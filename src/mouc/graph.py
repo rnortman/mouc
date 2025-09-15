@@ -46,8 +46,8 @@ class GraphGenerator:
     def _generate_all(self) -> str:
         """Generate a complete graph with all entities."""
         lines = ["digraph FeatureMap {"]
-        lines.append("  rankdir=BT;")
-        lines.append("  node [shape=box];")
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=oval];")
         lines.append("")
 
         # Add subgraphs for each entity type
