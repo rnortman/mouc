@@ -59,7 +59,7 @@ user_stories:
       The analytics team needs to process streaming data at 100Hz with
       strict latency requirements. They need synchronized data inputs
       and reliable inter-process communication.
-    requires: [data_sync, message_bus]
+    dependencies: [data_sync, message_bus]
     requestor: analytics_team
     links:
       - jira:STORY-100
@@ -70,7 +70,7 @@ user_stories:
     description: |
       SRE team needs to collect performance metrics from all services
       without impacting production latency requirements.
-    requires: [realtime_monitor]
+    dependencies: [realtime_monitor]
     requestor: sre_team
     links:
       - jira:STORY-200
@@ -81,7 +81,7 @@ user_stories:
     description: |
       API team needs high-throughput communication between
       their distributed service nodes.
-    requires: [message_bus]
+    dependencies: [message_bus]
     requestor: api_team
     links:
       - jira:STORY-300
@@ -92,7 +92,7 @@ outcomes:
     description: |
       Launch new mobile application with real-time features by Q3.
       Requires reliable real-time analytics and robust API integration.
-    enables: [analytics_realtime, api_gateway_integration]
+    dependencies: [analytics_realtime, api_gateway_integration]
     links:
       - jira:EPIC-1000
       - doc:[Product Brief](https://confluence.company.com/display/PROD/Mobile-App-Launch)
@@ -104,7 +104,7 @@ outcomes:
     description: |
       Complete visibility into production system performance
       to meet 99.99% uptime SLA.
-    enables: [service_telemetry]
+    dependencies: [service_telemetry]
     links:
       - "jira:EPIC-2000"
     target_date: 2024-Q2

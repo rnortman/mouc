@@ -140,14 +140,14 @@ class TestUserStory:
             id="test_story",
             name="Test Story",
             description="A test story",
-            requires=["cap1", "cap2"],
+            dependencies=["cap1", "cap2"],
             requestor="test_team",
             links=["jira:STORY-123"],
             tags=["urgent"],
         )
 
         assert story.id == "test_story"
-        assert story.requires == ["cap1", "cap2"]
+        assert story.dependencies == ["cap1", "cap2"]
         assert story.requestor == "test_team"
 
 
@@ -160,14 +160,14 @@ class TestOutcome:
             id="test_outcome",
             name="Test Outcome",
             description="A test outcome",
-            enables=["story1", "story2"],
+            dependencies=["story1", "story2"],
             links=["jira:EPIC-123"],
             target_date="2024-Q3",
             tags=["priority"],
         )
 
         assert outcome.id == "test_outcome"
-        assert outcome.enables == ["story1", "story2"]
+        assert outcome.dependencies == ["story1", "story2"]
         assert outcome.target_date == "2024-Q3"
 
 
@@ -181,9 +181,11 @@ class TestFeatureMap:
         cap1 = Capability(id="cap1", name="Cap 1", description="Desc 1")
         cap2 = Capability(id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"])
 
-        story1 = UserStory(id="story1", name="Story 1", description="Desc", requires=["cap2"])
+        story1 = UserStory(id="story1", name="Story 1", description="Desc", dependencies=["cap2"])
 
-        outcome1 = Outcome(id="outcome1", name="Outcome 1", description="Desc", enables=["story1"])
+        outcome1 = Outcome(
+            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1"]
+        )
 
         feature_map = FeatureMap(
             metadata=metadata,
@@ -223,9 +225,11 @@ class TestFeatureMap:
         story1 = UserStory(id="story1", name="Story 1", description="Desc")
         story2 = UserStory(id="story2", name="Story 2", description="Desc")
 
-        outcome1 = Outcome(id="outcome1", name="Outcome 1", description="Desc", enables=["story1"])
+        outcome1 = Outcome(
+            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1"]
+        )
         outcome2 = Outcome(
-            id="outcome2", name="Outcome 2", description="Desc", enables=["story1", "story2"]
+            id="outcome2", name="Outcome 2", description="Desc", dependencies=["story1", "story2"]
         )
 
         feature_map = FeatureMap(

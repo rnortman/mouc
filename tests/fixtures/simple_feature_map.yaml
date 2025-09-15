@@ -17,10 +17,10 @@ user_stories:
   story1:
     name: Story 1
     description: First story
-    requires: [cap2]
+    dependencies: [cap2]
     
 outcomes:
   outcome1:
     name: Outcome 1
     description: First outcome
-    enables: [story1]
+    dependencies: [story1]

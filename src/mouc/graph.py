@@ -88,16 +88,16 @@ class GraphGenerator:
                 lines.append(f"  {dep_id} -> {cap_id};")
 
         lines.append("")
-        lines.append("  // User story requirements (unblocks direction)")
+        lines.append("  // User story dependencies (unblocks direction)")
         for story_id, story in self.feature_map.user_stories.items():
-            for req_id in story.requires:
-                lines.append(f"  {req_id} -> {story_id};")
+            for dep_id in story.dependencies:
+                lines.append(f"  {dep_id} -> {story_id};")
 
         lines.append("")
-        lines.append("  // Outcome enablers")
+        lines.append("  // Outcome dependencies (unblocks direction)")
         for outcome_id, outcome in self.feature_map.outcomes.items():
-            for story_id in outcome.enables:
-                lines.append(f"  {outcome_id} -> {story_id};")
+            for dep_id in outcome.dependencies:
+                lines.append(f"  {dep_id} -> {outcome_id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -151,16 +151,16 @@ class GraphGenerator:
         for story_id, story in self.feature_map.user_stories.items():
             if story_id not in dependencies:
                 continue
-            for req_id in story.requires:
-                if req_id in dependencies:
-                    lines.append(f"  {req_id} -> {story_id};")
+            for dep_id in story.dependencies:
+                if dep_id in dependencies:
+                    lines.append(f"  {dep_id} -> {story_id};")
 
         for outcome_id, outcome in self.feature_map.outcomes.items():
             if outcome_id not in dependencies:
                 continue
-            for story_id in outcome.enables:
-                if story_id in dependencies:
-                    lines.append(f"  {outcome_id} -> {story_id};")
+            for dep_id in outcome.dependencies:
+                if dep_id in dependencies:
+                    lines.append(f"  {dep_id} -> {outcome_id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -228,16 +228,16 @@ class GraphGenerator:
         for story_id, story in self.feature_map.user_stories.items():
             if story_id not in expanded_ids:
                 continue
-            for req_id in story.requires:
-                if req_id in expanded_ids:
-                    lines.append(f"  {req_id} -> {story_id};")
+            for dep_id in story.dependencies:
+                if dep_id in expanded_ids:
+                    lines.append(f"  {dep_id} -> {story_id};")
 
         for outcome_id, outcome in self.feature_map.outcomes.items():
             if outcome_id not in expanded_ids:
                 continue
-            for story_id in outcome.enables:
-                if story_id in expanded_ids:
-                    lines.append(f"  {outcome_id} -> {story_id};")
+            for dep_id in outcome.dependencies:
+                if dep_id in expanded_ids:
+                    lines.append(f"  {dep_id} -> {outcome_id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -261,18 +261,18 @@ class GraphGenerator:
             # Check user stories
             elif current in self.feature_map.user_stories:
                 story = self.feature_map.user_stories[current]
-                for req_id in story.requires:
-                    if req_id not in dependencies:
-                        dependencies.add(req_id)
-                        to_process.append(req_id)
+                for dep_id in story.dependencies:
+                    if dep_id not in dependencies:
+                        dependencies.add(dep_id)
+                        to_process.append(dep_id)
 
             # Check outcomes
             elif current in self.feature_map.outcomes:
                 outcome = self.feature_map.outcomes[current]
-                for story_id in outcome.enables:
-                    if story_id not in dependencies:
-                        dependencies.add(story_id)
-                        to_process.append(story_id)
+                for dep_id in outcome.dependencies:
+                    if dep_id not in dependencies:
+                        dependencies.add(dep_id)
+                        to_process.append(dep_id)
 
         return dependencies
 
@@ -285,27 +285,27 @@ class GraphGenerator:
             cap = self.feature_map.capabilities[node_id]
             connections.update(cap.dependencies)
 
-        # If it's a user story, add its requirements
+        # If it's a user story, add its dependencies
         if node_id in self.feature_map.user_stories:
             story = self.feature_map.user_stories[node_id]
-            connections.update(story.requires)
+            connections.update(story.dependencies)
 
-        # If it's an outcome, add its enablers
+        # If it's an outcome, add its dependencies
         if node_id in self.feature_map.outcomes:
             outcome = self.feature_map.outcomes[node_id]
-            connections.update(outcome.enables)
+            connections.update(outcome.dependencies)
 
         # Find things that depend on this node
         connections.update(self.feature_map.get_capability_dependents(node_id))
 
-        # Find user stories that require this capability
+        # Find user stories that depend on this node
         for story_id, story in self.feature_map.user_stories.items():
-            if node_id in story.requires:
+            if node_id in story.dependencies:
                 connections.add(story_id)
 
-        # Find outcomes that enable this story
+        # Find outcomes that depend on this node
         for outcome_id, outcome in self.feature_map.outcomes.items():
-            if node_id in outcome.enables:
+            if node_id in outcome.dependencies:
                 connections.add(outcome_id)
 
         return connections

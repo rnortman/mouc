@@ -40,7 +40,7 @@ class TestMarkdownGenerator:
             id="story1",
             name="Story 1",
             description="Description of story 1.",
-            requires=["cap2"],
+            dependencies=["cap2"],
             requestor="frontend_team",
             links=["jira:STORY-789"],
             tags=["urgent"],
@@ -50,7 +50,7 @@ class TestMarkdownGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Description of outcome 1.",
-            enables=["story1"],
+            dependencies=["story1"],
             links=["jira:EPIC-999"],
             target_date="2024-Q3",
             tags=["priority"],
@@ -115,10 +115,10 @@ class TestMarkdownGenerator:
         assert "| Requestor | frontend_team |" in markdown
         assert "| Tags | `urgent` |" in markdown
         assert "Description of story 1." in markdown
-        assert "#### Requires" in markdown
+        assert "#### Dependencies" in markdown
         assert "- [Cap 2](#cap2) (`cap2`)" in markdown
-        assert "#### Enables" in markdown
-        assert "- [Outcome 1](#outcome1) (`outcome1`)" in markdown
+        assert "#### Required by" in markdown
+        assert "- [Outcome 1](#outcome1) (`outcome1`) [Outcome]" in markdown
         assert "| Jira | `STORY-789` |" in markdown
 
     def test_format_outcome(self, simple_feature_map: FeatureMap) -> None:
@@ -132,8 +132,8 @@ class TestMarkdownGenerator:
         assert "| Target Date | 2024-Q3 |" in markdown
         assert "| Tags | `priority` |" in markdown
         assert "Description of outcome 1." in markdown
-        assert "#### Enabled by" in markdown
-        assert "- [Story 1](#story1) (`story1`)" in markdown
+        assert "#### Dependencies" in markdown
+        assert "- [Story 1](#story1) (`story1`) [User Story]" in markdown
         assert "| Jira | `EPIC-999` |" in markdown
 
     def test_make_anchor(self, simple_feature_map: FeatureMap) -> None:
@@ -173,7 +173,7 @@ class TestMarkdownGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires=["missing_cap"],
+            dependencies=["missing_cap"],
         )
 
         feature_map = FeatureMap(

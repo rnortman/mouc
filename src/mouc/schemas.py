@@ -32,12 +32,12 @@ class UserStorySchema(BaseModel):
 
     name: str
     description: str
-    requires: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
     requestor: str | None = None
     links: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
-    @field_validator("requires", "tags", "links", mode="before")
+    @field_validator("dependencies", "tags", "links", mode="before")
     @classmethod
     def ensure_list(cls, v: Any) -> list[str]:
         """Ensure value is a list."""
@@ -53,12 +53,12 @@ class OutcomeSchema(BaseModel):
 
     name: str
     description: str
-    enables: list[str] = Field(default_factory=list)
+    dependencies: list[str] = Field(default_factory=list)
     links: list[str] = Field(default_factory=list)
     target_date: str | None = None
     tags: list[str] = Field(default_factory=list)
 
-    @field_validator("enables", "tags", "links", mode="before")
+    @field_validator("dependencies", "tags", "links", mode="before")
     @classmethod
     def ensure_list(cls, v: Any) -> list[str]:
         """Ensure value is a list."""

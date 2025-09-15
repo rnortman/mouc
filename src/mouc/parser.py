@@ -76,7 +76,7 @@ class FeatureMapParser:
                 id=story_id,
                 name=story_data.name,
                 description=story_data.description,
-                requires=story_data.requires,
+                dependencies=story_data.dependencies,
                 requestor=story_data.requestor,
                 links=story_data.links,
                 tags=story_data.tags,
@@ -89,7 +89,7 @@ class FeatureMapParser:
                 id=outcome_id,
                 name=outcome_data.name,
                 description=outcome_data.description,
-                enables=outcome_data.enables,
+                dependencies=outcome_data.dependencies,
                 links=outcome_data.links,
                 target_date=outcome_data.target_date,
                 tags=outcome_data.tags,
@@ -121,20 +121,28 @@ class FeatureMapParser:
                         f"Capability {cap.id} depends on unknown capability: {dep_id}"
                     )
 
-        # Validate user story requirements
+        # Validate user story dependencies
         for story in feature_map.user_stories.values():
-            for req_id in story.requires:
-                if req_id not in feature_map.capabilities:
+            for dep_id in story.dependencies:
+                # User stories can depend on capabilities or other user stories
+                if (
+                    dep_id not in feature_map.capabilities
+                    and dep_id not in feature_map.user_stories
+                ):
                     raise MissingReferenceError(
-                        f"User story {story.id} requires unknown capability: {req_id}"
+                        f"User story {story.id} depends on unknown entity: {dep_id}"
                     )
 
-        # Validate outcome enablers
+        # Validate outcome dependencies
         for outcome in feature_map.outcomes.values():
-            for story_id in outcome.enables:
-                if story_id not in feature_map.user_stories:
+            for dep_id in outcome.dependencies:
+                # Outcomes can depend on user stories or capabilities
+                if (
+                    dep_id not in feature_map.user_stories
+                    and dep_id not in feature_map.capabilities
+                ):
                     raise MissingReferenceError(
-                        f"Outcome {outcome.id} enables unknown user story: {story_id}"
+                        f"Outcome {outcome.id} depends on unknown entity: {dep_id}"
                     )
 
         # Check for circular dependencies

@@ -22,12 +22,12 @@ class TestGraphGenerator:
         cap3 = Capability(id="cap3", name="Cap 3", description="Desc 3", dependencies=["cap2"])
 
         story1 = UserStory(
-            id="story1", name="Story 1", description="Desc", requires=["cap2"], tags=["urgent"]
+            id="story1", name="Story 1", description="Desc", dependencies=["cap2"], tags=["urgent"]
         )
-        story2 = UserStory(id="story2", name="Story 2", description="Desc", requires=["cap3"])
+        story2 = UserStory(id="story2", name="Story 2", description="Desc", dependencies=["cap3"])
 
         outcome1 = Outcome(
-            id="outcome1", name="Outcome 1", description="Desc", enables=["story1", "story2"]
+            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1", "story2"]
         )
 
         return FeatureMap(
@@ -55,7 +55,8 @@ class TestGraphGenerator:
         # Check edges (unblocks direction)
         assert "cap1 -> cap2" in dot
         assert "cap2 -> story1" in dot
-        assert "outcome1 -> story1" in dot
+        assert "story1 -> outcome1" in dot
+        assert "story2 -> outcome1" in dot
 
     def test_generate_critical_path(self, simple_feature_map: FeatureMap) -> None:
         """Test generating critical path view."""

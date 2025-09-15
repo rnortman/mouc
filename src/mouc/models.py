@@ -81,7 +81,7 @@ class UserStory:
     id: str
     name: str
     description: str
-    requires: list[str] = field(default_factory=lambda: [])
+    dependencies: list[str] = field(default_factory=lambda: [])
     requestor: str | None = None
     links: list[str] = field(default_factory=lambda: [])
     tags: list[str] = field(default_factory=lambda: [])
@@ -99,7 +99,7 @@ class Outcome:
     id: str
     name: str
     description: str
-    enables: list[str] = field(default_factory=lambda: [])
+    dependencies: list[str] = field(default_factory=lambda: [])
     links: list[str] = field(default_factory=lambda: [])
     target_date: str | None = None
     tags: list[str] = field(default_factory=lambda: [])
@@ -148,6 +148,6 @@ class FeatureMap:
         """Get all outcomes that depend on the given user story."""
         dependents: list[str] = []
         for outcome_id, outcome in self.outcomes.items():
-            if story_id in outcome.enables:
+            if story_id in outcome.dependencies:
                 dependents.append(outcome_id)
         return dependents

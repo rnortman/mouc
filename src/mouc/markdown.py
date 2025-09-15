@@ -184,7 +184,7 @@ class MarkdownGenerator:
         stories_requiring = [
             story_id
             for story_id, story in self.feature_map.user_stories.items()
-            if cap_id in story.requires
+            if cap_id in story.dependencies
         ]
 
         if dependents or stories_requiring:
@@ -232,33 +232,37 @@ class MarkdownGenerator:
 
         lines.append(story.description.strip())
 
-        if story.requires:
+        if story.dependencies:
             lines.append("")
-            lines.append("#### Requires")
+            lines.append("#### Dependencies")
             lines.append("")
-            for req_id in story.requires:
-                if req_id in self.feature_map.capabilities:
-                    req = self.feature_map.capabilities[req_id]
-                    anchor = self._make_anchor(req_id)
-                    lines.append(f"- [{req.name}](#{anchor}) (`{req_id}`)")
+            for dep_id in story.dependencies:
+                if dep_id in self.feature_map.capabilities:
+                    dep = self.feature_map.capabilities[dep_id]
+                    anchor = self._make_anchor(dep_id)
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`)")
+                elif dep_id in self.feature_map.user_stories:
+                    dep = self.feature_map.user_stories[dep_id]
+                    anchor = self._make_anchor(dep_id)
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [User Story]")
                 else:
-                    lines.append(f"- `{req_id}` ⚠️ (missing)")
+                    lines.append(f"- `{dep_id}` ⚠️ (missing)")
 
-        # Find outcomes that enable this story
-        enabling_outcomes = [
+        # Find outcomes that depend on this story
+        dependent_outcomes = [
             outcome_id
             for outcome_id, outcome in self.feature_map.outcomes.items()
-            if story_id in outcome.enables
+            if story_id in outcome.dependencies
         ]
 
-        if enabling_outcomes:
+        if dependent_outcomes:
             lines.append("")
-            lines.append("#### Enables")
+            lines.append("#### Required by")
             lines.append("")
-            for outcome_id in enabling_outcomes:
+            for outcome_id in dependent_outcomes:
                 outcome = self.feature_map.outcomes[outcome_id]
                 anchor = self._make_anchor(outcome_id)
-                lines.append(f"- [{outcome.name}](#{anchor}) (`{outcome_id}`)")
+                lines.append(f"- [{outcome.name}](#{anchor}) (`{outcome_id}`) [Outcome]")
 
         return lines
 
@@ -289,17 +293,21 @@ class MarkdownGenerator:
 
         lines.append(outcome.description.strip())
 
-        if outcome.enables:
+        if outcome.dependencies:
             lines.append("")
-            lines.append("#### Enabled by")
+            lines.append("#### Dependencies")
             lines.append("")
-            for story_id in outcome.enables:
-                if story_id in self.feature_map.user_stories:
-                    story = self.feature_map.user_stories[story_id]
-                    anchor = self._make_anchor(story_id)
-                    lines.append(f"- [{story.name}](#{anchor}) (`{story_id}`)")
+            for dep_id in outcome.dependencies:
+                if dep_id in self.feature_map.user_stories:
+                    dep = self.feature_map.user_stories[dep_id]
+                    anchor = self._make_anchor(dep_id)
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [User Story]")
+                elif dep_id in self.feature_map.capabilities:
+                    dep = self.feature_map.capabilities[dep_id]
+                    anchor = self._make_anchor(dep_id)
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [Capability]")
                 else:
-                    lines.append(f"- `{story_id}` ⚠️ (missing)")
+                    lines.append(f"- `{dep_id}` ⚠️ (missing)")
 
         return lines
 

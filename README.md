@@ -48,7 +48,7 @@ user_stories:
   service_communication:
     name: Service Communication
     description: Frontend team needs services to communicate
-    requires: [message_bus]
+    dependencies: [message_bus]
     requestor: frontend_team
     links:
       - jira:STORY-456
@@ -57,7 +57,7 @@ outcomes:
   q3_launch:
     name: Q3 Product Launch
     description: Launch new product features in Q3
-    enables: [service_communication]
+    dependencies: [service_communication]
     links:
       - jira:EPIC-789
     target_date: 2024-Q3
@@ -146,7 +146,7 @@ user_stories:
     description: |
       Analytics team needs to process streaming data at 100Hz
       with strict latency requirements.
-    requires: [message_bus]  # Required capabilities
+    dependencies: [message_bus]  # Can depend on capabilities or other user stories
     requestor: analytics_team  # Who asked for this
     links:
       - jira:STORY-100
@@ -156,7 +156,7 @@ outcomes:
   mobile_app:
     name: Mobile App Launch
     description: Launch new mobile application by Q3
-    enables: [analytics_realtime]  # User stories that deliver this
+    dependencies: [analytics_realtime]  # Can depend on user stories or capabilities
     links:
       - jira:EPIC-1000  # Always present for exec visibility
     target_date: 2024-Q3
@@ -171,25 +171,22 @@ outcomes:
 
 **Optional fields**:
 
-For capabilities:
-- `dependencies`: List of capability IDs this depends on
+For all entities:
+- `dependencies`: List of entity IDs this depends on
+  - Capabilities can only depend on other capabilities
+  - User stories can depend on capabilities or other user stories
+  - Outcomes can depend on user stories or capabilities
 - `links`: List of links in various formats:
   - `design:[DD-123](https://...)` - Design doc with markdown link
   - `jira:TICKET-123` - Jira ticket reference
   - `https://...` - Plain URL
 - `tags`: List of arbitrary tags
 
-For user stories:
-- `requires`: List of required capability IDs
+Additional fields for user stories:
 - `requestor`: Team or person requesting
-- `links`: List of links (same format as capabilities)
-- `tags`: List of arbitrary tags
 
-For outcomes:
-- `enables`: List of user story IDs that deliver this outcome
-- `links`: List of links (usually includes jira:EPIC-xxx for exec visibility)
+Additional fields for outcomes:
 - `target_date`: Target completion date (e.g., "2024-Q3")
-- `tags`: List of arbitrary tags
 
 ## Use Cases
 

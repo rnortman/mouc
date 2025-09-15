@@ -41,8 +41,8 @@ class TestFeatureMapParser:
         assert "cap2" in feature_map.capabilities
 
         assert feature_map.capabilities["cap2"].dependencies == ["cap1"]
-        assert feature_map.user_stories["story1"].requires == ["cap2"]
-        assert feature_map.outcomes["outcome1"].enables == ["story1"]
+        assert feature_map.user_stories["story1"].dependencies == ["cap2"]
+        assert feature_map.outcomes["outcome1"].dependencies == ["story1"]
 
     def test_parse_nonexistent_file(self, parser: FeatureMapParser) -> None:
         """Test parsing a nonexistent file."""
@@ -110,32 +110,32 @@ class TestFeatureMapParser:
 
     def test_complex_validation(self, parser: FeatureMapParser) -> None:
         """Test complex validation scenarios."""
-        # User story requires non-existent capability
+        # User story depends on non-existent entity
         data = {
             "capabilities": {"cap1": {"name": "Cap 1", "description": "Desc"}},
             "user_stories": {
                 "story1": {
                     "name": "Story 1",
                     "description": "Desc",
-                    "requires": ["nonexistent"],
+                    "dependencies": ["nonexistent"],
                 }
             },
         }
 
-        with pytest.raises(MissingReferenceError, match="unknown capability: nonexistent"):
+        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
             parser._parse_data(data)
 
-        # Outcome enables non-existent story
+        # Outcome depends on non-existent entity
         data = {
             "user_stories": {"story1": {"name": "Story 1", "description": "Desc"}},
             "outcomes": {
                 "outcome1": {
                     "name": "Outcome 1",
                     "description": "Desc",
-                    "enables": ["nonexistent"],
+                    "dependencies": ["nonexistent"],
                 }
             },
         }
 
-        with pytest.raises(MissingReferenceError, match="unknown user story: nonexistent"):
+        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
             parser._parse_data(data)
