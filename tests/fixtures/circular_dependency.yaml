@@ -1,0 +1,18 @@
+metadata:
+  version: 1.0
+
+capabilities:
+  cap1:
+    name: Capability 1
+    description: First capability
+    dependencies: [cap3]
+    
+  cap2:
+    name: Capability 2
+    description: Second capability
+    dependencies: [cap1]
+    
+  cap3:
+    name: Capability 3
+    description: Third capability
+    dependencies: [cap2]

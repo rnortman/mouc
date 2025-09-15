@@ -1,0 +1,111 @@
+# Example feature map for a middleware platform team
+metadata:
+  version: 1.0
+  last_updated: 2025-01-15
+  team: middleware
+
+capabilities:
+  lock_free_queue:
+    name: Lock-Free Queue Implementation
+    description: |
+      High-performance thread-safe queue using atomic operations.
+      Provides bounded and unbounded variants with wait-free progress guarantees
+      for producers and lock-free guarantees for consumers.
+      
+      Performance targets:
+      - 10M ops/sec single producer/consumer
+      - Sub-microsecond latency at p99
+    dependencies: []
+    links:
+      - design:[DD-123](https://docs.google.com/document/d/abc123)
+      - jira:INFRA-456
+    tags: [critical, performance]
+    
+  message_bus:
+    name: Inter-Process Message Bus
+    description: |
+      Reliable message passing system for service communication.
+      Built on top of the lock-free queue for internal buffering.
+    dependencies: [lock_free_queue]
+    links:
+      - jira:INFRA-789
+    tags: [infrastructure]
+    
+  data_sync:
+    name: Data Stream Synchronization
+    description: |
+      Time-synchronized data fusion from multiple API endpoints.
+      Handles network delays, missing data, and provides interpolation.
+    dependencies: [message_bus]
+    links:
+      - design:[DD-456](https://docs.google.com/document/d/def456)
+    tags: [api_support, critical]
+    
+  realtime_monitor:
+    name: Real-time Performance Monitor
+    description: |
+      Tracks system latency and throughput metrics without impacting
+      real-time performance characteristics.
+    dependencies: [lock_free_queue]
+    links:
+      - jira:INFRA-999
+      - https://github.com/company/repo/issues/123
+    tags: [monitoring, tech_debt]
+
+user_stories:
+  analytics_realtime:
+    name: Real-time Analytics Pipeline
+    description: |
+      The analytics team needs to process streaming data at 100Hz with
+      strict latency requirements. They need synchronized data inputs
+      and reliable inter-process communication.
+    requires: [data_sync, message_bus]
+    requestor: analytics_team
+    links:
+      - jira:STORY-100
+    tags: [q2_commitment]
+    
+  service_telemetry:
+    name: Service Telemetry Collection
+    description: |
+      SRE team needs to collect performance metrics from all services
+      without impacting production latency requirements.
+    requires: [realtime_monitor]
+    requestor: sre_team
+    links:
+      - jira:STORY-200
+    tags: [monitoring]
+    
+  api_gateway_integration:
+    name: API Gateway Integration
+    description: |
+      API team needs high-throughput communication between
+      their distributed service nodes.
+    requires: [message_bus]
+    requestor: api_team
+    links:
+      - jira:STORY-300
+
+outcomes:
+  mobile_app_q3:
+    name: Mobile App Q3 Launch
+    description: |
+      Launch new mobile application with real-time features by Q3.
+      Requires reliable real-time analytics and robust API integration.
+    enables: [analytics_realtime, api_gateway_integration]
+    links:
+      - jira:EPIC-1000
+      - doc:[Product Brief](https://confluence.company.com/display/PROD/Mobile-App-Launch)
+    target_date: 2024-Q3
+    tags: [company_priority, safety_critical]
+    
+  production_observability:
+    name: Production Observability
+    description: |
+      Complete visibility into production system performance
+      to meet 99.99% uptime SLA.
+    enables: [service_telemetry]
+    links:
+      - "jira:EPIC-2000"
+    target_date: 2024-Q2
+    tags: [operational_excellence]

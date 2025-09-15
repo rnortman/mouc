@@ -1,0 +1,26 @@
+metadata:
+  version: 1.0
+  team: test_team
+
+capabilities:
+  cap1:
+    name: Capability 1
+    description: First capability
+    dependencies: []
+    
+  cap2:
+    name: Capability 2
+    description: Second capability
+    dependencies: [cap1]
+    
+user_stories:
+  story1:
+    name: Story 1
+    description: First story
+    requires: [cap2]
+    
+outcomes:
+  outcome1:
+    name: Outcome 1
+    description: First outcome
+    enables: [story1]
