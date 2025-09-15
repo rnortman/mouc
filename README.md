@@ -175,7 +175,7 @@ For all entities:
 - `dependencies`: List of entity IDs this depends on
   - Capabilities can only depend on other capabilities
   - User stories can depend on capabilities or other user stories
-  - Outcomes can depend on user stories or capabilities
+  - Outcomes can depend on any entity (capabilities, user stories, or other outcomes)
 - `links`: List of links in various formats:
   - `design:[DD-123](https://...)` - Design doc with markdown link
   - `jira:TICKET-123` - Jira ticket reference

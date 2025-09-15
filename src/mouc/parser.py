@@ -136,10 +136,11 @@ class FeatureMapParser:
         # Validate outcome dependencies
         for outcome in feature_map.outcomes.values():
             for dep_id in outcome.dependencies:
-                # Outcomes can depend on user stories or capabilities
+                # Outcomes can depend on anything
                 if (
                     dep_id not in feature_map.user_stories
                     and dep_id not in feature_map.capabilities
+                    and dep_id not in feature_map.outcomes
                 ):
                     raise MissingReferenceError(
                         f"Outcome {outcome.id} depends on unknown entity: {dep_id}"

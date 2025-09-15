@@ -186,8 +186,13 @@ class MarkdownGenerator:
             for story_id, story in self.feature_map.user_stories.items()
             if cap_id in story.dependencies
         ]
+        outcomes_requiring = [
+            outcome_id
+            for outcome_id, outcome in self.feature_map.outcomes.items()
+            if cap_id in outcome.dependencies
+        ]
 
-        if dependents or stories_requiring:
+        if dependents or stories_requiring or outcomes_requiring:
             lines.append("")
             lines.append("#### Required by")
             lines.append("")
@@ -202,6 +207,11 @@ class MarkdownGenerator:
                 story = self.feature_map.user_stories[story_id]
                 anchor = self._make_anchor(story_id)
                 lines.append(f"- [{story.name}](#{anchor}) (`{story_id}`) [User Story]")
+
+            for outcome_id in outcomes_requiring:
+                outcome = self.feature_map.outcomes[outcome_id]
+                anchor = self._make_anchor(outcome_id)
+                lines.append(f"- [{outcome.name}](#{anchor}) (`{outcome_id}`) [Outcome]")
 
         return lines
 
@@ -306,8 +316,28 @@ class MarkdownGenerator:
                     dep = self.feature_map.capabilities[dep_id]
                     anchor = self._make_anchor(dep_id)
                     lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [Capability]")
+                elif dep_id in self.feature_map.outcomes:
+                    dep = self.feature_map.outcomes[dep_id]
+                    anchor = self._make_anchor(dep_id)
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [Outcome]")
                 else:
                     lines.append(f"- `{dep_id}` ⚠️ (missing)")
+
+        # Find outcomes that depend on this outcome
+        dependent_outcomes = [
+            other_id
+            for other_id, other_outcome in self.feature_map.outcomes.items()
+            if outcome_id in other_outcome.dependencies and other_id != outcome_id
+        ]
+
+        if dependent_outcomes:
+            lines.append("")
+            lines.append("#### Required by")
+            lines.append("")
+            for other_id in dependent_outcomes:
+                other = self.feature_map.outcomes[other_id]
+                anchor = self._make_anchor(other_id)
+                lines.append(f"- [{other.name}](#{anchor}) (`{other_id}`) [Outcome]")
 
         return lines
 
