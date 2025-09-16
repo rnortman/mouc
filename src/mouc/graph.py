@@ -47,38 +47,25 @@ class GraphGenerator:
         """Generate a complete graph with all entities."""
         lines = ["digraph FeatureMap {"]
         lines.append("  rankdir=LR;")
-        lines.append("  node [shape=oval];")
+        lines.append("  node [shape=box];")
         lines.append("")
 
-        # Add subgraphs for each entity type
-        lines.append("  subgraph cluster_capabilities {")
-        lines.append('    label="Capabilities";')
-        lines.append("    style=filled;")
-        lines.append("    fillcolor=lightblue;")
+        # Add capabilities
         for cap_id, cap in self.feature_map.capabilities.items():
             label = self._escape_label(cap.name)
-            lines.append(f'    {cap_id} [label="{label}"];')
-        lines.append("  }")
+            lines.append(f'  {cap_id} [label="{label}", style=filled, fillcolor=lightblue];')
         lines.append("")
 
-        lines.append("  subgraph cluster_stories {")
-        lines.append('    label="User Stories";')
-        lines.append("    style=filled;")
-        lines.append("    fillcolor=lightgreen;")
+        # Add user stories
         for story_id, story in self.feature_map.user_stories.items():
             label = self._escape_label(story.name)
-            lines.append(f'    {story_id} [label="{label}"];')
-        lines.append("  }")
+            lines.append(f'  {story_id} [label="{label}", style=filled, fillcolor=lightgreen];')
         lines.append("")
 
-        lines.append("  subgraph cluster_outcomes {")
-        lines.append('    label="Outcomes";')
-        lines.append("    style=filled;")
-        lines.append("    fillcolor=lightyellow;")
+        # Add outcomes
         for outcome_id, outcome in self.feature_map.outcomes.items():
             label = self._escape_label(outcome.name)
-            lines.append(f'    {outcome_id} [label="{label}"];')
-        lines.append("  }")
+            lines.append(f'  {outcome_id} [label="{label}", style=filled, fillcolor=lightyellow];')
         lines.append("")
 
         # Add edges
@@ -109,8 +96,8 @@ class GraphGenerator:
         dependencies.add(target)
 
         lines = ["digraph CriticalPath {"]
-        lines.append("  rankdir=BT;")
-        lines.append("  node [shape=box];")
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=oval];")
         lines.append("")
 
         # Highlight the target
@@ -188,8 +175,8 @@ class GraphGenerator:
             expanded_ids.update(self._find_direct_connections(node_id))
 
         lines = ["digraph FilteredView {"]
-        lines.append("  rankdir=BT;")
-        lines.append("  node [shape=box];")
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=oval];")
         lines.append("")
 
         # Add nodes

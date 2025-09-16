@@ -43,14 +43,11 @@ class TestGraphGenerator:
         dot = generator.generate(GraphView.ALL)
 
         assert "digraph FeatureMap" in dot
-        assert "cluster_capabilities" in dot
-        assert "cluster_stories" in dot
-        assert "cluster_outcomes" in dot
 
-        # Check nodes
-        assert 'cap1 [label="Cap 1"]' in dot
-        assert 'story1 [label="Story 1"]' in dot
-        assert 'outcome1 [label="Outcome 1"]' in dot
+        # Check nodes with colors
+        assert 'cap1 [label="Cap 1", style=filled, fillcolor=lightblue]' in dot
+        assert 'story1 [label="Story 1", style=filled, fillcolor=lightgreen]' in dot
+        assert 'outcome1 [label="Outcome 1", style=filled, fillcolor=lightyellow]' in dot
 
         # Check edges (unblocks direction)
         assert "cap1 -> cap2" in dot
