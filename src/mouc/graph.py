@@ -47,7 +47,7 @@ class GraphGenerator:
         """Generate a complete graph with all entities."""
         lines = ["digraph FeatureMap {"]
         lines.append("  rankdir=LR;")
-        lines.append("  node [shape=box];")
+        lines.append("  node [shape=oval];")
         lines.append("")
 
         # Add capabilities
