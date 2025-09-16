@@ -342,5 +342,26 @@ class MarkdownGenerator:
         return lines
 
     def _make_anchor(self, entity_id: str) -> str:
-        """Create a valid HTML anchor from an entity ID."""
-        return entity_id.replace("_", "-")
+        """Create a valid HTML anchor from an entity name."""
+        # Get the entity name based on ID
+        if entity_id in self.feature_map.capabilities:
+            name = self.feature_map.capabilities[entity_id].name
+        elif entity_id in self.feature_map.user_stories:
+            name = self.feature_map.user_stories[entity_id].name
+        elif entity_id in self.feature_map.outcomes:
+            name = self.feature_map.outcomes[entity_id].name
+        else:
+            # Fallback to ID-based anchor if entity not found
+            return entity_id.replace("_", "-")
+
+        # Convert name to markdown anchor format
+        # Lowercase, replace spaces with hyphens, remove special chars
+        anchor = name.lower()
+        anchor = anchor.replace(" ", "-")
+        # Remove characters that aren't alphanumeric or hyphens
+        anchor = "".join(c for c in anchor if c.isalnum() or c == "-")
+        # Remove multiple consecutive hyphens
+        while "--" in anchor:
+            anchor = anchor.replace("--", "-")
+        # Remove leading/trailing hyphens
+        return anchor.strip("-")

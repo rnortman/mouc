@@ -77,8 +77,8 @@ class TestMarkdownGenerator:
         # Check table of contents
         assert "## Table of Contents" in markdown
         assert "- [Capabilities](#capabilities)" in markdown
-        assert "  - [Cap 1](#cap1)" in markdown
-        assert "  - [Cap 2](#cap2)" in markdown
+        assert "  - [Cap 1](#cap-1)" in markdown
+        assert "  - [Cap 2](#cap-2)" in markdown
 
         # Check sections
         assert "## Capabilities" in markdown
@@ -102,7 +102,7 @@ class TestMarkdownGenerator:
         lines = generator._format_capability("cap2", simple_feature_map.capabilities["cap2"])
         markdown = "\n".join(lines)
         assert "#### Dependencies" in markdown
-        assert "- [Cap 1](#cap1) (`cap1`)" in markdown
+        assert "- [Cap 1](#cap-1) (`cap1`)" in markdown
 
     def test_format_user_story(self, simple_feature_map: FeatureMap) -> None:
         """Test formatting a user story."""
@@ -116,9 +116,9 @@ class TestMarkdownGenerator:
         assert "| Tags | `urgent` |" in markdown
         assert "Description of story 1." in markdown
         assert "#### Dependencies" in markdown
-        assert "- [Cap 2](#cap2) (`cap2`)" in markdown
+        assert "- [Cap 2](#cap-2) (`cap2`)" in markdown
         assert "#### Required by" in markdown
-        assert "- [Outcome 1](#outcome1) (`outcome1`) [Outcome]" in markdown
+        assert "- [Outcome 1](#outcome-1) (`outcome1`) [Outcome]" in markdown
         assert "| Jira | `STORY-789` |" in markdown
 
     def test_format_outcome(self, simple_feature_map: FeatureMap) -> None:
@@ -133,15 +133,21 @@ class TestMarkdownGenerator:
         assert "| Tags | `priority` |" in markdown
         assert "Description of outcome 1." in markdown
         assert "#### Dependencies" in markdown
-        assert "- [Story 1](#story1) (`story1`) [User Story]" in markdown
+        assert "- [Story 1](#story-1) (`story1`) [User Story]" in markdown
         assert "| Jira | `EPIC-999` |" in markdown
 
     def test_make_anchor(self, simple_feature_map: FeatureMap) -> None:
-        """Test anchor generation."""
+        """Test anchor generation from entity names."""
         generator = MarkdownGenerator(simple_feature_map)
 
-        assert generator._make_anchor("simple_id") == "simple-id"
-        assert generator._make_anchor("id_with_underscores") == "id-with-underscores"
+        # Test existing entities - anchors should be based on names
+        assert generator._make_anchor("cap1") == "cap-1"  # "Cap 1" -> "cap-1"
+        assert generator._make_anchor("cap2") == "cap-2"  # "Cap 2" -> "cap-2"
+        assert generator._make_anchor("story1") == "story-1"  # "Story 1" -> "story-1"
+        assert generator._make_anchor("outcome1") == "outcome-1"  # "Outcome 1" -> "outcome-1"
+
+        # Test non-existent entity - fallback to ID transformation
+        assert generator._make_anchor("non_existent_id") == "non-existent-id"
 
     def test_empty_sections(self) -> None:
         """Test handling of empty sections."""
