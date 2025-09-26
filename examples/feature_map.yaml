@@ -32,6 +32,8 @@ entities:
     links:
       - jira:INFRA-789
     tags: [infrastructure]
+    meta:
+      timeframe: Sprint 1
     
   data_sync:
     type: capability
@@ -43,6 +45,8 @@ entities:
     links:
       - design:[DD-456](https://docs.google.com/document/d/def456)
     tags: [api_support, critical]
+    meta:
+      timeframe: Sprint 2
     
   realtime_monitor:
     type: capability

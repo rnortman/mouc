@@ -165,3 +165,133 @@ class TestGraphGenerator:
         connections = generator._find_direct_connections("story1")
         assert "cap2" in connections  # requires
         assert "outcome1" in connections  # enabled by
+
+    @pytest.fixture
+    def timeline_feature_map(self) -> FeatureMap:
+        """Create a feature map with timeframe metadata for testing timeline view."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc 1",
+            meta={"timeframe": "Q1 2025"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc 2",
+            dependencies=["cap1"],
+            meta={"timeframe": "Q1 2025"},
+        )
+        cap3 = Entity(
+            type="capability",
+            id="cap3",
+            name="Cap 3",
+            description="Desc 3",
+            dependencies=["cap2"],
+            meta={"timeframe": "Q2 2025"},
+        )
+
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2"],
+            meta={"timeframe": "Q2 2025"},
+        )
+        story2 = Entity(
+            type="user_story",
+            id="story2",
+            name="Story 2",
+            description="Desc",
+            dependencies=["cap3"],
+            # No timeframe - should go to "Unscheduled"
+        )
+
+        outcome1 = Entity(
+            type="outcome",
+            id="outcome1",
+            name="Outcome 1",
+            description="Desc",
+            dependencies=["story1", "story2"],
+            meta={"timeframe": "Q3 2025"},
+        )
+
+        return FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2, cap3, story1, story2, outcome1],
+        )
+
+    def test_generate_timeline_view(self, timeline_feature_map: FeatureMap) -> None:
+        """Test generating timeline view grouped by timeframe."""
+        generator = GraphGenerator(timeline_feature_map)
+        dot = generator.generate(GraphView.TIMELINE)
+
+        assert "digraph Timeline" in dot
+
+        # Check for subgraph clusters with timeframes
+        assert "subgraph cluster_0" in dot
+        assert 'label="Q1 2025"' in dot
+        assert "subgraph cluster_1" in dot
+        assert 'label="Q2 2025"' in dot
+        assert "subgraph cluster_2" in dot
+        assert 'label="Q3 2025"' in dot
+
+        # Check for unscheduled cluster
+        assert 'label="Unscheduled"' in dot
+        assert "style=dashed" in dot
+
+        # Check nodes are in the right clusters
+        # Q1 2025 should have cap1 and cap2
+        q1_section = dot[dot.find('label="Q1 2025"') : dot.find('label="Q2 2025"')]
+        assert 'cap1 [label="Cap 1"' in q1_section
+        assert 'cap2 [label="Cap 2"' in q1_section
+
+        # Q2 2025 should have cap3 and story1
+        q2_section = dot[dot.find('label="Q2 2025"') : dot.find('label="Q3 2025"')]
+        assert 'cap3 [label="Cap 3"' in q2_section
+        assert 'story1 [label="Story 1"' in q2_section
+
+        # Q3 2025 should have outcome1
+        q3_section = dot[dot.find('label="Q3 2025"') : dot.find('label="Unscheduled"')]
+        assert 'outcome1 [label="Outcome 1"' in q3_section
+
+        # Unscheduled should have story2
+        unscheduled_section = dot[dot.find('label="Unscheduled"') :]
+        assert 'story2 [label="Story 2"' in unscheduled_section
+
+        # Check edges are preserved
+        assert "cap1 -> cap2" in dot
+        assert "cap2 -> cap3" in dot
+        assert "cap2 -> story1" in dot
+        assert "cap3 -> story2" in dot
+        assert "story1 -> outcome1" in dot
+        assert "story2 -> outcome1" in dot
+
+        # Check colors are preserved
+        assert "fillcolor=lightblue" in dot  # capabilities
+        assert "fillcolor=lightgreen" in dot  # user stories
+        assert "fillcolor=lightyellow" in dot  # outcomes
+
+    def test_generate_timeline_view_no_timeframes(self, simple_feature_map: FeatureMap) -> None:
+        """Test timeline view when no entities have timeframe metadata."""
+        generator = GraphGenerator(simple_feature_map)
+        dot = generator.generate(GraphView.TIMELINE)
+
+        assert "digraph Timeline" in dot
+
+        # Should only have the unscheduled cluster
+        assert 'label="Unscheduled"' in dot
+        assert dot.count("subgraph cluster_") == 1
+
+        # All entities should be in the unscheduled cluster
+        assert "cap1" in dot
+        assert "cap2" in dot
+        assert "cap3" in dot
+        assert "story1" in dot
+        assert "story2" in dot
+        assert "outcome1" in dot

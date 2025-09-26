@@ -24,6 +24,16 @@ The system is built around a single YAML data model (`feature_map.yaml`) with th
    - Enabled by user stories
    - Always tracked in Jira for executive visibility
 
+## Development Standards
+
+Always unit test code using unit tests that are committed to the repo. Do not create throwaway scripts for testing.
+
+Keep functions small and modular. Do not create `v2` or `enhanced` versions of existing methods; add new functionality to existing methods.
+
+Add docstrings to public methods but avoid adding code comments.
+
+Don't Repeat Yourself. Refactor code as necessary to avoid duplication of logic.
+
 ## Development Commands
 
 Use `uv run` to run commands within the project environment.

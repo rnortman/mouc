@@ -6,7 +6,7 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import FeatureMap
+    from .models import Entity, FeatureMap
 
 
 class GraphView(Enum):
@@ -15,6 +15,7 @@ class GraphView(Enum):
     ALL = "all"
     CRITICAL_PATH = "critical-path"
     FILTERED = "filtered"
+    TIMELINE = "timeline"
 
 
 class GraphGenerator:
@@ -41,6 +42,8 @@ class GraphGenerator:
             if not tags:
                 raise ValueError("Filtered view requires tags")
             return self._generate_filtered(tags)
+        if view == GraphView.TIMELINE:
+            return self._generate_timeline()
         raise ValueError(f"Unknown view: {view}")
 
     def _generate_all(self) -> str:
@@ -219,3 +222,83 @@ class GraphGenerator:
     def _escape_label(self, label: str) -> str:
         """Escape special characters in DOT labels."""
         return label.replace('"', '\\"').replace("\n", "\\n")
+
+    def _generate_timeline(self) -> str:
+        """Generate a timeline graph grouped by timeframe."""
+        # Group entities by timeframe
+        timeframe_groups: dict[str, list[Entity]] = {}
+        unscheduled: list[Entity] = []
+
+        for entity in self.feature_map.entities:
+            timeframe = entity.meta.get("timeframe")
+            if timeframe:
+                if timeframe not in timeframe_groups:
+                    timeframe_groups[timeframe] = []
+                timeframe_groups[timeframe].append(entity)
+            else:
+                unscheduled.append(entity)
+
+        # Sort timeframes for consistent ordering
+        sorted_timeframes = sorted(timeframe_groups.keys())
+
+        lines = ["digraph Timeline {"]
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=oval];")
+        lines.append("")
+
+        # Create subgraph clusters for each timeframe
+        cluster_idx = 0
+        for timeframe in sorted_timeframes:
+            lines.append(f"  subgraph cluster_{cluster_idx} {{")
+            lines.append(f'    label="{self._escape_label(timeframe)}";')
+            lines.append("    style=filled;")
+            lines.append("    fillcolor=lightgrey;")
+            lines.append("")
+
+            # Add entities in this timeframe
+            for entity in timeframe_groups[timeframe]:
+                # Determine node color by type
+                color_map = {
+                    "capability": "lightblue",
+                    "user_story": "lightgreen",
+                    "outcome": "lightyellow",
+                }
+                color = color_map.get(entity.type, "white")
+
+                label = self._escape_label(entity.name)
+                lines.append(f'    {entity.id} [label="{label}", style=filled, fillcolor={color}];')
+
+            lines.append("  }")
+            lines.append("")
+            cluster_idx += 1
+
+        # Add unscheduled entities if any
+        if unscheduled:
+            lines.append(f"  subgraph cluster_{cluster_idx} {{")
+            lines.append('    label="Unscheduled";')
+            lines.append("    style=dashed;")
+            lines.append("")
+
+            for entity in unscheduled:
+                # Determine node color by type
+                color_map = {
+                    "capability": "lightblue",
+                    "user_story": "lightgreen",
+                    "outcome": "lightyellow",
+                }
+                color = color_map.get(entity.type, "white")
+
+                label = self._escape_label(entity.name)
+                lines.append(f'    {entity.id} [label="{label}", style=filled, fillcolor={color}];')
+
+            lines.append("  }")
+            lines.append("")
+
+        # Add all edges (dependencies)
+        lines.append("  // Dependencies")
+        for entity in self.feature_map.entities:
+            for dep_id in entity.dependencies:
+                lines.append(f"  {dep_id} -> {entity.id};")
+
+        lines.append("}")
+        return "\n".join(lines)

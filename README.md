@@ -33,8 +33,9 @@ metadata:
   version: 1.0
   team: middleware_platform
 
-capabilities:
+entities:
   message_bus:
+    type: capability
     name: Inter-Process Message Bus
     description: |
       High-performance message passing system for services.
@@ -44,23 +45,25 @@ capabilities:
       - jira:INFRA-123
     tags: [infrastructure]
 
-user_stories:
   service_communication:
+    type: user_story
     name: Service Communication
     description: Frontend team needs services to communicate
     dependencies: [message_bus]
-    requestor: frontend_team
+    meta:
+      requestor: frontend_team
     links:
       - jira:STORY-456
 
-outcomes:
   q3_launch:
+    type: outcome
     name: Q3 Product Launch
     description: Launch new product features in Q3
     dependencies: [service_communication]
     links:
       - jira:EPIC-789
-    target_date: 2024-Q3
+    meta:
+      target_date: 2024-Q3
 ```
 
 2. Generate documentation:
@@ -92,19 +95,22 @@ Generate dependency graphs in DOT format:
 
 ```bash
 # All entities and relationships
-mouc graph all
+mouc graph --view all
 
 # Critical path to a specific outcome
-mouc graph critical-path --target q3_launch
+mouc graph --view critical-path --target q3_launch
 
 # Filter by tags
-mouc graph filtered --tags infrastructure monitoring
+mouc graph --view filtered --tags infrastructure monitoring
+
+# Timeline view grouped by timeframe
+mouc graph --view timeline
 ```
 
 Render graphs with Graphviz:
 ```bash
-mouc graph all | dot -Tpng -o graph.png
-mouc graph all | dot -Tsvg -o graph.svg
+mouc graph --view all | dot -Tpng -o graph.png
+mouc graph --view all | dot -Tsvg -o graph.svg
 ```
 
 ## YAML Schema
@@ -117,8 +123,9 @@ metadata:
   last_updated: 2024-01-15
   team: middleware
 
-capabilities:
+entities:
   lock_free_queue:
+    type: capability
     name: Lock-Free Queue Implementation
     description: |
       High-performance thread-safe queue using atomic operations.
@@ -126,52 +133,56 @@ capabilities:
       Performance targets:
       - 10M ops/sec single producer/consumer
       - Sub-microsecond latency at p99
-    dependencies: []  # List of capability IDs this depends on
+    dependencies: []  # List of entity IDs this depends on
     links:
       - design:[DD-123](https://docs.google.com/document/d/abc123)
       - jira:INFRA-456
     tags: [critical, performance]  # Arbitrary tags
 
   message_bus:
+    type: capability
     name: Inter-Process Message Bus
     description: Reliable message passing built on lock-free queue
     dependencies: [lock_free_queue]
     links:
       - jira:INFRA-789
     tags: [infrastructure]
+    meta:
+      timeframe: Q1 2025  # Optional: for timeline view
 
-user_stories:
   analytics_realtime:
+    type: user_story
     name: Real-time Analytics Pipeline
     description: |
       Analytics team needs to process streaming data at 100Hz
       with strict latency requirements.
     dependencies: [message_bus]  # Can depend on capabilities or other user stories
-    requestor: analytics_team  # Who asked for this
+    meta:
+      requestor: analytics_team  # Who asked for this
     links:
       - jira:STORY-100
     tags: [q2_commitment]
 
-outcomes:
   mobile_app:
+    type: outcome
     name: Mobile App Launch
     description: Launch new mobile application by Q3
     dependencies: [analytics_realtime]  # Can depend on user stories or capabilities
     links:
       - jira:EPIC-1000  # Always present for exec visibility
-    target_date: 2024-Q3
+    meta:
+      target_date: 2024-Q3
     tags: [company_priority]
 ```
 
 ### Field Reference
 
 **Required fields** for all entities:
+- `type`: Entity type (`capability`, `user_story`, or `outcome`)
 - `name`: Human-readable name
 - `description`: Can be single line or multi-paragraph markdown
 
-**Optional fields**:
-
-For all entities:
+**Optional fields** for all entities:
 - `dependencies`: List of entity IDs this depends on
   - Capabilities can only depend on other capabilities
   - User stories can depend on capabilities or other user stories
@@ -181,12 +192,10 @@ For all entities:
   - `jira:TICKET-123` - Jira ticket reference
   - `https://...` - Plain URL
 - `tags`: List of arbitrary tags
-
-Additional fields for user stories:
-- `requestor`: Team or person requesting
-
-Additional fields for outcomes:
-- `target_date`: Target completion date (e.g., "2024-Q3")
+- `meta`: Dictionary of metadata. Common fields include:
+  - `timeframe`: Time period for timeline view (e.g., `"Q1 2025"`, `"Sprint 23"`)
+  - `requestor`: Team or person requesting (for user stories)
+  - `target_date`: Target completion date (for outcomes)
 
 ## Use Cases
 
@@ -194,14 +203,14 @@ Additional fields for outcomes:
 
 What needs to be done for the Q3 launch?
 ```bash
-mouc graph critical-path --target q3_launch | dot -Tpng -o critical_path.png
+mouc graph --view critical-path --target q3_launch | dot -Tpng -o critical_path.png
 ```
 
 ### Filter by Team
 
 What infrastructure work is planned?
 ```bash
-mouc graph filtered --tags infrastructure | dot -Tpng -o infra_work.png
+mouc graph --view filtered --tags infrastructure | dot -Tpng -o infra_work.png
 ```
 
 ### Generate Reports
@@ -209,6 +218,17 @@ mouc graph filtered --tags infrastructure | dot -Tpng -o infra_work.png
 Create documentation for architecture review:
 ```bash
 mouc doc --output architecture_review.md
+```
+
+### View Timeline
+
+Group work by time periods (quarters, sprints, etc.):
+```bash
+# Add timeframe metadata to entities:
+# meta:
+#   timeframe: "Q1 2025"
+
+mouc graph --view timeline | dot -Tpng -o timeline.png
 ```
 
 ## Best Practices
