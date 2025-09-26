@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -19,6 +20,8 @@ class MarkdownGenerator:
         """Generate complete markdown documentation."""
         sections = [
             self._generate_header(),
+            self._generate_timeline(),
+            self._check_backward_dependencies(),
             self._generate_toc(),
             self._generate_capabilities_section(),
             self._generate_user_stories_section(),
@@ -73,6 +76,102 @@ class MarkdownGenerator:
                 lines.append(f"  - [{entity.name}](#{anchor})")
 
         return "\n".join(lines)
+
+    def _generate_timeline(self) -> str:
+        """Generate timeline section grouped by timeframe."""
+        # Group entities by timeframe
+        timeframe_groups: dict[str, list[Entity]] = {}
+        unscheduled: list[Entity] = []
+
+        for entity in self.feature_map.entities:
+            timeframe = entity.meta.get("timeframe")
+            if timeframe:
+                if timeframe not in timeframe_groups:
+                    timeframe_groups[timeframe] = []
+                timeframe_groups[timeframe].append(entity)
+            else:
+                unscheduled.append(entity)
+
+        # If no entities have timeframes, don't generate the timeline section
+        if not timeframe_groups:
+            return ""
+
+        lines = ["## Timeline", ""]
+
+        # Sort timeframes lexically for consistent ordering
+        sorted_timeframes = sorted(timeframe_groups.keys())
+
+        # Generate timeline entries
+        for timeframe in sorted_timeframes:
+            lines.append(f"### {timeframe}")
+            lines.append("")
+
+            entities = sorted(timeframe_groups[timeframe], key=lambda e: (e.type, e.id))
+            for entity in entities:
+                anchor = self._make_anchor(entity.id)
+                type_label = f" [{self._pretty_type(entity.type)}]"
+                lines.append(f"- [{entity.name}](#{anchor}){type_label}")
+
+            lines.append("")
+
+        # Add unscheduled section if there are any
+        if unscheduled:
+            lines.append("### Unscheduled")
+            lines.append("")
+
+            entities = sorted(unscheduled, key=lambda e: (e.type, e.id))
+            for entity in entities:
+                anchor = self._make_anchor(entity.id)
+                type_label = f" [{self._pretty_type(entity.type)}]"
+                lines.append(f"- [{entity.name}](#{anchor}){type_label}")
+
+            lines.append("")
+
+        return "\n".join(lines).rstrip()
+
+    def _check_backward_dependencies(self) -> str:
+        """Check for dependencies going backward in timeline order."""
+        warnings: list[str] = []
+
+        # Build a map of entity IDs to their timeframes
+        timeframe_map: dict[str, str | None] = {}
+        for entity in self.feature_map.entities:
+            timeframe_map[entity.id] = entity.meta.get("timeframe")
+
+        # Check each entity's dependencies
+        for entity in self.feature_map.entities:
+            entity_timeframe = timeframe_map.get(entity.id)
+
+            # Skip if entity has no timeframe
+            if not entity_timeframe:
+                continue
+
+            for dep_id in entity.dependencies:
+                dep_timeframe = timeframe_map.get(dep_id)
+
+                # Skip if dependency has no timeframe
+                if not dep_timeframe:
+                    continue
+
+                # Check if dependency comes after entity in lexical order
+                if dep_timeframe > entity_timeframe:
+                    dep_entity = self.feature_map.get_entity_by_id(dep_id)
+                    dep_name = dep_entity.name if dep_entity else dep_id
+                    msg = f"`{entity.name}` ({entity_timeframe}) depends on `{dep_name}` ({dep_timeframe})"
+                    warnings.append(msg)
+                    # Also print to console
+                    sys.stderr.write(f"WARNING: Backward dependency - {msg}\n")
+
+        # Generate warning section if any backward dependencies found
+        if warnings:
+            lines = ["## ⚠️ Timeline Warnings", ""]
+            lines.append("The following dependencies go backward in timeline order:")
+            lines.append("")
+            for warning in warnings:
+                lines.append(f"- {warning}")
+            return "\n".join(lines)
+
+        return ""
 
     def _generate_capabilities_section(self) -> str:
         """Generate capabilities section."""
@@ -153,8 +252,17 @@ class MarkdownGenerator:
         table_rows: list[str] = []
         table_rows.append(f"| ID | `{entity.id}` |")
 
-        if "requestor" in entity.meta:
-            table_rows.append(f"| Requestor | {entity.meta['requestor']} |")
+        # Add all metadata fields
+        for key, value in sorted(entity.meta.items()):
+            # Format the key nicely
+            pretty_key = key.replace("_", " ").title()
+            # Format the value based on type
+            formatted_value: str
+            if isinstance(value, list):
+                formatted_value = ", ".join(str(item) for item in value)  # type: ignore
+            else:
+                formatted_value = str(value)
+            table_rows.append(f"| {pretty_key} | {formatted_value} |")
 
         if entity.tags:
             tags = ", ".join(f"`{tag}`" for tag in entity.tags)

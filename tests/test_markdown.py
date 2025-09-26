@@ -203,3 +203,224 @@ class TestMarkdownGenerator:
         assert "## Capabilities" in markdown
         assert "## User Stories" not in markdown
         assert "## Outcomes" not in markdown
+
+    def test_timeline_generation(self) -> None:
+        """Test timeline section generation."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            dependencies=["cap1"],
+            meta={"timeframe": "2024-Q2"},
+        )
+        cap3 = Entity(
+            type="capability",
+            id="cap3",
+            name="Cap 3",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2"],
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2, cap3, story1],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # Check timeline section exists
+        assert "## Timeline" in markdown
+
+        # Check timeframes are in lexical order
+        assert markdown.find("### 2024-Q1") < markdown.find("### 2024-Q2")
+
+        # Check entities are grouped by timeframe
+        timeline_section = markdown[
+            markdown.find("## Timeline") : markdown.find("## Table of Contents")
+        ]
+
+        # In 2024-Q1 section
+        assert "[Cap 1](#cap-1) [Capability]" in timeline_section
+        assert "[Cap 3](#cap-3) [Capability]" in timeline_section
+
+        # In 2024-Q2 section
+        assert "[Cap 2](#cap-2) [Capability]" in timeline_section
+
+        # Unscheduled section
+        assert "### Unscheduled" in timeline_section
+        assert "[Story 1](#story-1) [User Story]" in timeline_section
+
+    def test_no_timeline_when_no_timeframes(self) -> None:
+        """Test that timeline section is not generated when no entities have timeframes."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+        story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
+
+        feature_map = FeatureMap(metadata=metadata, entities=[cap1, story1])
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # No timeline section should be generated
+        assert "## Timeline" not in markdown
+
+    def test_metadata_display_all_fields(self) -> None:
+        """Test that all metadata fields are displayed in entity sections."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={
+                "requestor": "team_alpha",
+                "timeframe": "2024-Q1",
+                "priority": "high",
+                "cost_estimate": 50000,
+                "custom_field": "custom_value",
+            },
+        )
+
+        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # Check all metadata fields are displayed
+        cap1_section = markdown[markdown.find("### Cap 1") :]
+        assert "| Requestor | team_alpha |" in cap1_section
+        assert "| Timeframe | 2024-Q1 |" in cap1_section
+        assert "| Priority | high |" in cap1_section
+        assert "| Cost Estimate | 50000 |" in cap1_section
+        assert "| Custom Field | custom_value |" in cap1_section
+
+    def test_backward_dependency_warnings(self) -> None:
+        """Test detection and display of backward dependencies in timeline."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            dependencies=["cap2"],  # Depends on something in the future
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            meta={"timeframe": "2024-Q2"},
+        )
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2"],
+            meta={"timeframe": "2024-Q1"},  # Also backward dependency
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2, story1],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # Check warning section exists
+        assert "## ⚠️ Timeline Warnings" in markdown
+        assert "The following dependencies go backward in timeline order:" in markdown
+
+        # Check specific warnings
+        assert "`Cap 1` (2024-Q1) depends on `Cap 2` (2024-Q2)" in markdown
+        assert "`Story 1` (2024-Q1) depends on `Cap 2` (2024-Q2)" in markdown
+
+    def test_no_warnings_when_dependencies_correct(self) -> None:
+        """Test that no warnings are shown when dependencies follow timeline order."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            dependencies=["cap1"],  # Correct order
+            meta={"timeframe": "2024-Q2"},
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # No warning section should be generated
+        assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_backward_dependency_console_output(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """Test that backward dependencies print warnings to console."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            dependencies=["cap2"],  # Backward dependency
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            meta={"timeframe": "2024-Q2"},
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        generator.generate()
+
+        # Check console output
+        captured = capsys.readouterr()
+        assert "WARNING: Backward dependency" in captured.err
+        assert "Cap 1" in captured.err
+        assert "2024-Q1" in captured.err
+        assert "Cap 2" in captured.err
+        assert "2024-Q2" in captured.err
