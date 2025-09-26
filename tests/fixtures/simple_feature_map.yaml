@@ -2,25 +2,27 @@ metadata:
   version: 1.0
   team: test_team
 
-capabilities:
+entities:
   cap1:
+    type: capability
     name: Capability 1
     description: First capability
     dependencies: []
     
   cap2:
+    type: capability
     name: Capability 2
     description: Second capability
     dependencies: [cap1]
     
-user_stories:
   story1:
+    type: user_story
     name: Story 1
     description: First story
     dependencies: [cap2]
     
-outcomes:
   outcome1:
+    type: outcome
     name: Outcome 1
     description: First outcome
     dependencies: [story1]

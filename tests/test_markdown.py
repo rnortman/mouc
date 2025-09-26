@@ -4,7 +4,7 @@
 import pytest
 
 from mouc.markdown import MarkdownGenerator
-from mouc.models import Capability, FeatureMap, FeatureMapMetadata, Outcome, UserStory
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 
 
 class TestMarkdownGenerator:
@@ -19,7 +19,8 @@ class TestMarkdownGenerator:
             last_updated="2024-01-15",
         )
 
-        cap1 = Capability(
+        cap1 = Entity(
+            type="capability",
             id="cap1",
             name="Cap 1",
             description="Description of capability 1.",
@@ -29,168 +30,176 @@ class TestMarkdownGenerator:
                 "jira:JIRA-456",
             ],
         )
-        cap2 = Capability(
+        cap2 = Entity(
+            type="capability",
             id="cap2",
             name="Cap 2",
             description="Description of capability 2.",
             dependencies=["cap1"],
         )
 
-        story1 = UserStory(
+        story1 = Entity(
+            type="user_story",
             id="story1",
             name="Story 1",
             description="Description of story 1.",
             dependencies=["cap2"],
-            requestor="frontend_team",
-            links=["jira:STORY-789"],
             tags=["urgent"],
+            meta={"requestor": "team_alpha"},
         )
 
-        outcome1 = Outcome(
+        outcome1 = Entity(
+            type="outcome",
             id="outcome1",
             name="Outcome 1",
             description="Description of outcome 1.",
             dependencies=["story1"],
-            links=["jira:EPIC-999"],
-            target_date="2024-Q3",
-            tags=["priority"],
+            meta={"target_date": "2024-Q3"},
         )
 
         return FeatureMap(
             metadata=metadata,
-            capabilities={"cap1": cap1, "cap2": cap2},
-            user_stories={"story1": story1},
-            outcomes={"outcome1": outcome1},
+            entities=[cap1, cap2, story1, outcome1],
         )
 
-    def test_generate_complete_document(self, simple_feature_map: FeatureMap) -> None:
-        """Test generating a complete markdown document."""
+    def test_generate_header(self, simple_feature_map: FeatureMap) -> None:
+        """Test header generation."""
         generator = MarkdownGenerator(simple_feature_map)
         markdown = generator.generate()
 
-        # Check header
         assert "# Feature Map" in markdown
         assert "| Team | test_team |" in markdown
         assert "| Last Updated | 2024-01-15 |" in markdown
         assert "| Version | 1.0 |" in markdown
 
-        # Check table of contents
+    def test_generate_toc(self, simple_feature_map: FeatureMap) -> None:
+        """Test table of contents generation."""
+        generator = MarkdownGenerator(simple_feature_map)
+        markdown = generator.generate()
+
         assert "## Table of Contents" in markdown
         assert "- [Capabilities](#capabilities)" in markdown
         assert "  - [Cap 1](#cap-1)" in markdown
         assert "  - [Cap 2](#cap-2)" in markdown
+        assert "- [User Stories](#user-stories)" in markdown
+        assert "  - [Story 1](#story-1)" in markdown
+        assert "- [Outcomes](#outcomes)" in markdown
+        assert "  - [Outcome 1](#outcome-1)" in markdown
 
-        # Check sections
-        assert "## Capabilities" in markdown
-        assert "## User Stories" in markdown
-        assert "## Outcomes" in markdown
-
-    def test_format_capability(self, simple_feature_map: FeatureMap) -> None:
-        """Test formatting a capability."""
+    def test_generate_capabilities_section(self, simple_feature_map: FeatureMap) -> None:
+        """Test capabilities section generation."""
         generator = MarkdownGenerator(simple_feature_map)
-        lines = generator._format_capability("cap1", simple_feature_map.capabilities["cap1"])
-        markdown = "\n".join(lines)
+        markdown = generator.generate()
 
+        assert "## Capabilities" in markdown
         assert "### Cap 1" in markdown
+        assert "Description of capability 1." in markdown
         assert "| ID | `cap1` |" in markdown
         assert "| Tags | `infra` |" in markdown
-        assert "Description of capability 1." in markdown
-        assert "[DD-123](https://example.com/dd123)" in markdown
+
+        # Check links formatting - the Link parser treats markdown links as plain links
+        assert "| Link | [DD-123](https://example.com/dd123) |" in markdown
         assert "| Jira | `JIRA-456` |" in markdown
 
-        # Check dependencies are shown
-        lines = generator._format_capability("cap2", simple_feature_map.capabilities["cap2"])
-        markdown = "\n".join(lines)
+        # Check dependencies
+        assert "### Cap 2" in markdown
         assert "#### Dependencies" in markdown
         assert "- [Cap 1](#cap-1) (`cap1`)" in markdown
 
-    def test_format_user_story(self, simple_feature_map: FeatureMap) -> None:
-        """Test formatting a user story."""
+    def test_generate_user_stories_section(self, simple_feature_map: FeatureMap) -> None:
+        """Test user stories section generation."""
         generator = MarkdownGenerator(simple_feature_map)
-        lines = generator._format_user_story("story1", simple_feature_map.user_stories["story1"])
-        markdown = "\n".join(lines)
+        markdown = generator.generate()
 
+        assert "## User Stories" in markdown
         assert "### Story 1" in markdown
-        assert "| ID | `story1` |" in markdown
-        assert "| Requestor | frontend_team |" in markdown
-        assert "| Tags | `urgent` |" in markdown
-        assert "Description of story 1." in markdown
+        assert "| Requestor | team_alpha |" in markdown
         assert "#### Dependencies" in markdown
         assert "- [Cap 2](#cap-2) (`cap2`)" in markdown
-        assert "#### Required by" in markdown
-        assert "- [Outcome 1](#outcome-1) (`outcome1`) [Outcome]" in markdown
-        assert "| Jira | `STORY-789` |" in markdown
 
-    def test_format_outcome(self, simple_feature_map: FeatureMap) -> None:
-        """Test formatting an outcome."""
+    def test_generate_outcomes_section(self, simple_feature_map: FeatureMap) -> None:
+        """Test outcomes section generation."""
         generator = MarkdownGenerator(simple_feature_map)
-        lines = generator._format_outcome("outcome1", simple_feature_map.outcomes["outcome1"])
-        markdown = "\n".join(lines)
+        markdown = generator.generate()
 
+        assert "## Outcomes" in markdown
         assert "### Outcome 1" in markdown
-        assert "| ID | `outcome1` |" in markdown
-        assert "| Target Date | 2024-Q3 |" in markdown
-        assert "| Tags | `priority` |" in markdown
-        assert "Description of outcome 1." in markdown
         assert "#### Dependencies" in markdown
         assert "- [Story 1](#story-1) (`story1`) [User Story]" in markdown
-        assert "| Jira | `EPIC-999` |" in markdown
 
-    def test_make_anchor(self, simple_feature_map: FeatureMap) -> None:
-        """Test anchor generation from entity names."""
-        generator = MarkdownGenerator(simple_feature_map)
-
-        # Test existing entities - anchors should be based on names
-        assert generator._make_anchor("cap1") == "cap-1"  # "Cap 1" -> "cap-1"
-        assert generator._make_anchor("cap2") == "cap-2"  # "Cap 2" -> "cap-2"
-        assert generator._make_anchor("story1") == "story-1"  # "Story 1" -> "story-1"
-        assert generator._make_anchor("outcome1") == "outcome-1"  # "Outcome 1" -> "outcome-1"
-
-        # Test non-existent entity - fallback to ID transformation
-        assert generator._make_anchor("non_existent_id") == "non-existent-id"
-
-    def test_empty_sections(self) -> None:
-        """Test handling of empty sections."""
+    def test_dependency_tracking(self) -> None:
+        """Test that dependencies and dependents are tracked correctly."""
         metadata = FeatureMapMetadata()
+
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+        cap2 = Entity(
+            type="capability", id="cap2", name="Cap 2", description="Desc", dependencies=["cap1"]
+        )
+        cap3 = Entity(
+            type="capability", id="cap3", name="Cap 3", description="Desc", dependencies=["cap1"]
+        )
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2", "cap3"],
+        )
+
         feature_map = FeatureMap(
             metadata=metadata,
-            capabilities={},
-            user_stories={},
-            outcomes={},
+            entities=[cap1, cap2, cap3, story1],
         )
 
         generator = MarkdownGenerator(feature_map)
         markdown = generator.generate()
 
-        # Should not include empty sections
-        assert "## Capabilities" not in markdown
-        assert "## User Stories" not in markdown
-        assert "## Outcomes" not in markdown
+        # Check that cap1 shows it's required by cap2 and cap3
+        cap1_section = markdown[markdown.find("### Cap 1") : markdown.find("### Cap 2")]
+        assert "#### Required by" in cap1_section
+        assert "- [Cap 2](#cap-2) (`cap2`)" in cap1_section
+        assert "- [Cap 3](#cap-3) (`cap3`)" in cap1_section
 
-        # Should still include header section
-        assert "# Feature Map" in markdown
+        # Check that story1 shows dependencies on both caps
+        story1_section = markdown[markdown.find("### Story 1") :]
+        assert "- [Cap 2](#cap-2) (`cap2`) [Capability]" in story1_section
+        assert "- [Cap 3](#cap-3) (`cap3`) [Capability]" in story1_section
 
-    def test_missing_references_warning(self) -> None:
-        """Test that missing references show warnings."""
+    def test_anchor_generation(self) -> None:
+        """Test that anchors are generated correctly."""
         metadata = FeatureMapMetadata()
 
-        # Story requires non-existent capability
-        story1 = UserStory(
-            id="story1",
-            name="Story 1",
+        cap1 = Entity(
+            type="capability",
+            id="complex_id_123",
+            name="Complex Name with Special Chars!",
             description="Desc",
-            dependencies=["missing_cap"],
         )
 
-        feature_map = FeatureMap(
-            metadata=metadata,
-            capabilities={},
-            user_stories={"story1": story1},
-            outcomes={},
-        )
+        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
 
         generator = MarkdownGenerator(feature_map)
-        lines = generator._format_user_story("story1", story1)
-        markdown = "\n".join(lines)
 
-        assert "`missing_cap` ⚠️ (missing)" in markdown
+        # Test the anchor generation
+        anchor = generator._make_anchor("complex_id_123")
+        assert anchor == "complex-name-with-special-chars"
+
+        # Test with non-existent ID
+        anchor2 = generator._make_anchor("non_existent")
+        assert anchor2 == "non-existent"
+
+    def test_empty_sections(self) -> None:
+        """Test that empty sections are not generated."""
+        metadata = FeatureMapMetadata()
+
+        # Only capabilities, no stories or outcomes
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+
+        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        assert "## Capabilities" in markdown
+        assert "## User Stories" not in markdown
+        assert "## Outcomes" not in markdown

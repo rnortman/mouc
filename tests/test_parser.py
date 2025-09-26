@@ -36,13 +36,24 @@ class TestFeatureMapParser:
         assert feature_map.metadata.version == "1.0"
         assert feature_map.metadata.team == "test_team"
 
-        assert len(feature_map.capabilities) == 2
-        assert "cap1" in feature_map.capabilities
-        assert "cap2" in feature_map.capabilities
+        # Check entities
+        assert len(feature_map.entities) == 4
+        assert len(feature_map.get_entities_by_type("capability")) == 2
+        assert len(feature_map.get_entities_by_type("user_story")) == 1
+        assert len(feature_map.get_entities_by_type("outcome")) == 1
 
-        assert feature_map.capabilities["cap2"].dependencies == ["cap1"]
-        assert feature_map.user_stories["story1"].dependencies == ["cap2"]
-        assert feature_map.outcomes["outcome1"].dependencies == ["story1"]
+        # Check specific entities
+        cap2 = feature_map.get_entity_by_id("cap2")
+        assert cap2 is not None
+        assert cap2.dependencies == ["cap1"]
+
+        story1 = feature_map.get_entity_by_id("story1")
+        assert story1 is not None
+        assert story1.dependencies == ["cap2"]
+
+        outcome1 = feature_map.get_entity_by_id("outcome1")
+        assert outcome1 is not None
+        assert outcome1.dependencies == ["story1"]
 
     def test_parse_nonexistent_file(self, parser: FeatureMapParser) -> None:
         """Test parsing a nonexistent file."""
@@ -58,8 +69,8 @@ class TestFeatureMapParser:
         with pytest.raises(CircularDependencyError, match="Circular dependency detected"):
             parser.parse_file(file_path)
 
-    def test_missing_capability_reference(self, parser: FeatureMapParser) -> None:
-        """Test detection of missing capability references."""
+    def test_missing_reference_old_format(self, parser: FeatureMapParser) -> None:
+        """Test detection of missing references in old format."""
         data = {
             "capabilities": {
                 "cap1": {
@@ -70,7 +81,38 @@ class TestFeatureMapParser:
             }
         }
 
-        with pytest.raises(MissingReferenceError, match="unknown capability: nonexistent"):
+        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
+            parser._parse_data(data)
+
+    def test_missing_reference_new_format(self, parser: FeatureMapParser) -> None:
+        """Test detection of missing references in new format."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                    "dependencies": ["nonexistent"],
+                }
+            }
+        }
+
+        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
+            parser._parse_data(data)
+
+    def test_missing_type_in_entities_format(self, parser: FeatureMapParser) -> None:
+        """Test that entities in 'entities' section must have type."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "name": "Cap 1",
+                    "description": "Desc",
+                    # Missing type
+                }
+            }
+        }
+
+        with pytest.raises(ValidationError, match="must have a 'type' field"):
             parser._parse_data(data)
 
     def test_missing_required_fields(self, parser: FeatureMapParser) -> None:
@@ -104,38 +146,113 @@ class TestFeatureMapParser:
         feature_map = parser._parse_data(data)
 
         assert feature_map.metadata.version == "1.0"
-        assert len(feature_map.capabilities) == 0
-        assert len(feature_map.user_stories) == 0
-        assert len(feature_map.outcomes) == 0
+        assert len(feature_map.entities) == 0
+        assert len(feature_map.get_entities_by_type("capability")) == 0
+        assert len(feature_map.get_entities_by_type("user_story")) == 0
+        assert len(feature_map.get_entities_by_type("outcome")) == 0
 
-    def test_complex_validation(self, parser: FeatureMapParser) -> None:
-        """Test complex validation scenarios."""
-        # User story depends on non-existent entity
+    def test_old_format_parsing(self, parser: FeatureMapParser) -> None:
+        """Test parsing old format with separate sections."""
         data = {
-            "capabilities": {"cap1": {"name": "Cap 1", "description": "Desc"}},
+            "capabilities": {
+                "cap1": {"name": "Cap 1", "description": "Desc"},
+                "cap2": {"name": "Cap 2", "description": "Desc", "dependencies": ["cap1"]},
+            },
             "user_stories": {
                 "story1": {
                     "name": "Story 1",
                     "description": "Desc",
-                    "dependencies": ["nonexistent"],
+                    "dependencies": ["cap2"],
                 }
             },
-        }
-
-        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
-            parser._parse_data(data)
-
-        # Outcome depends on non-existent entity
-        data = {
-            "user_stories": {"story1": {"name": "Story 1", "description": "Desc"}},
             "outcomes": {
                 "outcome1": {
                     "name": "Outcome 1",
                     "description": "Desc",
-                    "dependencies": ["nonexistent"],
+                    "dependencies": ["story1"],
                 }
             },
         }
 
-        with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
+        feature_map = parser._parse_data(data)
+
+        assert len(feature_map.entities) == 4
+
+        # Check that entities have correct types
+        cap1 = feature_map.get_entity_by_id("cap1")
+        assert cap1 is not None
+        assert cap1.type == "capability"
+
+        story1 = feature_map.get_entity_by_id("story1")
+        assert story1 is not None
+        assert story1.type == "user_story"
+
+        outcome1 = feature_map.get_entity_by_id("outcome1")
+        assert outcome1 is not None
+        assert outcome1.type == "outcome"
+
+    def test_new_format_parsing(self, parser: FeatureMapParser) -> None:
+        """Test parsing new format with entities section."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                },
+                "story1": {
+                    "type": "user_story",
+                    "name": "Story 1",
+                    "description": "Desc",
+                    "dependencies": ["cap1"],
+                    "meta": {"requestor": "test_team"},
+                },
+                "outcome1": {
+                    "type": "outcome",
+                    "name": "Outcome 1",
+                    "description": "Desc",
+                    "dependencies": ["story1"],
+                },
+            }
+        }
+
+        feature_map = parser._parse_data(data)
+
+        assert len(feature_map.entities) == 3
+
+        story1 = feature_map.get_entity_by_id("story1")
+        assert story1 is not None
+        assert story1.type == "user_story"
+        assert story1.meta["requestor"] == "test_team"
+
+    def test_mixed_format_not_allowed(self, parser: FeatureMapParser) -> None:
+        """Test that mixing old and new formats works."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                }
+            },
+            "capabilities": {"cap2": {"name": "Cap 2", "description": "Desc"}},
+        }
+
+        # Both formats should work together
+        feature_map = parser._parse_data(data)
+        assert len(feature_map.entities) == 2
+
+    def test_invalid_entity_type(self, parser: FeatureMapParser) -> None:
+        """Test invalid entity type validation."""
+        data = {
+            "entities": {
+                "thing1": {
+                    "type": "invalid_type",
+                    "name": "Thing 1",
+                    "description": "Desc",
+                }
+            }
+        }
+
+        with pytest.raises(ValidationError, match="Invalid entity type 'invalid_type'"):
             parser._parse_data(data)

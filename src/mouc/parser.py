@@ -15,11 +15,9 @@ from .exceptions import (
     ValidationError,
 )
 from .models import (
-    Capability,
+    Entity,
     FeatureMap,
     FeatureMapMetadata,
-    Outcome,
-    UserStory,
 )
 from .schemas import FeatureMapSchema
 
@@ -59,50 +57,54 @@ class FeatureMapParser:
             team=schema.metadata.team,
         )
 
-        capabilities = {
-            cap_id: Capability(
-                id=cap_id,
-                name=cap_data.name,
-                description=cap_data.description,
-                dependencies=cap_data.dependencies,
-                links=cap_data.links,
-                tags=cap_data.tags,
-            )
-            for cap_id, cap_data in schema.capabilities.items()
-        }
+        entities: list[Entity] = []
 
-        user_stories = {
-            story_id: UserStory(
-                id=story_id,
-                name=story_data.name,
-                description=story_data.description,
-                dependencies=story_data.dependencies,
-                requestor=story_data.requestor,
-                links=story_data.links,
-                tags=story_data.tags,
-            )
-            for story_id, story_data in schema.user_stories.items()
-        }
+        # Handle new format: entities with explicit type
+        for entity_id, entity_data in schema.entities.items():
+            if not entity_data.type:
+                raise ValidationError(
+                    f"Entity '{entity_id}' in 'entities' section must have a 'type' field"
+                )
+            meta = entity_data.meta.copy() if entity_data.meta else {}
 
-        outcomes = {
-            outcome_id: Outcome(
-                id=outcome_id,
-                name=outcome_data.name,
-                description=outcome_data.description,
-                dependencies=outcome_data.dependencies,
-                links=outcome_data.links,
-                target_date=outcome_data.target_date,
-                tags=outcome_data.tags,
+            entity = Entity(
+                type=entity_data.type,
+                id=entity_id,
+                name=entity_data.name,
+                description=entity_data.description,
+                dependencies=entity_data.dependencies,
+                links=entity_data.links,
+                tags=entity_data.tags,
+                meta=meta,
             )
-            for outcome_id, outcome_data in schema.outcomes.items()
-        }
+            entities.append(entity)
+
+        # Handle old format: entities grouped by type
+        for entity_dict, type_name in [
+            (schema.capabilities, "capability"),
+            (schema.user_stories, "user_story"),
+            (schema.outcomes, "outcome"),
+        ]:
+            for entity_id, entity_data in entity_dict.items():
+                # For old format, set type based on section
+                meta = entity_data.meta.copy() if entity_data.meta else {}
+
+                entity = Entity(
+                    type=type_name,
+                    id=entity_id,
+                    name=entity_data.name,
+                    description=entity_data.description,
+                    dependencies=entity_data.dependencies,
+                    links=entity_data.links,
+                    tags=entity_data.tags,
+                    meta=meta,
+                )
+                entities.append(entity)
 
         # Create feature map
         feature_map = FeatureMap(
             metadata=metadata,
-            capabilities=capabilities,
-            user_stories=user_stories,
-            outcomes=outcomes,
+            entities=entities,
         )
 
         # Validate references
@@ -112,72 +114,48 @@ class FeatureMapParser:
 
     def _validate_feature_map(self, feature_map: FeatureMap) -> None:
         """Validate the entire feature map."""
+        all_ids = feature_map.get_all_ids()
 
-        # Validate capability dependencies
-        for cap in feature_map.capabilities.values():
-            for dep_id in cap.dependencies:
-                if dep_id not in feature_map.capabilities:
+        # Validate all entity dependencies
+        for entity in feature_map.entities:
+            for dep_id in entity.dependencies:
+                if dep_id not in all_ids:
                     raise MissingReferenceError(
-                        f"Capability {cap.id} depends on unknown capability: {dep_id}"
-                    )
-
-        # Validate user story dependencies
-        for story in feature_map.user_stories.values():
-            for dep_id in story.dependencies:
-                # User stories can depend on capabilities or other user stories
-                if (
-                    dep_id not in feature_map.capabilities
-                    and dep_id not in feature_map.user_stories
-                ):
-                    raise MissingReferenceError(
-                        f"User story {story.id} depends on unknown entity: {dep_id}"
-                    )
-
-        # Validate outcome dependencies
-        for outcome in feature_map.outcomes.values():
-            for dep_id in outcome.dependencies:
-                # Outcomes can depend on anything
-                if (
-                    dep_id not in feature_map.user_stories
-                    and dep_id not in feature_map.capabilities
-                    and dep_id not in feature_map.outcomes
-                ):
-                    raise MissingReferenceError(
-                        f"Outcome {outcome.id} depends on unknown entity: {dep_id}"
+                        f"{entity.type.title()} {entity.id} depends on unknown entity: {dep_id}"
                     )
 
         # Check for circular dependencies
         self._check_circular_dependencies(feature_map)
 
     def _check_circular_dependencies(self, feature_map: FeatureMap) -> None:
-        """Check for circular dependencies in capabilities."""
-        for cap_id in feature_map.capabilities:
+        """Check for circular dependencies in all entities."""
+        for entity in feature_map.entities:
             visited: set[str] = set()
             path: list[str] = []
-            if self._has_circular_dependency(feature_map, cap_id, visited, path):
-                cycle = " -> ".join(path[path.index(cap_id) :] + [cap_id])
+            if self._has_circular_dependency(feature_map, entity.id, visited, path):
+                cycle = " -> ".join(path[path.index(entity.id) :] + [entity.id])
                 raise CircularDependencyError(f"Circular dependency detected: {cycle}")
 
     def _has_circular_dependency(
         self,
         feature_map: FeatureMap,
-        cap_id: str,
+        entity_id: str,
         visited: set[str],
         path: list[str],
     ) -> bool:
         """Recursively check for circular dependencies."""
-        if cap_id in path:
+        if entity_id in path:
             return True
 
-        if cap_id in visited:
+        if entity_id in visited:
             return False
 
-        visited.add(cap_id)
-        path.append(cap_id)
+        visited.add(entity_id)
+        path.append(entity_id)
 
-        cap = feature_map.capabilities.get(cap_id)
-        if cap:
-            for dep_id in cap.dependencies:
+        entity = feature_map.get_entity_by_id(entity_id)
+        if entity:
+            for dep_id in entity.dependencies:
                 if self._has_circular_dependency(feature_map, dep_id, visited, path):
                     return True
 

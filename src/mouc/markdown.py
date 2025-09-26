@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .models import Capability, FeatureMap, Outcome, UserStory
+    from .models import Entity, FeatureMap
 
 
 class MarkdownGenerator:
@@ -49,67 +49,69 @@ class MarkdownGenerator:
         """Generate table of contents."""
         lines = ["## Table of Contents", ""]
 
-        if self.feature_map.capabilities:
+        # Group entities by type
+        capabilities = self.feature_map.get_entities_by_type("capability")
+        user_stories = self.feature_map.get_entities_by_type("user_story")
+        outcomes = self.feature_map.get_entities_by_type("outcome")
+
+        if capabilities:
             lines.append("- [Capabilities](#capabilities)")
-            for cap_id in sorted(self.feature_map.capabilities.keys()):
-                cap = self.feature_map.capabilities[cap_id]
-                anchor = self._make_anchor(cap_id)
-                lines.append(f"  - [{cap.name}](#{anchor})")
+            for entity in sorted(capabilities, key=lambda e: e.id):
+                anchor = self._make_anchor(entity.id)
+                lines.append(f"  - [{entity.name}](#{anchor})")
 
-        if self.feature_map.user_stories:
+        if user_stories:
             lines.append("- [User Stories](#user-stories)")
-            for story_id in sorted(self.feature_map.user_stories.keys()):
-                story = self.feature_map.user_stories[story_id]
-                anchor = self._make_anchor(story_id)
-                lines.append(f"  - [{story.name}](#{anchor})")
+            for entity in sorted(user_stories, key=lambda e: e.id):
+                anchor = self._make_anchor(entity.id)
+                lines.append(f"  - [{entity.name}](#{anchor})")
 
-        if self.feature_map.outcomes:
+        if outcomes:
             lines.append("- [Outcomes](#outcomes)")
-            for outcome_id in sorted(self.feature_map.outcomes.keys()):
-                outcome = self.feature_map.outcomes[outcome_id]
-                anchor = self._make_anchor(outcome_id)
-                lines.append(f"  - [{outcome.name}](#{anchor})")
+            for entity in sorted(outcomes, key=lambda e: e.id):
+                anchor = self._make_anchor(entity.id)
+                lines.append(f"  - [{entity.name}](#{anchor})")
 
         return "\n".join(lines)
 
     def _generate_capabilities_section(self) -> str:
         """Generate capabilities section."""
-        if not self.feature_map.capabilities:
+        capabilities = self.feature_map.get_entities_by_type("capability")
+        if not capabilities:
             return ""
 
         lines = ["## Capabilities", ""]
 
-        for cap_id in sorted(self.feature_map.capabilities.keys()):
-            cap = self.feature_map.capabilities[cap_id]
-            lines.extend(self._format_capability(cap_id, cap))
+        for entity in sorted(capabilities, key=lambda e: e.id):
+            lines.extend(self._format_entity(entity))
             lines.append("")
 
         return "\n".join(lines)
 
     def _generate_user_stories_section(self) -> str:
         """Generate user stories section."""
-        if not self.feature_map.user_stories:
+        user_stories = self.feature_map.get_entities_by_type("user_story")
+        if not user_stories:
             return ""
 
         lines = ["## User Stories", ""]
 
-        for story_id in sorted(self.feature_map.user_stories.keys()):
-            story = self.feature_map.user_stories[story_id]
-            lines.extend(self._format_user_story(story_id, story))
+        for entity in sorted(user_stories, key=lambda e: e.id):
+            lines.extend(self._format_entity(entity))
             lines.append("")
 
         return "\n".join(lines)
 
     def _generate_outcomes_section(self) -> str:
         """Generate outcomes section."""
-        if not self.feature_map.outcomes:
+        outcomes = self.feature_map.get_entities_by_type("outcome")
+        if not outcomes:
             return ""
 
         lines = ["## Outcomes", ""]
 
-        for outcome_id in sorted(self.feature_map.outcomes.keys()):
-            outcome = self.feature_map.outcomes[outcome_id]
-            lines.extend(self._format_outcome(outcome_id, outcome))
+        for entity in sorted(outcomes, key=lambda e: e.id):
+            lines.extend(self._format_entity(entity))
             lines.append("")
 
         return "\n".join(lines)
@@ -143,20 +145,23 @@ class MarkdownGenerator:
 
         return rows
 
-    def _format_capability(self, cap_id: str, cap: Capability) -> list[str]:
-        """Format a single capability."""
-        lines = [f"### {cap.name}", ""]
+    def _format_entity(self, entity: Entity) -> list[str]:
+        """Format a single entity."""
+        lines = [f"### {entity.name}", ""]
 
         # Build metadata table
         table_rows: list[str] = []
-        table_rows.append(f"| ID | `{cap_id}` |")
+        table_rows.append(f"| ID | `{entity.id}` |")
 
-        if cap.tags:
-            tags = ", ".join(f"`{tag}`" for tag in cap.tags)
+        if "requestor" in entity.meta:
+            table_rows.append(f"| Requestor | {entity.meta['requestor']} |")
+
+        if entity.tags:
+            tags = ", ".join(f"`{tag}`" for tag in entity.tags)
             table_rows.append(f"| Tags | {tags} |")
 
         # Add links
-        link_rows = self._format_links(cap.links)
+        link_rows = self._format_links(entity.links)
         table_rows.extend(link_rows)
 
         if table_rows:
@@ -165,191 +170,56 @@ class MarkdownGenerator:
             lines.extend(table_rows)
             lines.append("")
 
-        lines.append(cap.description.strip())
+        lines.append(entity.description.strip())
 
-        if cap.dependencies:
+        if entity.dependencies:
             lines.append("")
             lines.append("#### Dependencies")
             lines.append("")
-            for dep_id in cap.dependencies:
-                if dep_id in self.feature_map.capabilities:
-                    dep = self.feature_map.capabilities[dep_id]
+            for dep_id in entity.dependencies:
+                dep = self.feature_map.get_entity_by_id(dep_id)
+                if dep:
                     anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`)")
+                    type_label = (
+                        f" [{self._pretty_type(dep.type)}]" if dep.type != entity.type else ""
+                    )
+                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`){type_label}")
                 else:
                     lines.append(f"- `{dep_id}` ⚠️ (missing)")
 
-        # Find what depends on this
-        dependents = self.feature_map.get_capability_dependents(cap_id)
-        stories_requiring = [
-            story_id
-            for story_id, story in self.feature_map.user_stories.items()
-            if cap_id in story.dependencies
-        ]
-        outcomes_requiring = [
-            outcome_id
-            for outcome_id, outcome in self.feature_map.outcomes.items()
-            if cap_id in outcome.dependencies
-        ]
+        # Find what depends on this entity
+        dependents = self.feature_map.get_dependents(entity.id)
 
-        if dependents or stories_requiring or outcomes_requiring:
+        if dependents:
             lines.append("")
             lines.append("#### Required by")
             lines.append("")
 
+            # Sort dependents by type and ID for consistent output
+            sorted_dependents: list[tuple[str, str, Entity]] = []
             for dep_id in dependents:
-                if dep_id in self.feature_map.capabilities:
-                    dep = self.feature_map.capabilities[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`)")
+                dep = self.feature_map.get_entity_by_id(dep_id)
+                if dep:
+                    sorted_dependents.append((dep.type, dep_id, dep))
 
-            for story_id in stories_requiring:
-                story = self.feature_map.user_stories[story_id]
-                anchor = self._make_anchor(story_id)
-                lines.append(f"- [{story.name}](#{anchor}) (`{story_id}`) [User Story]")
-
-            for outcome_id in outcomes_requiring:
-                outcome = self.feature_map.outcomes[outcome_id]
-                anchor = self._make_anchor(outcome_id)
-                lines.append(f"- [{outcome.name}](#{anchor}) (`{outcome_id}`) [Outcome]")
+            for _dep_type, dep_id, dep in sorted(sorted_dependents):
+                anchor = self._make_anchor(dep_id)
+                type_label = f" [{self._pretty_type(dep.type)}]" if dep.type != entity.type else ""
+                lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`){type_label}")
 
         return lines
 
-    def _format_user_story(self, story_id: str, story: UserStory) -> list[str]:
-        """Format a single user story."""
-        lines = [f"### {story.name}", ""]
-
-        # Build metadata table
-        table_rows: list[str] = []
-        table_rows.append(f"| ID | `{story_id}` |")
-
-        if story.requestor:
-            table_rows.append(f"| Requestor | {story.requestor} |")
-
-        if story.tags:
-            tags = ", ".join(f"`{tag}`" for tag in story.tags)
-            table_rows.append(f"| Tags | {tags} |")
-
-        # Add links
-        link_rows = self._format_links(story.links)
-        table_rows.extend(link_rows)
-
-        if table_rows:
-            lines.append("| | |")
-            lines.append("|-|-|")
-            lines.extend(table_rows)
-            lines.append("")
-
-        lines.append(story.description.strip())
-
-        if story.dependencies:
-            lines.append("")
-            lines.append("#### Dependencies")
-            lines.append("")
-            for dep_id in story.dependencies:
-                if dep_id in self.feature_map.capabilities:
-                    dep = self.feature_map.capabilities[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`)")
-                elif dep_id in self.feature_map.user_stories:
-                    dep = self.feature_map.user_stories[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [User Story]")
-                else:
-                    lines.append(f"- `{dep_id}` ⚠️ (missing)")
-
-        # Find outcomes that depend on this story
-        dependent_outcomes = [
-            outcome_id
-            for outcome_id, outcome in self.feature_map.outcomes.items()
-            if story_id in outcome.dependencies
-        ]
-
-        if dependent_outcomes:
-            lines.append("")
-            lines.append("#### Required by")
-            lines.append("")
-            for outcome_id in dependent_outcomes:
-                outcome = self.feature_map.outcomes[outcome_id]
-                anchor = self._make_anchor(outcome_id)
-                lines.append(f"- [{outcome.name}](#{anchor}) (`{outcome_id}`) [Outcome]")
-
-        return lines
-
-    def _format_outcome(self, outcome_id: str, outcome: Outcome) -> list[str]:
-        """Format a single outcome."""
-        lines = [f"### {outcome.name}", ""]
-
-        # Build metadata table
-        table_rows: list[str] = []
-        table_rows.append(f"| ID | `{outcome_id}` |")
-
-        if outcome.target_date:
-            table_rows.append(f"| Target Date | {outcome.target_date} |")
-
-        if outcome.tags:
-            tags = ", ".join(f"`{tag}`" for tag in outcome.tags)
-            table_rows.append(f"| Tags | {tags} |")
-
-        # Add links
-        link_rows = self._format_links(outcome.links)
-        table_rows.extend(link_rows)
-
-        if table_rows:
-            lines.append("| | |")
-            lines.append("|-|-|")
-            lines.extend(table_rows)
-            lines.append("")
-
-        lines.append(outcome.description.strip())
-
-        if outcome.dependencies:
-            lines.append("")
-            lines.append("#### Dependencies")
-            lines.append("")
-            for dep_id in outcome.dependencies:
-                if dep_id in self.feature_map.user_stories:
-                    dep = self.feature_map.user_stories[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [User Story]")
-                elif dep_id in self.feature_map.capabilities:
-                    dep = self.feature_map.capabilities[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [Capability]")
-                elif dep_id in self.feature_map.outcomes:
-                    dep = self.feature_map.outcomes[dep_id]
-                    anchor = self._make_anchor(dep_id)
-                    lines.append(f"- [{dep.name}](#{anchor}) (`{dep_id}`) [Outcome]")
-                else:
-                    lines.append(f"- `{dep_id}` ⚠️ (missing)")
-
-        # Find outcomes that depend on this outcome
-        dependent_outcomes = [
-            other_id
-            for other_id, other_outcome in self.feature_map.outcomes.items()
-            if outcome_id in other_outcome.dependencies and other_id != outcome_id
-        ]
-
-        if dependent_outcomes:
-            lines.append("")
-            lines.append("#### Required by")
-            lines.append("")
-            for other_id in dependent_outcomes:
-                other = self.feature_map.outcomes[other_id]
-                anchor = self._make_anchor(other_id)
-                lines.append(f"- [{other.name}](#{anchor}) (`{other_id}`) [Outcome]")
-
-        return lines
+    def _pretty_type(self, entity_type: str) -> str:
+        """Convert entity type to pretty display name."""
+        type_names = {"capability": "Capability", "user_story": "User Story", "outcome": "Outcome"}
+        return type_names.get(entity_type, entity_type.replace("_", " ").title())
 
     def _make_anchor(self, entity_id: str) -> str:
         """Create a valid HTML anchor from an entity name."""
         # Get the entity name based on ID
-        if entity_id in self.feature_map.capabilities:
-            name = self.feature_map.capabilities[entity_id].name
-        elif entity_id in self.feature_map.user_stories:
-            name = self.feature_map.user_stories[entity_id].name
-        elif entity_id in self.feature_map.outcomes:
-            name = self.feature_map.outcomes[entity_id].name
+        entity = self.feature_map.get_entity_by_id(entity_id)
+        if entity:
+            name = entity.name
         else:
             # Fallback to ID-based anchor if entity not found
             return entity_id.replace("_", "-")

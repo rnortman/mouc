@@ -4,7 +4,7 @@
 import pytest
 
 from mouc.graph import GraphGenerator, GraphView
-from mouc.models import Capability, FeatureMap, FeatureMapMetadata, Outcome, UserStory
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 
 
 class TestGraphGenerator:
@@ -15,26 +15,48 @@ class TestGraphGenerator:
         """Create a simple feature map for testing."""
         metadata = FeatureMapMetadata()
 
-        cap1 = Capability(id="cap1", name="Cap 1", description="Desc 1", tags=["infra"])
-        cap2 = Capability(
-            id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"], tags=["infra"]
+        cap1 = Entity(
+            type="capability", id="cap1", name="Cap 1", description="Desc 1", tags=["infra"]
         )
-        cap3 = Capability(id="cap3", name="Cap 3", description="Desc 3", dependencies=["cap2"])
-
-        story1 = UserStory(
-            id="story1", name="Story 1", description="Desc", dependencies=["cap2"], tags=["urgent"]
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc 2",
+            dependencies=["cap1"],
+            tags=["infra"],
         )
-        story2 = UserStory(id="story2", name="Story 2", description="Desc", dependencies=["cap3"])
+        cap3 = Entity(
+            type="capability", id="cap3", name="Cap 3", description="Desc 3", dependencies=["cap2"]
+        )
 
-        outcome1 = Outcome(
-            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1", "story2"]
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2"],
+            tags=["urgent"],
+        )
+        story2 = Entity(
+            type="user_story",
+            id="story2",
+            name="Story 2",
+            description="Desc",
+            dependencies=["cap3"],
+        )
+
+        outcome1 = Entity(
+            type="outcome",
+            id="outcome1",
+            name="Outcome 1",
+            description="Desc",
+            dependencies=["story1", "story2"],
         )
 
         return FeatureMap(
             metadata=metadata,
-            capabilities={"cap1": cap1, "cap2": cap2, "cap3": cap3},
-            user_stories={"story1": story1, "story2": story2},
-            outcomes={"outcome1": outcome1},
+            entities=[cap1, cap2, cap3, story1, story2, outcome1],
         )
 
     def test_generate_all_view(self, simple_feature_map: FeatureMap) -> None:

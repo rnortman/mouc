@@ -4,59 +4,32 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Valid entity types that we currently support
+VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
 
 
-class CapabilitySchema(BaseModel):
-    """Schema for capability YAML data."""
+class EntitySchema(BaseModel):
+    """Schema for unified entity YAML data."""
 
+    type: str | None = None  # Optional for backward compatibility
     name: str
     description: str
     dependencies: list[str] = Field(default_factory=list)
     links: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    meta: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("dependencies", "tags", "links", mode="before")
-    @classmethod
-    def ensure_list(cls, v: Any) -> list[str]:
-        """Ensure value is a list."""
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return [str(item) for item in v]  # type: ignore[misc]
-        return [str(v)]
-
-
-class UserStorySchema(BaseModel):
-    """Schema for user story YAML data."""
-
-    name: str
-    description: str
-    dependencies: list[str] = Field(default_factory=list)
-    requestor: str | None = None
-    links: list[str] = Field(default_factory=list)
-    tags: list[str] = Field(default_factory=list)
-
-    @field_validator("dependencies", "tags", "links", mode="before")
-    @classmethod
-    def ensure_list(cls, v: Any) -> list[str]:
-        """Ensure value is a list."""
-        if v is None:
-            return []
-        if isinstance(v, list):
-            return [str(item) for item in v]  # type: ignore[misc]
-        return [str(v)]
-
-
-class OutcomeSchema(BaseModel):
-    """Schema for outcome YAML data."""
-
-    name: str
-    description: str
-    dependencies: list[str] = Field(default_factory=list)
-    links: list[str] = Field(default_factory=list)
-    target_date: str | None = None
-    tags: list[str] = Field(default_factory=list)
+    @model_validator(mode="after")
+    def validate_entity_type(self) -> EntitySchema:
+        """Validate that the entity type is valid."""
+        if self.type and self.type not in VALID_ENTITY_TYPES:
+            raise ValueError(
+                f"Invalid entity type '{self.type}'. "
+                f"Must be one of: {', '.join(sorted(VALID_ENTITY_TYPES))}"
+            )
+        return self
 
     @field_validator("dependencies", "tags", "links", mode="before")
     @classmethod
@@ -95,6 +68,9 @@ class FeatureMapSchema(BaseModel):
     """Schema for the entire feature map YAML data."""
 
     metadata: MetadataSchema = Field(default_factory=MetadataSchema)
-    capabilities: dict[str, CapabilitySchema] = Field(default_factory=dict)
-    user_stories: dict[str, UserStorySchema] = Field(default_factory=dict)
-    outcomes: dict[str, OutcomeSchema] = Field(default_factory=dict)
+    # New format: all entities under 'entities' key with explicit type
+    entities: dict[str, EntitySchema] = Field(default_factory=dict)
+    # Old format: entities grouped by type
+    capabilities: dict[str, EntitySchema] = Field(default_factory=dict)
+    user_stories: dict[str, EntitySchema] = Field(default_factory=dict)
+    outcomes: dict[str, EntitySchema] = Field(default_factory=dict)

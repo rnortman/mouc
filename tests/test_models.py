@@ -1,6 +1,6 @@
 """Tests for data models."""
 
-from mouc.models import Capability, FeatureMap, FeatureMapMetadata, Link, Outcome, UserStory
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata, Link
 
 
 class TestLink:
@@ -47,12 +47,13 @@ class TestLink:
         assert link.url == "https://github.com/company/repo"
 
 
-class TestCapability:
-    """Test the Capability model."""
+class TestEntity:
+    """Test the Entity model."""
 
-    def test_capability_creation(self) -> None:
-        """Test creating a capability."""
-        cap = Capability(
+    def test_capability_entity_creation(self) -> None:
+        """Test creating a capability entity."""
+        cap = Entity(
+            type="capability",
             id="test_cap",
             name="Test Capability",
             description="A test capability",
@@ -64,6 +65,7 @@ class TestCapability:
             tags=["tag1", "tag2"],
         )
 
+        assert cap.type == "capability"
         assert cap.id == "test_cap"
         assert cap.name == "Test Capability"
         assert cap.dependencies == ["dep1", "dep2"]
@@ -73,23 +75,26 @@ class TestCapability:
         assert cap.parsed_links[1].type == "jira"
         assert cap.parsed_links[1].label == "JIRA-456"
 
-    def test_capability_defaults(self) -> None:
-        """Test capability with default values."""
-        cap = Capability(
+    def test_entity_defaults(self) -> None:
+        """Test entity with default values."""
+        entity = Entity(
+            type="capability",
             id="test_cap",
             name="Test Capability",
             description="A test capability",
         )
 
-        assert cap.dependencies == []
-        assert cap.links == []
-        assert cap.parsed_links == []
-        assert cap.tags == []
+        assert entity.dependencies == []
+        assert entity.links == []
+        assert entity.parsed_links == []
+        assert entity.tags == []
+        assert entity.meta == {}
 
     def test_link_parsing(self) -> None:
         """Test link parsing."""
         # Test various link formats
-        cap = Capability(
+        cap = Entity(
+            type="capability",
             id="cap1",
             name="Cap 1",
             description="Desc",
@@ -130,45 +135,41 @@ class TestCapability:
         assert links[4].label == "github.com"
         assert links[4].url == "https://github.com/company/repo"
 
-
-class TestUserStory:
-    """Test the UserStory model."""
-
-    def test_user_story_creation(self) -> None:
-        """Test creating a user story."""
-        story = UserStory(
+    def test_user_story_entity_creation(self) -> None:
+        """Test creating a user story entity."""
+        story = Entity(
+            type="user_story",
             id="test_story",
             name="Test Story",
             description="A test story",
             dependencies=["cap1", "cap2"],
-            requestor="test_team",
             links=["jira:STORY-123"],
             tags=["urgent"],
+            meta={"requestor": "test_team"},
         )
 
+        assert story.type == "user_story"
         assert story.id == "test_story"
         assert story.dependencies == ["cap1", "cap2"]
-        assert story.requestor == "test_team"
+        assert story.meta["requestor"] == "test_team"
 
-
-class TestOutcome:
-    """Test the Outcome model."""
-
-    def test_outcome_creation(self) -> None:
-        """Test creating an outcome."""
-        outcome = Outcome(
+    def test_outcome_entity_creation(self) -> None:
+        """Test creating an outcome entity."""
+        outcome = Entity(
+            type="outcome",
             id="test_outcome",
             name="Test Outcome",
             description="A test outcome",
             dependencies=["story1", "story2"],
             links=["jira:EPIC-123"],
-            target_date="2024-Q3",
             tags=["priority"],
+            meta={"target_date": "2024-Q3"},
         )
 
+        assert outcome.type == "outcome"
         assert outcome.id == "test_outcome"
         assert outcome.dependencies == ["story1", "story2"]
-        assert outcome.target_date == "2024-Q3"
+        assert outcome.meta["target_date"] == "2024-Q3"
 
 
 class TestFeatureMap:
@@ -178,66 +179,107 @@ class TestFeatureMap:
         """Test creating a feature map."""
         metadata = FeatureMapMetadata(version="1.0", team="test_team")
 
-        cap1 = Capability(id="cap1", name="Cap 1", description="Desc 1")
-        cap2 = Capability(id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"])
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc 1")
+        cap2 = Entity(
+            type="capability", id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"]
+        )
 
-        story1 = UserStory(id="story1", name="Story 1", description="Desc", dependencies=["cap2"])
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            dependencies=["cap2"],
+        )
 
-        outcome1 = Outcome(
-            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1"]
+        outcome1 = Entity(
+            type="outcome",
+            id="outcome1",
+            name="Outcome 1",
+            description="Desc",
+            dependencies=["story1"],
         )
 
         feature_map = FeatureMap(
             metadata=metadata,
-            capabilities={"cap1": cap1, "cap2": cap2},
-            user_stories={"story1": story1},
-            outcomes={"outcome1": outcome1},
+            entities=[cap1, cap2, story1, outcome1],
         )
 
-        assert len(feature_map.capabilities) == 2
+        assert len(feature_map.entities) == 4
+        assert len(feature_map.get_entities_by_type("capability")) == 2
+        assert len(feature_map.get_entities_by_type("user_story")) == 1
+        assert len(feature_map.get_entities_by_type("outcome")) == 1
         assert feature_map.get_all_ids() == {"cap1", "cap2", "story1", "outcome1"}
 
-    def test_get_capability_dependents(self) -> None:
-        """Test finding capability dependents."""
+    def test_get_dependents(self) -> None:
+        """Test finding entity dependents."""
         metadata = FeatureMapMetadata()
 
-        cap1 = Capability(id="cap1", name="Cap 1", description="Desc 1")
-        cap2 = Capability(id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"])
-        cap3 = Capability(
-            id="cap3", name="Cap 3", description="Desc 3", dependencies=["cap1", "cap2"]
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc 1")
+        cap2 = Entity(
+            type="capability", id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"]
+        )
+        cap3 = Entity(
+            type="capability",
+            id="cap3",
+            name="Cap 3",
+            description="Desc 3",
+            dependencies=["cap1", "cap2"],
         )
 
         feature_map = FeatureMap(
             metadata=metadata,
-            capabilities={"cap1": cap1, "cap2": cap2, "cap3": cap3},
-            user_stories={},
-            outcomes={},
+            entities=[cap1, cap2, cap3],
         )
 
-        assert feature_map.get_capability_dependents("cap1") == ["cap2", "cap3"]
-        assert feature_map.get_capability_dependents("cap2") == ["cap3"]
-        assert feature_map.get_capability_dependents("cap3") == []
+        assert set(feature_map.get_dependents("cap1")) == {"cap2", "cap3"}
+        assert feature_map.get_dependents("cap2") == ["cap3"]
+        assert feature_map.get_dependents("cap3") == []
 
     def test_get_story_dependents(self) -> None:
         """Test finding story dependents."""
         metadata = FeatureMapMetadata()
 
-        story1 = UserStory(id="story1", name="Story 1", description="Desc")
-        story2 = UserStory(id="story2", name="Story 2", description="Desc")
+        story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
+        story2 = Entity(type="user_story", id="story2", name="Story 2", description="Desc")
 
-        outcome1 = Outcome(
-            id="outcome1", name="Outcome 1", description="Desc", dependencies=["story1"]
+        outcome1 = Entity(
+            type="outcome",
+            id="outcome1",
+            name="Outcome 1",
+            description="Desc",
+            dependencies=["story1"],
         )
-        outcome2 = Outcome(
-            id="outcome2", name="Outcome 2", description="Desc", dependencies=["story1", "story2"]
+        outcome2 = Entity(
+            type="outcome",
+            id="outcome2",
+            name="Outcome 2",
+            description="Desc",
+            dependencies=["story1", "story2"],
         )
 
         feature_map = FeatureMap(
             metadata=metadata,
-            capabilities={},
-            user_stories={"story1": story1, "story2": story2},
-            outcomes={"outcome1": outcome1, "outcome2": outcome2},
+            entities=[story1, story2, outcome1, outcome2],
         )
 
-        assert set(feature_map.get_story_dependents("story1")) == {"outcome1", "outcome2"}
-        assert feature_map.get_story_dependents("story2") == ["outcome2"]
+        assert set(feature_map.get_dependents("story1")) == {"outcome1", "outcome2"}
+        assert feature_map.get_dependents("story2") == ["outcome2"]
+
+    def test_get_entity_by_id(self) -> None:
+        """Test getting entities by ID."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc 1")
+        story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
+        outcome1 = Entity(type="outcome", id="outcome1", name="Outcome 1", description="Desc")
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, story1, outcome1],
+        )
+
+        assert feature_map.get_entity_by_id("cap1") == cap1
+        assert feature_map.get_entity_by_id("story1") == story1
+        assert feature_map.get_entity_by_id("outcome1") == outcome1
+        assert feature_map.get_entity_by_id("nonexistent") is None

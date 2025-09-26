@@ -50,41 +50,34 @@ class GraphGenerator:
         lines.append("  node [shape=oval];")
         lines.append("")
 
+        # Group entities by type for consistent rendering
+        capabilities = self.feature_map.get_entities_by_type("capability")
+        user_stories = self.feature_map.get_entities_by_type("user_story")
+        outcomes = self.feature_map.get_entities_by_type("outcome")
+
         # Add capabilities
-        for cap_id, cap in self.feature_map.capabilities.items():
-            label = self._escape_label(cap.name)
-            lines.append(f'  {cap_id} [label="{label}", style=filled, fillcolor=lightblue];')
+        for entity in capabilities:
+            label = self._escape_label(entity.name)
+            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightblue];')
         lines.append("")
 
         # Add user stories
-        for story_id, story in self.feature_map.user_stories.items():
-            label = self._escape_label(story.name)
-            lines.append(f'  {story_id} [label="{label}", style=filled, fillcolor=lightgreen];')
+        for entity in user_stories:
+            label = self._escape_label(entity.name)
+            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightgreen];')
         lines.append("")
 
         # Add outcomes
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            label = self._escape_label(outcome.name)
-            lines.append(f'  {outcome_id} [label="{label}", style=filled, fillcolor=lightyellow];')
+        for entity in outcomes:
+            label = self._escape_label(entity.name)
+            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightyellow];')
         lines.append("")
 
-        # Add edges
-        lines.append("  // Capability dependencies (unblocks direction)")
-        for cap_id, cap in self.feature_map.capabilities.items():
-            for dep_id in cap.dependencies:
-                lines.append(f"  {dep_id} -> {cap_id};")
-
-        lines.append("")
-        lines.append("  // User story dependencies (unblocks direction)")
-        for story_id, story in self.feature_map.user_stories.items():
-            for dep_id in story.dependencies:
-                lines.append(f"  {dep_id} -> {story_id};")
-
-        lines.append("")
-        lines.append("  // Outcome dependencies (unblocks direction)")
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            for dep_id in outcome.dependencies:
-                lines.append(f"  {dep_id} -> {outcome_id};")
+        # Add edges (unblocks direction)
+        lines.append("  // Dependencies (unblocks direction)")
+        for entity in self.feature_map.entities:
+            for dep_id in entity.dependencies:
+                lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -109,18 +102,17 @@ class GraphGenerator:
             if node_id == target:
                 continue
 
-            # Determine node type and style
-            if node_id in self.feature_map.capabilities:
-                entity = self.feature_map.capabilities[node_id]
-                color = "lightblue"
-            elif node_id in self.feature_map.user_stories:
-                entity = self.feature_map.user_stories[node_id]
-                color = "lightgreen"
-            elif node_id in self.feature_map.outcomes:
-                entity = self.feature_map.outcomes[node_id]
-                color = "lightyellow"
-            else:
+            entity = self.feature_map.get_entity_by_id(node_id)
+            if not entity:
                 continue
+
+            # Determine node color by type
+            color_map = {
+                "capability": "lightblue",
+                "user_story": "lightgreen",
+                "outcome": "lightyellow",
+            }
+            color = color_map.get(entity.type, "white")
 
             label = self._escape_label(entity.name)
             lines.append(f'  {node_id} [label="{label}", style=filled, fillcolor={color}];')
@@ -128,26 +120,12 @@ class GraphGenerator:
         lines.append("")
 
         # Add edges only for nodes in the critical path (unblocks direction)
-        for cap_id, cap in self.feature_map.capabilities.items():
-            if cap_id not in dependencies:
+        for entity in self.feature_map.entities:
+            if entity.id not in dependencies:
                 continue
-            for dep_id in cap.dependencies:
+            for dep_id in entity.dependencies:
                 if dep_id in dependencies:
-                    lines.append(f"  {dep_id} -> {cap_id};")
-
-        for story_id, story in self.feature_map.user_stories.items():
-            if story_id not in dependencies:
-                continue
-            for dep_id in story.dependencies:
-                if dep_id in dependencies:
-                    lines.append(f"  {dep_id} -> {story_id};")
-
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            if outcome_id not in dependencies:
-                continue
-            for dep_id in outcome.dependencies:
-                if dep_id in dependencies:
-                    lines.append(f"  {dep_id} -> {outcome_id};")
+                    lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -157,17 +135,9 @@ class GraphGenerator:
         # Find all entities with matching tags
         matching_ids: set[str] = set()
 
-        for cap_id, cap in self.feature_map.capabilities.items():
-            if any(tag in cap.tags for tag in tags):
-                matching_ids.add(cap_id)
-
-        for story_id, story in self.feature_map.user_stories.items():
-            if any(tag in story.tags for tag in tags):
-                matching_ids.add(story_id)
-
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            if any(tag in outcome.tags for tag in tags):
-                matching_ids.add(outcome_id)
+        for entity in self.feature_map.entities:
+            if any(tag in entity.tags for tag in tags):
+                matching_ids.add(entity.id)
 
         # Also include direct dependencies/dependents
         expanded_ids: set[str] = matching_ids.copy()
@@ -181,17 +151,17 @@ class GraphGenerator:
 
         # Add nodes
         for node_id in expanded_ids:
-            if node_id in self.feature_map.capabilities:
-                entity = self.feature_map.capabilities[node_id]
-                color = "lightblue"
-            elif node_id in self.feature_map.user_stories:
-                entity = self.feature_map.user_stories[node_id]
-                color = "lightgreen"
-            elif node_id in self.feature_map.outcomes:
-                entity = self.feature_map.outcomes[node_id]
-                color = "lightyellow"
-            else:
+            entity = self.feature_map.get_entity_by_id(node_id)
+            if not entity:
                 continue
+
+            # Determine node color by type
+            color_map = {
+                "capability": "lightblue",
+                "user_story": "lightgreen",
+                "outcome": "lightyellow",
+            }
+            color = color_map.get(entity.type, "white")
 
             label = self._escape_label(entity.name)
             # Highlight nodes that match the filter
@@ -205,26 +175,12 @@ class GraphGenerator:
         lines.append("")
 
         # Add edges (unblocks direction)
-        for cap_id, cap in self.feature_map.capabilities.items():
-            if cap_id not in expanded_ids:
+        for entity in self.feature_map.entities:
+            if entity.id not in expanded_ids:
                 continue
-            for dep_id in cap.dependencies:
+            for dep_id in entity.dependencies:
                 if dep_id in expanded_ids:
-                    lines.append(f"  {dep_id} -> {cap_id};")
-
-        for story_id, story in self.feature_map.user_stories.items():
-            if story_id not in expanded_ids:
-                continue
-            for dep_id in story.dependencies:
-                if dep_id in expanded_ids:
-                    lines.append(f"  {dep_id} -> {story_id};")
-
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            if outcome_id not in expanded_ids:
-                continue
-            for dep_id in outcome.dependencies:
-                if dep_id in expanded_ids:
-                    lines.append(f"  {dep_id} -> {outcome_id};")
+                    lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")
         return "\n".join(lines)
@@ -237,26 +193,9 @@ class GraphGenerator:
         while to_process:
             current = to_process.pop()
 
-            # Check capabilities
-            if current in self.feature_map.capabilities:
-                cap = self.feature_map.capabilities[current]
-                for dep_id in cap.dependencies:
-                    if dep_id not in dependencies:
-                        dependencies.add(dep_id)
-                        to_process.append(dep_id)
-
-            # Check user stories
-            elif current in self.feature_map.user_stories:
-                story = self.feature_map.user_stories[current]
-                for dep_id in story.dependencies:
-                    if dep_id not in dependencies:
-                        dependencies.add(dep_id)
-                        to_process.append(dep_id)
-
-            # Check outcomes
-            elif current in self.feature_map.outcomes:
-                outcome = self.feature_map.outcomes[current]
-                for dep_id in outcome.dependencies:
+            entity = self.feature_map.get_entity_by_id(current)
+            if entity:
+                for dep_id in entity.dependencies:
                     if dep_id not in dependencies:
                         dependencies.add(dep_id)
                         to_process.append(dep_id)
@@ -267,33 +206,13 @@ class GraphGenerator:
         """Find direct dependencies and dependents of a node."""
         connections: set[str] = set()
 
-        # If it's a capability, add its dependencies
-        if node_id in self.feature_map.capabilities:
-            cap = self.feature_map.capabilities[node_id]
-            connections.update(cap.dependencies)
-
-        # If it's a user story, add its dependencies
-        if node_id in self.feature_map.user_stories:
-            story = self.feature_map.user_stories[node_id]
-            connections.update(story.dependencies)
-
-        # If it's an outcome, add its dependencies
-        if node_id in self.feature_map.outcomes:
-            outcome = self.feature_map.outcomes[node_id]
-            connections.update(outcome.dependencies)
+        # Find the entity and add its dependencies
+        entity = self.feature_map.get_entity_by_id(node_id)
+        if entity:
+            connections.update(entity.dependencies)
 
         # Find things that depend on this node
-        connections.update(self.feature_map.get_capability_dependents(node_id))
-
-        # Find user stories that depend on this node
-        for story_id, story in self.feature_map.user_stories.items():
-            if node_id in story.dependencies:
-                connections.add(story_id)
-
-        # Find outcomes that depend on this node
-        for outcome_id, outcome in self.feature_map.outcomes.items():
-            if node_id in outcome.dependencies:
-                connections.add(outcome_id)
+        connections.update(self.feature_map.get_dependents(node_id))
 
         return connections
 

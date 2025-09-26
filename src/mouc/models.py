@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from typing import Any
 from urllib.parse import urlparse
 
 
@@ -57,52 +58,22 @@ class Link:
         return cls(type=link_type, label=link_str, url=None, raw=link_str)
 
 
-@dataclass
-class Capability:
-    """Technical capability or infrastructure component."""
+# Valid entity types - can be extended in the future!
+VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
 
+
+@dataclass
+class Entity:
+    """Unified entity model for all types (capabilities, user stories, outcomes)."""
+
+    type: str
     id: str
     name: str
     description: str
     dependencies: list[str] = field(default_factory=lambda: [])
     links: list[str] = field(default_factory=lambda: [])
     tags: list[str] = field(default_factory=lambda: [])
-
-    @property
-    def parsed_links(self) -> list[Link]:
-        """Parse link strings into Link objects."""
-        return [Link.parse(link) for link in self.links]
-
-
-@dataclass
-class UserStory:
-    """User story representing a request from another team."""
-
-    id: str
-    name: str
-    description: str
-    dependencies: list[str] = field(default_factory=lambda: [])
-    requestor: str | None = None
-    links: list[str] = field(default_factory=lambda: [])
-    tags: list[str] = field(default_factory=lambda: [])
-
-    @property
-    def parsed_links(self) -> list[Link]:
-        """Parse link strings into Link objects."""
-        return [Link.parse(link) for link in self.links]
-
-
-@dataclass
-class Outcome:
-    """Business or organizational outcome."""
-
-    id: str
-    name: str
-    description: str
-    dependencies: list[str] = field(default_factory=lambda: [])
-    links: list[str] = field(default_factory=lambda: [])
-    target_date: str | None = None
-    tags: list[str] = field(default_factory=lambda: [])
+    meta: dict[str, Any] = field(default_factory=lambda: {})
 
     @property
     def parsed_links(self) -> list[Link]:
@@ -124,30 +95,27 @@ class FeatureMap:
     """Complete feature map containing all entities."""
 
     metadata: FeatureMapMetadata
-    capabilities: dict[str, Capability]
-    user_stories: dict[str, UserStory]
-    outcomes: dict[str, Outcome]
+    entities: list[Entity]
 
     def get_all_ids(self) -> set[str]:
         """Get all entity IDs in the map."""
-        return (
-            set(self.capabilities.keys())
-            | set(self.user_stories.keys())
-            | set(self.outcomes.keys())
-        )
+        return {entity.id for entity in self.entities}
 
-    def get_capability_dependents(self, capability_id: str) -> list[str]:
-        """Get all capabilities that depend on the given capability."""
-        dependents: list[str] = []
-        for cap_id, cap in self.capabilities.items():
-            if capability_id in cap.dependencies:
-                dependents.append(cap_id)
-        return dependents
+    def get_entities_by_type(self, entity_type: str) -> list[Entity]:
+        """Get all entities of a specific type."""
+        return [e for e in self.entities if e.type == entity_type]
 
-    def get_story_dependents(self, story_id: str) -> list[str]:
-        """Get all outcomes that depend on the given user story."""
+    def get_entity_by_id(self, entity_id: str) -> Entity | None:
+        """Get an entity by its ID."""
+        for entity in self.entities:
+            if entity.id == entity_id:
+                return entity
+        return None
+
+    def get_dependents(self, entity_id: str) -> list[str]:
+        """Get all entities that depend on the given entity."""
         dependents: list[str] = []
-        for outcome_id, outcome in self.outcomes.items():
-            if story_id in outcome.dependencies:
-                dependents.append(outcome_id)
+        for entity in self.entities:
+            if entity_id in entity.dependencies:
+                dependents.append(entity.id)
         return dependents

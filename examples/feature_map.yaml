@@ -4,8 +4,9 @@ metadata:
   last_updated: 2025-01-15
   team: middleware
 
-capabilities:
+entities:
   lock_free_queue:
+    type: capability
     name: Lock-Free Queue Implementation
     description: |
       High-performance thread-safe queue using atomic operations.
@@ -22,6 +23,7 @@ capabilities:
     tags: [critical, performance]
     
   message_bus:
+    type: capability
     name: Inter-Process Message Bus
     description: |
       Reliable message passing system for service communication.
@@ -32,6 +34,7 @@ capabilities:
     tags: [infrastructure]
     
   data_sync:
+    type: capability
     name: Data Stream Synchronization
     description: |
       Time-synchronized data fusion from multiple API endpoints.
@@ -42,6 +45,7 @@ capabilities:
     tags: [api_support, critical]
     
   realtime_monitor:
+    type: capability
     name: Real-time Performance Monitor
     description: |
       Tracks system latency and throughput metrics without impacting
@@ -52,42 +56,47 @@ capabilities:
       - https://github.com/company/repo/issues/123
     tags: [monitoring, tech_debt]
 
-user_stories:
   analytics_realtime:
+    type: user_story
     name: Real-time Analytics Pipeline
     description: |
       The analytics team needs to process streaming data at 100Hz with
       strict latency requirements. They need synchronized data inputs
       and reliable inter-process communication.
     dependencies: [data_sync, message_bus]
-    requestor: analytics_team
+    meta:
+      requestor: analytics_team
     links:
       - jira:STORY-100
     tags: [q2_commitment]
     
   service_telemetry:
+    type: user_story
     name: Service Telemetry Collection
     description: |
       SRE team needs to collect performance metrics from all services
       without impacting production latency requirements.
     dependencies: [realtime_monitor]
-    requestor: sre_team
+    meta:
+      requestor: sre_team
     links:
       - jira:STORY-200
     tags: [monitoring]
     
   api_gateway_integration:
+    type: user_story
     name: API Gateway Integration
     description: |
       API team needs high-throughput communication between
       their distributed service nodes.
     dependencies: [message_bus]
-    requestor: api_team
+    meta:
+      requestor: api_team
     links:
       - jira:STORY-300
 
-outcomes:
   mobile_app_q3:
+    type: outcome
     name: Mobile App Q3 Launch
     description: |
       Launch new mobile application with real-time features by Q3.
@@ -96,10 +105,10 @@ outcomes:
     links:
       - jira:EPIC-1000
       - doc:[Product Brief](https://confluence.company.com/display/PROD/Mobile-App-Launch)
-    target_date: 2024-Q3
     tags: [company_priority, safety_critical]
     
   production_observability:
+    type: outcome
     name: Production Observability
     description: |
       Complete visibility into production system performance
@@ -107,5 +116,4 @@ outcomes:
     dependencies: [service_telemetry]
     links:
       - "jira:EPIC-2000"
-    target_date: 2024-Q2
     tags: [operational_excellence]
