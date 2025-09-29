@@ -1,15 +1,50 @@
 [project]
 name = "mouc"
 version = "0.1.0"
-description = "Mapping Outcomes User stories and Capabilities - A lightweight dependency tracking system"
+description = "A lightweight dependency tracking system for mapping technical capabilities to user stories and outcomes"
 readme = "README.md"
 requires-python = ">=3.10"
+authors = [
+    {name = "Randall Nortman", email = "oss@randallnortman.net"},
+]
+license = "MIT"
+keywords = [
+    "dependency-tracking",
+    "project-management",
+    "capability-mapping",
+    "user-stories",
+    "technical-dependencies",
+    "outcome-mapping",
+    "software-planning",
+    "visualization",
+    "yaml-based",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: Documentation",
+    "Topic :: Utilities",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+    "Typing :: Typed",
+]
 dependencies = [
     "pyyaml>=6.0",
     "graphviz>=0.20",
     "pydantic>=2.0",
     "typer>=0.9.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/rnortman/mouc"
+Repository = "https://github.com/rnortman/mouc.git"
+Issues = "https://github.com/rnortman/mouc/issues"
+Documentation = "https://github.com/rnortman/mouc#readme"
 
 [project.scripts]
 mouc = "mouc.cli:main"
@@ -20,6 +55,8 @@ dev = [
     "pytest-cov>=4.0",
     "ruff>=0.1.0",
     "pyright>=1.1.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 
 [tool.ruff]
@@ -50,13 +87,25 @@ pythonVersion = "3.10"
 reportMissingImports = true
 reportMissingTypeStubs = false
 
+[build-system]
+requires = ["setuptools>=61", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.405",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
     "ruff>=0.13.0",
+    "build>=1.0.0",
+    "twine>=5.0.0",
 ]
 
 [tool.uv]
 package = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+mouc = ["py.typed"]

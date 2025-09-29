@@ -246,7 +246,7 @@ mouc graph --view timeline | dot -Tpng -o timeline.png
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/mouc.git
+git clone https://github.com/rnortman/mouc.git
 cd mouc
 
 # Install with development dependencies
