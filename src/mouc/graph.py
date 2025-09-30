@@ -272,10 +272,10 @@ class GraphGenerator:
             return "lightgray"
 
         start_hue = 120
-        end_hue = 220
+        end_hue = 230
 
-        start_lightness = 88
-        end_lightness = 50
+        start_lightness = 95
+        end_lightness = 70
 
         if total_timeframes == 1:
             hue = (start_hue + end_hue) / 2
