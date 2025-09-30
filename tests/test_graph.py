@@ -5,6 +5,7 @@ import pytest
 
 from mouc.graph import GraphGenerator, GraphView
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.parser import resolve_graph_edges
 
 
 class TestGraphGenerator:
@@ -23,11 +24,11 @@ class TestGraphGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            dependencies=["cap1"],
+            requires={"cap1"},
             tags=["infra"],
         )
         cap3 = Entity(
-            type="capability", id="cap3", name="Cap 3", description="Desc 3", dependencies=["cap2"]
+            type="capability", id="cap3", name="Cap 3", description="Desc 3", requires={"cap2"}
         )
 
         story1 = Entity(
@@ -35,7 +36,7 @@ class TestGraphGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2"],
+            requires={"cap2"},
             tags=["urgent"],
         )
         story2 = Entity(
@@ -43,7 +44,7 @@ class TestGraphGenerator:
             id="story2",
             name="Story 2",
             description="Desc",
-            dependencies=["cap3"],
+            requires={"cap3"},
         )
 
         outcome1 = Entity(
@@ -51,12 +52,15 @@ class TestGraphGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            dependencies=["story1", "story2"],
+            requires={"story1", "story2"},
         )
+
+        entities = [cap1, cap2, cap3, story1, story2, outcome1]
+        resolve_graph_edges(entities)
 
         return FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, cap3, story1, story2, outcome1],
+            entities=entities,
         )
 
     def test_generate_all_view(self, simple_feature_map: FeatureMap) -> None:
@@ -183,7 +187,7 @@ class TestGraphGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            dependencies=["cap1"],
+            requires={"cap1"},
             meta={"timeframe": "Q1 2025"},
         )
         cap3 = Entity(
@@ -191,7 +195,7 @@ class TestGraphGenerator:
             id="cap3",
             name="Cap 3",
             description="Desc 3",
-            dependencies=["cap2"],
+            requires={"cap2"},
             meta={"timeframe": "Q2 2025"},
         )
 
@@ -200,7 +204,7 @@ class TestGraphGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2"],
+            requires={"cap2"},
             meta={"timeframe": "Q2 2025"},
         )
         story2 = Entity(
@@ -208,7 +212,7 @@ class TestGraphGenerator:
             id="story2",
             name="Story 2",
             description="Desc",
-            dependencies=["cap3"],
+            requires={"cap3"},
             # No timeframe - should go to "Unscheduled"
         )
 
@@ -217,13 +221,16 @@ class TestGraphGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            dependencies=["story1", "story2"],
+            requires={"story1", "story2"},
             meta={"timeframe": "Q3 2025"},
         )
 
+        entities = [cap1, cap2, cap3, story1, story2, outcome1]
+        resolve_graph_edges(entities)
+
         return FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, cap3, story1, story2, outcome1],
+            entities=entities,
         )
 
     def test_generate_timeline_view(self, timeline_feature_map: FeatureMap) -> None:

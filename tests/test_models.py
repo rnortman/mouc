@@ -1,6 +1,7 @@
 """Tests for data models."""
 
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata, Link
+from mouc.parser import resolve_graph_edges
 
 
 class TestLink:
@@ -57,7 +58,7 @@ class TestEntity:
             id="test_cap",
             name="Test Capability",
             description="A test capability",
-            dependencies=["dep1", "dep2"],
+            requires={"dep1", "dep2"},
             links=[
                 "[DD-123](https://example.com/doc)",
                 "jira:JIRA-456",
@@ -68,7 +69,7 @@ class TestEntity:
         assert cap.type == "capability"
         assert cap.id == "test_cap"
         assert cap.name == "Test Capability"
-        assert cap.dependencies == ["dep1", "dep2"]
+        assert cap.requires == {"dep1", "dep2"}
         assert len(cap.parsed_links) == 2
         assert cap.parsed_links[0].label == "DD-123"
         assert cap.parsed_links[0].url == "https://example.com/doc"
@@ -84,7 +85,8 @@ class TestEntity:
             description="A test capability",
         )
 
-        assert entity.dependencies == []
+        assert entity.requires == set()
+        assert entity.enables == set()
         assert entity.links == []
         assert entity.parsed_links == []
         assert entity.tags == []
@@ -142,7 +144,7 @@ class TestEntity:
             id="test_story",
             name="Test Story",
             description="A test story",
-            dependencies=["cap1", "cap2"],
+            requires={"cap1", "cap2"},
             links=["jira:STORY-123"],
             tags=["urgent"],
             meta={"requestor": "test_team"},
@@ -150,7 +152,7 @@ class TestEntity:
 
         assert story.type == "user_story"
         assert story.id == "test_story"
-        assert story.dependencies == ["cap1", "cap2"]
+        assert story.requires == {"cap1", "cap2"}
         assert story.meta["requestor"] == "test_team"
 
     def test_outcome_entity_creation(self) -> None:
@@ -160,7 +162,7 @@ class TestEntity:
             id="test_outcome",
             name="Test Outcome",
             description="A test outcome",
-            dependencies=["story1", "story2"],
+            requires={"story1", "story2"},
             links=["jira:EPIC-123"],
             tags=["priority"],
             meta={"target_date": "2024-Q3"},
@@ -168,7 +170,7 @@ class TestEntity:
 
         assert outcome.type == "outcome"
         assert outcome.id == "test_outcome"
-        assert outcome.dependencies == ["story1", "story2"]
+        assert outcome.requires == {"story1", "story2"}
         assert outcome.meta["target_date"] == "2024-Q3"
 
 
@@ -181,7 +183,12 @@ class TestFeatureMap:
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc 1")
         cap2 = Entity(
-            type="capability", id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"]
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc 2",
+            requires={"cap1"},
+            enables={"story1"},
         )
 
         story1 = Entity(
@@ -189,7 +196,8 @@ class TestFeatureMap:
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2"],
+            requires={"cap2"},
+            enables={"outcome1"},
         )
 
         outcome1 = Entity(
@@ -197,12 +205,14 @@ class TestFeatureMap:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            dependencies=["story1"],
+            requires={"story1"},
         )
 
+        entities = [cap1, cap2, story1, outcome1]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, story1, outcome1],
+            entities=entities,
         )
 
         assert len(feature_map.entities) == 4
@@ -215,56 +225,83 @@ class TestFeatureMap:
         """Test finding entity dependents."""
         metadata = FeatureMapMetadata()
 
-        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc 1")
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc 1",
+            enables={"cap2", "cap3"},
+        )
         cap2 = Entity(
-            type="capability", id="cap2", name="Cap 2", description="Desc 2", dependencies=["cap1"]
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc 2",
+            requires={"cap1"},
+            enables={"cap3"},
         )
         cap3 = Entity(
             type="capability",
             id="cap3",
             name="Cap 3",
             description="Desc 3",
-            dependencies=["cap1", "cap2"],
+            requires={"cap1", "cap2"},
         )
 
+        entities = [cap1, cap2, cap3]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, cap3],
+            entities=entities,
         )
 
-        assert set(feature_map.get_dependents("cap1")) == {"cap2", "cap3"}
-        assert feature_map.get_dependents("cap2") == ["cap3"]
-        assert feature_map.get_dependents("cap3") == []
+        assert feature_map.get_dependents("cap1") == {"cap2", "cap3"}
+        assert feature_map.get_dependents("cap2") == {"cap3"}
+        assert feature_map.get_dependents("cap3") == set()
 
     def test_get_story_dependents(self) -> None:
         """Test finding story dependents."""
         metadata = FeatureMapMetadata()
 
-        story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
-        story2 = Entity(type="user_story", id="story2", name="Story 2", description="Desc")
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            enables={"outcome1", "outcome2"},
+        )
+        story2 = Entity(
+            type="user_story",
+            id="story2",
+            name="Story 2",
+            description="Desc",
+            enables={"outcome2"},
+        )
 
         outcome1 = Entity(
             type="outcome",
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            dependencies=["story1"],
+            requires={"story1"},
         )
         outcome2 = Entity(
             type="outcome",
             id="outcome2",
             name="Outcome 2",
             description="Desc",
-            dependencies=["story1", "story2"],
+            requires={"story1", "story2"},
         )
 
+        entities = [story1, story2, outcome1, outcome2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[story1, story2, outcome1, outcome2],
+            entities=entities,
         )
 
-        assert set(feature_map.get_dependents("story1")) == {"outcome1", "outcome2"}
-        assert feature_map.get_dependents("story2") == ["outcome2"]
+        assert feature_map.get_dependents("story1") == {"outcome1", "outcome2"}
+        assert feature_map.get_dependents("story2") == {"outcome2"}
 
     def test_get_entity_by_id(self) -> None:
         """Test getting entities by ID."""
@@ -274,9 +311,11 @@ class TestFeatureMap:
         story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
         outcome1 = Entity(type="outcome", id="outcome1", name="Outcome 1", description="Desc")
 
+        entities = [cap1, story1, outcome1]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, story1, outcome1],
+            entities=entities,
         )
 
         assert feature_map.get_entity_by_id("cap1") == cap1

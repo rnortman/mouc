@@ -12,6 +12,8 @@ Mouc helps engineering teams track and visualize dependencies between:
 
 This is **not** a project management system. It's a technical dependency tracker that answers "what depends on what" and "what blocks what."
 
+Dependencies can be specified from either direction using `requires` (what this needs) or `enables` (what this unblocks), and the system automatically creates bidirectional edges.
+
 ## Installation
 
 Install with uv (recommended):
@@ -40,7 +42,7 @@ entities:
     description: |
       High-performance message passing system for services.
       Provides reliable, ordered message delivery.
-    dependencies: []
+    enables: [service_communication]  # This unblocks the service communication story
     links:
       - jira:INFRA-123
     tags: [infrastructure]
@@ -49,7 +51,7 @@ entities:
     type: user_story
     name: Service Communication
     description: Frontend team needs services to communicate
-    dependencies: [message_bus]
+    requires: [message_bus]  # Or you can specify from this end
     meta:
       requestor: frontend_team
     links:
@@ -59,7 +61,7 @@ entities:
     type: outcome
     name: Q3 Product Launch
     description: Launch new product features in Q3
-    dependencies: [service_communication]
+    requires: [service_communication]
     links:
       - jira:EPIC-789
     meta:
@@ -132,11 +134,11 @@ entities:
     name: Lock-Free Queue Implementation
     description: |
       High-performance thread-safe queue using atomic operations.
-      
+
       Performance targets:
       - 10M ops/sec single producer/consumer
       - Sub-microsecond latency at p99
-    dependencies: []  # List of entity IDs this depends on
+    requires: []  # List of entity IDs this depends on
     links:
       - design:[DD-123](https://docs.google.com/document/d/abc123)
       - jira:INFRA-456
@@ -146,7 +148,7 @@ entities:
     type: capability
     name: Inter-Process Message Bus
     description: Reliable message passing built on lock-free queue
-    dependencies: [lock_free_queue]
+    requires: [lock_free_queue]
     links:
       - jira:INFRA-789
     tags: [infrastructure]
@@ -159,7 +161,7 @@ entities:
     description: |
       Analytics team needs to process streaming data at 100Hz
       with strict latency requirements.
-    dependencies: [message_bus]  # Can depend on capabilities or other user stories
+    requires: [message_bus]  # Can depend on capabilities or other user stories
     meta:
       requestor: analytics_team  # Who asked for this
     links:
@@ -170,7 +172,7 @@ entities:
     type: outcome
     name: Mobile App Launch
     description: Launch new mobile application by Q3
-    dependencies: [analytics_realtime]  # Can depend on user stories or capabilities
+    requires: [analytics_realtime]  # Can depend on user stories or capabilities
     links:
       - jira:EPIC-1000  # Always present for exec visibility
     meta:
@@ -186,10 +188,14 @@ entities:
 - `description`: Can be single line or multi-paragraph markdown
 
 **Optional fields** for all entities:
-- `dependencies`: List of entity IDs this depends on
+- `requires`: List of entity IDs this depends on (what must be completed before this)
   - Capabilities can only depend on other capabilities
   - User stories can depend on capabilities or other user stories
   - Outcomes can depend on any entity (capabilities, user stories, or other outcomes)
+- `enables`: List of entity IDs that depend on this (what this unblocks)
+  - You can specify edges from either end - use `requires` OR `enables` or both
+  - The system automatically creates bidirectional edges
+- `dependencies`: ⚠️ **Deprecated** - Use `requires` instead (backward compatible)
 - `links`: List of links in various formats:
   - `design:[DD-123](https://...)` - Design doc with markdown link
   - `jira:TICKET-123` - Jira ticket reference
@@ -199,6 +205,51 @@ entities:
   - `timeframe`: Time period for timeline view (e.g., `"Q1 2025"`, `"Sprint 23"`)
   - `requestor`: Team or person requesting (for user stories)
   - `target_date`: Target completion date (for outcomes)
+
+**Specifying Dependencies**:
+
+You can specify edges from either direction:
+
+```yaml
+# Option 1: Specify what each entity requires
+entities:
+  cap1:
+    type: capability
+    name: Foundation
+    requires: []
+
+  cap2:
+    type: capability
+    name: Feature
+    requires: [cap1]  # cap2 depends on cap1
+
+# Option 2: Specify what each entity enables
+entities:
+  cap1:
+    type: capability
+    name: Foundation
+    enables: [cap2]  # cap1 unblocks cap2
+
+  cap2:
+    type: capability
+    name: Feature
+    requires: []
+
+# Option 3: Mix both (useful for complex graphs)
+entities:
+  cap1:
+    type: capability
+    name: Foundation
+    enables: [cap2, cap3]
+
+  cap2:
+    type: capability
+    name: Feature A
+    requires: [cap1]
+    enables: [story1]
+```
+
+All three examples create the same dependency graph. The system automatically resolves bidirectional edges.
 
 ## Use Cases
 

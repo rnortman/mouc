@@ -16,7 +16,9 @@ class EntitySchema(BaseModel):
     type: str | None = None  # Optional for backward compatibility
     name: str
     description: str
-    dependencies: list[str] = Field(default_factory=list)
+    requires: list[str] = Field(default_factory=list)
+    enables: list[str] = Field(default_factory=list)
+    dependencies: list[str] | None = None  # Deprecated alias for requires
     links: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
@@ -31,7 +33,27 @@ class EntitySchema(BaseModel):
             )
         return self
 
-    @field_validator("dependencies", "tags", "links", mode="before")
+    @model_validator(mode="after")
+    def handle_dependencies_alias(self) -> EntitySchema:
+        """Handle backward compatibility for 'dependencies' field."""
+        import sys
+
+        if self.dependencies is not None:
+            if self.requires:
+                raise ValueError(
+                    "Cannot specify both 'dependencies' and 'requires'. "
+                    "Use 'requires' (dependencies is deprecated)."
+                )
+            # Emit deprecation warning to stderr
+            sys.stderr.write(
+                "WARNING: 'dependencies' field is deprecated. Use 'requires' instead.\n"
+            )
+            # Copy dependencies to requires
+            self.requires = self.dependencies
+            self.dependencies = None
+        return self
+
+    @field_validator("requires", "enables", "tags", "links", mode="before")
     @classmethod
     def ensure_list(cls, v: Any) -> list[str]:
         """Ensure value is a list."""

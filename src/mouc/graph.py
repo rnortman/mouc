@@ -82,7 +82,7 @@ class GraphGenerator:
         # Add edges (unblocks direction)
         lines.append("  // Dependencies (unblocks direction)")
         for entity in self.feature_map.entities:
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")
@@ -129,7 +129,7 @@ class GraphGenerator:
         for entity in self.feature_map.entities:
             if entity.id not in dependencies:
                 continue
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 if dep_id in dependencies:
                     lines.append(f"  {dep_id} -> {entity.id};")
 
@@ -184,7 +184,7 @@ class GraphGenerator:
         for entity in self.feature_map.entities:
             if entity.id not in expanded_ids:
                 continue
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 if dep_id in expanded_ids:
                     lines.append(f"  {dep_id} -> {entity.id};")
 
@@ -201,7 +201,7 @@ class GraphGenerator:
 
             entity = self.feature_map.get_entity_by_id(current)
             if entity:
-                for dep_id in entity.dependencies:
+                for dep_id in entity.requires:
                     if dep_id not in dependencies:
                         dependencies.add(dep_id)
                         to_process.append(dep_id)
@@ -212,13 +212,11 @@ class GraphGenerator:
         """Find direct dependencies and dependents of a node."""
         connections: set[str] = set()
 
-        # Find the entity and add its dependencies
+        # Find the entity and add its dependencies and dependents
         entity = self.feature_map.get_entity_by_id(node_id)
         if entity:
-            connections.update(entity.dependencies)
-
-        # Find things that depend on this node
-        connections.update(self.feature_map.get_dependents(node_id))
+            connections.update(entity.requires)
+            connections.update(entity.enables)
 
         return connections
 
@@ -361,7 +359,7 @@ class GraphGenerator:
         # Add all edges (dependencies)
         lines.append("  // Dependencies")
         for entity in self.feature_map.entities:
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")
@@ -413,7 +411,7 @@ class GraphGenerator:
         # Add edges (unblocks direction)
         lines.append("  // Dependencies")
         for entity in self.feature_map.entities:
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 lines.append(f"  {dep_id} -> {entity.id};")
 
         lines.append("}")

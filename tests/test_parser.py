@@ -45,15 +45,22 @@ class TestFeatureMapParser:
         # Check specific entities
         cap2 = feature_map.get_entity_by_id("cap2")
         assert cap2 is not None
-        assert cap2.dependencies == ["cap1"]
+        assert cap2.requires == {"cap1"}
 
         story1 = feature_map.get_entity_by_id("story1")
         assert story1 is not None
-        assert story1.dependencies == ["cap2"]
+        assert story1.requires == {"cap2"}
 
         outcome1 = feature_map.get_entity_by_id("outcome1")
         assert outcome1 is not None
-        assert outcome1.dependencies == ["story1"]
+        assert outcome1.requires == {"story1"}
+
+        # Check bidirectional edges are resolved
+        cap1 = feature_map.get_entity_by_id("cap1")
+        assert cap1 is not None
+        assert cap1.enables == {"cap2"}
+        assert cap2.enables == {"story1"}
+        assert story1.enables == {"outcome1"}
 
     def test_parse_nonexistent_file(self, parser: FeatureMapParser) -> None:
         """Test parsing a nonexistent file."""
@@ -255,4 +262,133 @@ class TestFeatureMapParser:
         }
 
         with pytest.raises(ValidationError, match="Invalid entity type 'invalid_type'"):
+            parser._parse_data(data)
+
+    def test_enables_field(self, parser: FeatureMapParser) -> None:
+        """Test using enables field to specify edges."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                    "enables": ["story1"],
+                },
+                "story1": {
+                    "type": "user_story",
+                    "name": "Story 1",
+                    "description": "Desc",
+                },
+            }
+        }
+
+        feature_map = parser._parse_data(data)
+
+        cap1 = feature_map.get_entity_by_id("cap1")
+        story1 = feature_map.get_entity_by_id("story1")
+
+        assert cap1 is not None
+        assert story1 is not None
+
+        # Check bidirectional edges are resolved
+        assert cap1.enables == {"story1"}
+        assert story1.requires == {"cap1"}
+
+    def test_mixed_requires_and_enables(self, parser: FeatureMapParser) -> None:
+        """Test using both requires and enables fields."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                },
+                "cap2": {
+                    "type": "capability",
+                    "name": "Cap 2",
+                    "description": "Desc",
+                    "requires": ["cap1"],
+                },
+                "story1": {
+                    "type": "user_story",
+                    "name": "Story 1",
+                    "description": "Desc",
+                    "requires": ["cap2"],
+                },
+            }
+        }
+
+        feature_map = parser._parse_data(data)
+
+        cap1 = feature_map.get_entity_by_id("cap1")
+        cap2 = feature_map.get_entity_by_id("cap2")
+        story1 = feature_map.get_entity_by_id("story1")
+
+        assert cap1 is not None
+        assert cap2 is not None
+        assert story1 is not None
+
+        # Check all edges are bidirectional
+        assert cap1.enables == {"cap2"}
+        assert cap2.requires == {"cap1"}
+        assert cap2.enables == {"story1"}
+        assert story1.requires == {"cap2"}
+
+    def test_dependencies_backward_compatibility(
+        self, parser: FeatureMapParser, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Test that dependencies field still works as alias for requires."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                },
+                "story1": {
+                    "type": "user_story",
+                    "name": "Story 1",
+                    "description": "Desc",
+                    "dependencies": ["cap1"],
+                },
+            }
+        }
+
+        feature_map = parser._parse_data(data)
+        captured = capsys.readouterr()
+
+        # Check deprecation warning was emitted
+        assert "WARNING: 'dependencies' field is deprecated" in captured.err
+
+        # Check edges work correctly
+        cap1 = feature_map.get_entity_by_id("cap1")
+        story1 = feature_map.get_entity_by_id("story1")
+
+        assert cap1 is not None
+        assert story1 is not None
+        assert story1.requires == {"cap1"}
+        assert cap1.enables == {"story1"}
+
+    def test_dependencies_and_requires_conflict(self, parser: FeatureMapParser) -> None:
+        """Test that specifying both dependencies and requires raises an error."""
+        data = {
+            "entities": {
+                "cap1": {
+                    "type": "capability",
+                    "name": "Cap 1",
+                    "description": "Desc",
+                },
+                "story1": {
+                    "type": "user_story",
+                    "name": "Story 1",
+                    "description": "Desc",
+                    "dependencies": ["cap1"],
+                    "requires": ["cap1"],
+                },
+            }
+        }
+
+        with pytest.raises(
+            ValidationError, match="Cannot specify both 'dependencies' and 'requires'"
+        ):
             parser._parse_data(data)

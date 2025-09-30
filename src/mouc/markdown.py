@@ -146,7 +146,7 @@ class MarkdownGenerator:
             if not entity_timeframe:
                 continue
 
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 dep_timeframe = timeframe_map.get(dep_id)
 
                 # If dependency has no timeframe (unscheduled), it's always backward
@@ -286,11 +286,11 @@ class MarkdownGenerator:
 
         lines.append(entity.description.strip())
 
-        if entity.dependencies:
+        if entity.requires:
             lines.append("")
-            lines.append("#### Dependencies")
+            lines.append("#### Requires")
             lines.append("")
-            for dep_id in entity.dependencies:
+            for dep_id in sorted(entity.requires):
                 dep = self.feature_map.get_entity_by_id(dep_id)
                 if dep:
                     anchor = self._make_anchor(dep_id)
@@ -301,17 +301,17 @@ class MarkdownGenerator:
                 else:
                     lines.append(f"- `{dep_id}` ⚠️ (missing)")
 
-        # Find what depends on this entity
-        dependents = self.feature_map.get_dependents(entity.id)
+        # Find what depends on this entity (what this enables)
+        dependents = entity.enables
 
         if dependents:
             lines.append("")
-            lines.append("#### Required by")
+            lines.append("#### Enables")
             lines.append("")
 
             # Sort dependents by type and ID for consistent output
             sorted_dependents: list[tuple[str, str, Entity]] = []
-            for dep_id in dependents:
+            for dep_id in sorted(dependents):
                 dep = self.feature_map.get_entity_by_id(dep_id)
                 if dep:
                     sorted_dependents.append((dep.type, dep_id, dep))

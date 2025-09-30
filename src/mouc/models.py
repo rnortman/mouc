@@ -62,6 +62,18 @@ class Link:
 VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
 
 
+def _default_set() -> set[str]:
+    return set()
+
+
+def _default_list() -> list[str]:
+    return []
+
+
+def _default_dict() -> dict[str, Any]:
+    return {}
+
+
 @dataclass
 class Entity:
     """Unified entity model for all types (capabilities, user stories, outcomes)."""
@@ -70,10 +82,11 @@ class Entity:
     id: str
     name: str
     description: str
-    dependencies: list[str] = field(default_factory=lambda: [])
-    links: list[str] = field(default_factory=lambda: [])
-    tags: list[str] = field(default_factory=lambda: [])
-    meta: dict[str, Any] = field(default_factory=lambda: {})
+    requires: set[str] = field(default_factory=_default_set)
+    enables: set[str] = field(default_factory=_default_set)
+    links: list[str] = field(default_factory=_default_list)
+    tags: list[str] = field(default_factory=_default_list)
+    meta: dict[str, Any] = field(default_factory=_default_dict)
 
     @property
     def parsed_links(self) -> list[Link]:
@@ -112,10 +125,9 @@ class FeatureMap:
                 return entity
         return None
 
-    def get_dependents(self, entity_id: str) -> list[str]:
-        """Get all entities that depend on the given entity."""
-        dependents: list[str] = []
-        for entity in self.entities:
-            if entity_id in entity.dependencies:
-                dependents.append(entity.id)
-        return dependents
+    def get_dependents(self, entity_id: str) -> set[str]:
+        """Get all entities that depend on the given entity (i.e., what this enables)."""
+        entity = self.get_entity_by_id(entity_id)
+        if entity:
+            return entity.enables
+        return set()

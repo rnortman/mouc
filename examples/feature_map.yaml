@@ -12,11 +12,11 @@ entities:
       High-performance thread-safe queue using atomic operations.
       Provides bounded and unbounded variants with wait-free progress guarantees
       for producers and lock-free guarantees for consumers.
-      
+
       Performance targets:
       - 10M ops/sec single producer/consumer
       - Sub-microsecond latency at p99
-    dependencies: []
+    enables: [message_bus, realtime_monitor]  # Specify edges from this side
     links:
       - design:[DD-123](https://docs.google.com/document/d/abc123)
       - jira:INFRA-456
@@ -30,33 +30,33 @@ entities:
     description: |
       Reliable message passing system for service communication.
       Built on top of the lock-free queue for internal buffering.
-    dependencies: [lock_free_queue]
+    requires: [lock_free_queue]
     links:
       - jira:INFRA-789
     tags: [infrastructure]
     meta:
       timeframe: Sprint 1
-    
+
   data_sync:
     type: capability
     name: Data Stream Synchronization
     description: |
       Time-synchronized data fusion from multiple API endpoints.
       Handles network delays, missing data, and provides interpolation.
-    dependencies: [message_bus]
+    requires: [message_bus]
     links:
       - design:[DD-456](https://docs.google.com/document/d/def456)
     tags: [api_support, critical]
     meta:
       timeframe: Sprint 2
-    
+
   realtime_monitor:
     type: capability
     name: Real-time Performance Monitor
     description: |
       Tracks system latency and throughput metrics without impacting
       real-time performance characteristics.
-    dependencies: [lock_free_queue]
+    requires: [lock_free_queue]
     links:
       - jira:INFRA-999
       - https://github.com/company/repo/issues/123
@@ -71,43 +71,40 @@ entities:
       The analytics team needs to process streaming data at 100Hz with
       strict latency requirements. They need synchronized data inputs
       and reliable inter-process communication.
-    dependencies: [data_sync, message_bus]
+    requires: [data_sync, message_bus]
     meta:
       requestor: analytics_team
+      timeframe: Sprint 4
     links:
       - jira:STORY-100
     tags: [q2_commitment]
-    meta:
-      timeframe: Sprint 4
-    
+
   service_telemetry:
     type: user_story
     name: Service Telemetry Collection
     description: |
       SRE team needs to collect performance metrics from all services
       without impacting production latency requirements.
-    dependencies: [realtime_monitor]
+    requires: [realtime_monitor]
     meta:
       requestor: sre_team
+      timeframe: Sprint 5
     links:
       - jira:STORY-200
     tags: [monitoring]
-    meta:
-      timeframe: Sprint 5
-    
+
   api_gateway_integration:
     type: user_story
     name: API Gateway Integration
     description: |
       API team needs high-throughput communication between
       their distributed service nodes.
-    dependencies: [message_bus]
+    requires: [message_bus]
     meta:
       requestor: api_team
+      timeframe: Sprint 6
     links:
       - jira:STORY-300
-    meta:
-      timeframe: Sprint 6
 
   mobile_app_q3:
     type: outcome
@@ -115,19 +112,19 @@ entities:
     description: |
       Launch new mobile application with real-time features by Q3.
       Requires reliable real-time analytics and robust API integration.
-    dependencies: [analytics_realtime, api_gateway_integration]
+    requires: [analytics_realtime, api_gateway_integration]
     links:
       - jira:EPIC-1000
       - doc:[Product Brief](https://confluence.company.com/display/PROD/Mobile-App-Launch)
     tags: [company_priority, safety_critical]
-    
+
   production_observability:
     type: outcome
     name: Production Observability
     description: |
       Complete visibility into production system performance
       to meet 99.99% uptime SLA.
-    dependencies: [service_telemetry]
+    requires: [service_telemetry]
     links:
       - "jira:EPIC-2000"
     tags: [operational_excellence]

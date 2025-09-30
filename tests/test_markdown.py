@@ -5,6 +5,7 @@ import pytest
 
 from mouc.markdown import MarkdownGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.parser import resolve_graph_edges
 
 
 class TestMarkdownGenerator:
@@ -35,7 +36,7 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Description of capability 2.",
-            dependencies=["cap1"],
+            requires={"cap1"},
         )
 
         story1 = Entity(
@@ -43,7 +44,7 @@ class TestMarkdownGenerator:
             id="story1",
             name="Story 1",
             description="Description of story 1.",
-            dependencies=["cap2"],
+            requires={"cap2"},
             tags=["urgent"],
             meta={"requestor": "team_alpha"},
         )
@@ -53,13 +54,16 @@ class TestMarkdownGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Description of outcome 1.",
-            dependencies=["story1"],
+            requires={"story1"},
             meta={"target_date": "2024-Q3"},
         )
 
+        entities = [cap1, cap2, story1, outcome1]
+        resolve_graph_edges(entities)
+
         return FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, story1, outcome1],
+            entities=entities,
         )
 
     def test_generate_header(self, simple_feature_map: FeatureMap) -> None:
@@ -103,7 +107,7 @@ class TestMarkdownGenerator:
 
         # Check dependencies
         assert "### Cap 2" in markdown
-        assert "#### Dependencies" in markdown
+        assert "#### Requires" in markdown
         assert "- [Cap 1](#cap-1) (`cap1`)" in markdown
 
     def test_generate_user_stories_section(self, simple_feature_map: FeatureMap) -> None:
@@ -114,7 +118,7 @@ class TestMarkdownGenerator:
         assert "## User Stories" in markdown
         assert "### Story 1" in markdown
         assert "| Requestor | team_alpha |" in markdown
-        assert "#### Dependencies" in markdown
+        assert "#### Requires" in markdown
         assert "- [Cap 2](#cap-2) (`cap2`)" in markdown
 
     def test_generate_outcomes_section(self, simple_feature_map: FeatureMap) -> None:
@@ -124,7 +128,7 @@ class TestMarkdownGenerator:
 
         assert "## Outcomes" in markdown
         assert "### Outcome 1" in markdown
-        assert "#### Dependencies" in markdown
+        assert "#### Requires" in markdown
         assert "- [Story 1](#story-1) (`story1`) [User Story]" in markdown
 
     def test_dependency_tracking(self) -> None:
@@ -133,22 +137,24 @@ class TestMarkdownGenerator:
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
         cap2 = Entity(
-            type="capability", id="cap2", name="Cap 2", description="Desc", dependencies=["cap1"]
+            type="capability", id="cap2", name="Cap 2", description="Desc", requires={"cap1"}
         )
         cap3 = Entity(
-            type="capability", id="cap3", name="Cap 3", description="Desc", dependencies=["cap1"]
+            type="capability", id="cap3", name="Cap 3", description="Desc", requires={"cap1"}
         )
         story1 = Entity(
             type="user_story",
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2", "cap3"],
+            requires={"cap2", "cap3"},
         )
 
+        entities = [cap1, cap2, cap3, story1]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, cap3, story1],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -156,7 +162,7 @@ class TestMarkdownGenerator:
 
         # Check that cap1 shows it's required by cap2 and cap3
         cap1_section = markdown[markdown.find("### Cap 1") : markdown.find("### Cap 2")]
-        assert "#### Required by" in cap1_section
+        assert "#### Enables" in cap1_section
         assert "- [Cap 2](#cap-2) (`cap2`)" in cap1_section
         assert "- [Cap 3](#cap-3) (`cap3`)" in cap1_section
 
@@ -176,7 +182,12 @@ class TestMarkdownGenerator:
             description="Desc",
         )
 
-        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
+        entities = [cap1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
 
         generator = MarkdownGenerator(feature_map)
 
@@ -195,7 +206,12 @@ class TestMarkdownGenerator:
         # Only capabilities, no stories or outcomes
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
 
-        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
+        entities = [cap1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
 
         generator = MarkdownGenerator(feature_map)
         markdown = generator.generate()
@@ -220,7 +236,7 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            dependencies=["cap1"],
+            requires={"cap1"},
             meta={"timeframe": "2024-Q2"},
         )
         cap3 = Entity(
@@ -235,12 +251,14 @@ class TestMarkdownGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2"],
+            requires={"cap2"},
         )
 
+        entities = [cap1, cap2, cap3, story1]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, cap3, story1],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -275,7 +293,12 @@ class TestMarkdownGenerator:
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
         story1 = Entity(type="user_story", id="story1", name="Story 1", description="Desc")
 
-        feature_map = FeatureMap(metadata=metadata, entities=[cap1, story1])
+        entities = [cap1, story1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
 
         generator = MarkdownGenerator(feature_map)
         markdown = generator.generate()
@@ -301,7 +324,12 @@ class TestMarkdownGenerator:
             },
         )
 
-        feature_map = FeatureMap(metadata=metadata, entities=[cap1])
+        entities = [cap1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
 
         generator = MarkdownGenerator(feature_map)
         markdown = generator.generate()
@@ -323,7 +351,7 @@ class TestMarkdownGenerator:
             id="cap1",
             name="Cap 1",
             description="Desc",
-            dependencies=["cap2"],  # Depends on something in the future
+            requires={"cap2"},  # Depends on something in the future
             meta={"timeframe": "2024-Q1"},
         )
         cap2 = Entity(
@@ -338,13 +366,15 @@ class TestMarkdownGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            dependencies=["cap2"],
+            requires={"cap2"},
             meta={"timeframe": "2024-Q1"},  # Also backward dependency
         )
 
+        entities = [cap1, cap2, story1]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2, story1],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -374,13 +404,15 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            dependencies=["cap1"],  # Correct order
+            requires={"cap1"},  # Correct order
             meta={"timeframe": "2024-Q2"},
         )
 
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -398,7 +430,7 @@ class TestMarkdownGenerator:
             id="cap1",
             name="Cap 1",
             description="Desc",
-            dependencies=["cap2"],  # Backward dependency
+            requires={"cap2"},  # Backward dependency
             meta={"timeframe": "2024-Q1"},
         )
         cap2 = Entity(
@@ -409,9 +441,11 @@ class TestMarkdownGenerator:
             meta={"timeframe": "2024-Q2"},
         )
 
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -441,13 +475,15 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            dependencies=["cap1"],  # Scheduled depending on unscheduled
+            requires={"cap1"},  # Scheduled depending on unscheduled
             meta={"timeframe": "2024-Q2"},
         )
 
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -473,13 +509,15 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            dependencies=["cap1"],  # Unscheduled depending on scheduled - OK
+            requires={"cap1"},  # Unscheduled depending on scheduled - OK
             # No timeframe
         )
 
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)
@@ -504,13 +542,15 @@ class TestMarkdownGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            dependencies=["cap1"],  # Unscheduled depending on unscheduled - OK
+            requires={"cap1"},  # Unscheduled depending on unscheduled - OK
             # No timeframe
         )
 
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
         feature_map = FeatureMap(
             metadata=metadata,
-            entities=[cap1, cap2],
+            entities=entities,
         )
 
         generator = MarkdownGenerator(feature_map)

@@ -22,6 +22,32 @@ from .models import (
 from .schemas import FeatureMapSchema
 
 
+def resolve_graph_edges(entities: list[Entity]) -> None:
+    """Resolve bidirectional edges: populate requires/enables on both ends.
+
+    For each entity, if it specifies 'requires', add this entity to those entities' 'enables'.
+    If it specifies 'enables', add those entities to this entity's 'requires'.
+
+    This mutates the entities in place to ensure all edges are bidirectional.
+    """
+    # Build a map for quick lookups
+    entity_map: dict[str, Entity] = {entity.id: entity for entity in entities}
+
+    # Process each entity's explicitly specified edges
+    for entity in entities:
+        # For each entity this one requires, add this entity to their enables
+        for required_id in list(entity.requires):
+            required_entity = entity_map.get(required_id)
+            if required_entity:
+                required_entity.enables.add(entity.id)
+
+        # For each entity this one enables, add this entity to their requires
+        for enabled_id in list(entity.enables):
+            enabled_entity = entity_map.get(enabled_id)
+            if enabled_entity:
+                enabled_entity.requires.add(entity.id)
+
+
 class FeatureMapParser:
     """Parser for feature map YAML files."""
 
@@ -72,7 +98,8 @@ class FeatureMapParser:
                 id=entity_id,
                 name=entity_data.name,
                 description=entity_data.description,
-                dependencies=entity_data.dependencies,
+                requires=set(entity_data.requires),
+                enables=set(entity_data.enables),
                 links=entity_data.links,
                 tags=entity_data.tags,
                 meta=meta,
@@ -94,12 +121,16 @@ class FeatureMapParser:
                     id=entity_id,
                     name=entity_data.name,
                     description=entity_data.description,
-                    dependencies=entity_data.dependencies,
+                    requires=set(entity_data.requires),
+                    enables=set(entity_data.enables),
                     links=entity_data.links,
                     tags=entity_data.tags,
                     meta=meta,
                 )
                 entities.append(entity)
+
+        # Resolve bidirectional edges
+        resolve_graph_edges(entities)
 
         # Create feature map
         feature_map = FeatureMap(
@@ -116,12 +147,17 @@ class FeatureMapParser:
         """Validate the entire feature map."""
         all_ids = feature_map.get_all_ids()
 
-        # Validate all entity dependencies
+        # Validate all entity dependencies (requires and enables should both reference valid IDs)
         for entity in feature_map.entities:
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 if dep_id not in all_ids:
                     raise MissingReferenceError(
-                        f"{entity.type.title()} {entity.id} depends on unknown entity: {dep_id}"
+                        f"{entity.type.title()} {entity.id} requires unknown entity: {dep_id}"
+                    )
+            for enabled_id in entity.enables:
+                if enabled_id not in all_ids:
+                    raise MissingReferenceError(
+                        f"{entity.type.title()} {entity.id} enables unknown entity: {enabled_id}"
                     )
 
         # Check for circular dependencies
@@ -155,7 +191,7 @@ class FeatureMapParser:
 
         entity = feature_map.get_entity_by_id(entity_id)
         if entity:
-            for dep_id in entity.dependencies:
+            for dep_id in entity.requires:
                 if self._has_circular_dependency(feature_map, dep_id, visited, path):
                     return True
 
