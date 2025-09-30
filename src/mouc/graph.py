@@ -16,6 +16,7 @@ class GraphView(Enum):
     CRITICAL_PATH = "critical-path"
     FILTERED = "filtered"
     TIMELINE = "timeline"
+    TIMEFRAME_COLORED = "timeframe-colored"
 
 
 class GraphGenerator:
@@ -44,6 +45,8 @@ class GraphGenerator:
             return self._generate_filtered(tags)
         if view == GraphView.TIMELINE:
             return self._generate_timeline()
+        if view == GraphView.TIMEFRAME_COLORED:
+            return self._generate_timeframe_colored()
         raise ValueError(f"Unknown view: {view}")
 
     def _generate_all(self) -> str:
@@ -223,6 +226,67 @@ class GraphGenerator:
         """Escape special characters in DOT labels."""
         return label.replace('"', '\\"').replace("\n", "\\n")
 
+    def _hsl_to_hex(self, h: float, s: float, lightness: float) -> str:
+        """Convert HSL color to hex format for Graphviz.
+
+        Args:
+            h: Hue in degrees (0-360)
+            s: Saturation as percentage (0-100)
+            lightness: Lightness as percentage (0-100)
+
+        Returns:
+            Hex color string like "#RRGGBB"
+        """
+        h = h / 360
+        s = s / 100
+        lightness = lightness / 100
+
+        if s == 0:
+            r = g = b = lightness
+        else:
+
+            def hue_to_rgb(p: float, q: float, t: float) -> float:
+                if t < 0:
+                    t += 1
+                if t > 1:
+                    t -= 1
+                if t < 1 / 6:
+                    return p + (q - p) * 6 * t
+                if t < 1 / 2:
+                    return q
+                if t < 2 / 3:
+                    return p + (q - p) * (2 / 3 - t) * 6
+                return p
+
+            q = lightness * (1 + s) if lightness < 0.5 else lightness + s - lightness * s
+            p = 2 * lightness - q
+            r = hue_to_rgb(p, q, h + 1 / 3)
+            g = hue_to_rgb(p, q, h)
+            b = hue_to_rgb(p, q, h - 1 / 3)
+
+        return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+
+    def _get_timeframe_color(self, timeframe_index: int, total_timeframes: int) -> str:
+        """Generate a color for a timeframe based on its position in the sequence."""
+        if total_timeframes == 0:
+            return "lightgray"
+
+        start_hue = 120
+        end_hue = 220
+
+        start_lightness = 88
+        end_lightness = 50
+
+        if total_timeframes == 1:
+            hue = (start_hue + end_hue) / 2
+            lightness = (start_lightness + end_lightness) / 2
+        else:
+            progress = timeframe_index / (total_timeframes - 1)
+            hue = start_hue + (end_hue - start_hue) * progress
+            lightness = start_lightness + (end_lightness - start_lightness) * progress
+
+        return self._hsl_to_hex(hue, 60, lightness)
+
     def _generate_timeline(self) -> str:
         """Generate a timeline graph grouped by timeframe."""
         # Group entities by timeframe
@@ -295,6 +359,58 @@ class GraphGenerator:
             lines.append("")
 
         # Add all edges (dependencies)
+        lines.append("  // Dependencies")
+        for entity in self.feature_map.entities:
+            for dep_id in entity.dependencies:
+                lines.append(f"  {dep_id} -> {entity.id};")
+
+        lines.append("}")
+        return "\n".join(lines)
+
+    def _generate_timeframe_colored(self) -> str:
+        """Generate a graph where node colors represent timeframes."""
+        # Group entities by timeframe
+        timeframe_groups: dict[str, list[Entity]] = {}
+        unscheduled: list[Entity] = []
+
+        for entity in self.feature_map.entities:
+            timeframe = entity.meta.get("timeframe")
+            if timeframe:
+                if timeframe not in timeframe_groups:
+                    timeframe_groups[timeframe] = []
+                timeframe_groups[timeframe].append(entity)
+            else:
+                unscheduled.append(entity)
+
+        # Sort timeframes for consistent ordering
+        sorted_timeframes = sorted(timeframe_groups.keys())
+        total_timeframes = len(sorted_timeframes)
+
+        # Build a map of entity ID to color
+        entity_colors: dict[str, str] = {}
+        for idx, timeframe in enumerate(sorted_timeframes):
+            color = self._get_timeframe_color(idx, total_timeframes)
+            for entity in timeframe_groups[timeframe]:
+                entity_colors[entity.id] = color
+
+        # Unscheduled entities get gray
+        for entity in unscheduled:
+            entity_colors[entity.id] = "lightgray"
+
+        lines = ["digraph TimeframeColored {"]
+        lines.append("  rankdir=LR;")
+        lines.append("  node [shape=oval];")
+        lines.append("")
+
+        # Add all nodes with colors based on timeframe
+        for entity in self.feature_map.entities:
+            color = entity_colors.get(entity.id, "white")
+            label = self._escape_label(entity.name)
+            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor="{color}"];')
+
+        lines.append("")
+
+        # Add edges (unblocks direction)
         lines.append("  // Dependencies")
         for entity in self.feature_map.entities:
             for dep_id in entity.dependencies:

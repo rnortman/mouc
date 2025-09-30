@@ -105,6 +105,9 @@ mouc graph --view filtered --tags infrastructure monitoring
 
 # Timeline view grouped by timeframe
 mouc graph --view timeline
+
+# Timeframe-colored view (colors indicate time progression)
+mouc graph --view timeframe-colored
 ```
 
 Render graphs with Graphviz:
@@ -228,7 +231,11 @@ Group work by time periods (quarters, sprints, etc.):
 # meta:
 #   timeframe: "Q1 2025"
 
+# Clustered by timeframe
 mouc graph --view timeline | dot -Tpng -o timeline.png
+
+# Colored by timeframe
+mouc graph --view timeframe-colored | dot -Tpng -o timeframe_colored.png
 ```
 
 ## Best Practices

@@ -295,3 +295,78 @@ class TestGraphGenerator:
         assert "story1" in dot
         assert "story2" in dot
         assert "outcome1" in dot
+
+    def test_generate_timeframe_colored_view(self, timeline_feature_map: FeatureMap) -> None:
+        """Test generating timeframe-colored view with sequential colors."""
+        generator = GraphGenerator(timeline_feature_map)
+        dot = generator.generate(GraphView.TIMEFRAME_COLORED)
+
+        assert "digraph TimeframeColored" in dot
+
+        # All entities should be present
+        assert "cap1" in dot
+        assert "cap2" in dot
+        assert "cap3" in dot
+        assert "story1" in dot
+        assert "story2" in dot
+        assert "outcome1" in dot
+
+        # Check edges are preserved
+        assert "cap1 -> cap2" in dot
+        assert "cap2 -> cap3" in dot
+        assert "cap2 -> story1" in dot
+        assert "cap3 -> story2" in dot
+        assert "story1 -> outcome1" in dot
+        assert "story2 -> outcome1" in dot
+
+        # Nodes should have color styling with hex colors
+        assert "fillcolor" in dot
+        assert "#" in dot  # Hex color format
+        assert "lightgray" in dot  # Unscheduled nodes
+
+    def test_generate_timeframe_colored_view_no_timeframes(
+        self, simple_feature_map: FeatureMap
+    ) -> None:
+        """Test timeframe-colored view when no entities have timeframe metadata."""
+        generator = GraphGenerator(simple_feature_map)
+        dot = generator.generate(GraphView.TIMEFRAME_COLORED)
+
+        assert "digraph TimeframeColored" in dot
+
+        # All entities should have gray color (unscheduled)
+        assert "lightgray" in dot
+
+        # All entities should be present
+        assert "cap1" in dot
+        assert "cap2" in dot
+        assert "cap3" in dot
+        assert "story1" in dot
+        assert "story2" in dot
+        assert "outcome1" in dot
+
+    def test_get_timeframe_color(self, simple_feature_map: FeatureMap) -> None:
+        """Test timeframe color generation."""
+        generator = GraphGenerator(simple_feature_map)
+
+        # Single timeframe should start at red (0°)
+        color = generator._get_timeframe_color(0, 1)
+        assert color.startswith("#")
+        assert len(color) == 7  # #RRGGBB
+
+        # Multiple timeframes should get distributed colors
+        color1 = generator._get_timeframe_color(0, 3)  # 0° (red)
+        color2 = generator._get_timeframe_color(1, 3)  # 120° (green)
+        color3 = generator._get_timeframe_color(2, 3)  # 240° (blue)
+
+        # Colors should be different
+        assert color1 != color2
+        assert color2 != color3
+        assert color1 != color3
+
+        # Colors should be hex format
+        assert color1.startswith("#")
+        assert color2.startswith("#")
+        assert color3.startswith("#")
+        assert len(color1) == 7
+        assert len(color2) == 7
+        assert len(color3) == 7

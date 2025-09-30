@@ -21,6 +21,8 @@ entities:
       - design:[DD-123](https://docs.google.com/document/d/abc123)
       - jira:INFRA-456
     tags: [critical, performance]
+    meta:
+      timeframe: Sprint 0
     
   message_bus:
     type: capability
@@ -59,6 +61,8 @@ entities:
       - jira:INFRA-999
       - https://github.com/company/repo/issues/123
     tags: [monitoring, tech_debt]
+    meta:
+      timeframe: Sprint 3
 
   analytics_realtime:
     type: user_story
@@ -73,6 +77,8 @@ entities:
     links:
       - jira:STORY-100
     tags: [q2_commitment]
+    meta:
+      timeframe: Sprint 4
     
   service_telemetry:
     type: user_story
@@ -86,6 +92,8 @@ entities:
     links:
       - jira:STORY-200
     tags: [monitoring]
+    meta:
+      timeframe: Sprint 5
     
   api_gateway_integration:
     type: user_story
@@ -98,6 +106,8 @@ entities:
       requestor: api_team
     links:
       - jira:STORY-300
+    meta:
+      timeframe: Sprint 6
 
   mobile_app_q3:
     type: outcome
@@ -121,3 +131,5 @@ entities:
     links:
       - "jira:EPIC-2000"
     tags: [operational_excellence]
+    meta:
+      timeframe: Sprint 7
