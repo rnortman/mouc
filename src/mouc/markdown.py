@@ -15,6 +15,10 @@ class MarkdownGenerator:
     def __init__(self, feature_map: FeatureMap):
         """Initialize with a feature map."""
         self.feature_map = feature_map
+        # Create styling context
+        from . import styling
+
+        self.styling_context = styling.create_styling_context(feature_map)
 
     def generate(self) -> str:
         """Generate complete markdown documentation."""
@@ -61,19 +65,22 @@ class MarkdownGenerator:
             lines.append("- [Capabilities](#capabilities)")
             for entity in sorted(capabilities, key=lambda e: e.id):
                 anchor = self._make_anchor(entity.id)
-                lines.append(f"  - [{entity.name}](#{anchor})")
+                type_label = self._format_type_label(entity)
+                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
 
         if user_stories:
             lines.append("- [User Stories](#user-stories)")
             for entity in sorted(user_stories, key=lambda e: e.id):
                 anchor = self._make_anchor(entity.id)
-                lines.append(f"  - [{entity.name}](#{anchor})")
+                type_label = self._format_type_label(entity)
+                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
 
         if outcomes:
             lines.append("- [Outcomes](#outcomes)")
             for entity in sorted(outcomes, key=lambda e: e.id):
                 anchor = self._make_anchor(entity.id)
-                lines.append(f"  - [{entity.name}](#{anchor})")
+                type_label = self._format_type_label(entity)
+                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
 
         return "\n".join(lines)
 
@@ -109,7 +116,7 @@ class MarkdownGenerator:
             entities = sorted(timeframe_groups[timeframe], key=lambda e: (e.type, e.id))
             for entity in entities:
                 anchor = self._make_anchor(entity.id)
-                type_label = f" [{self._pretty_type(entity.type)}]"
+                type_label = self._format_type_label(entity)
                 lines.append(f"- [{entity.name}](#{anchor}){type_label}")
 
             lines.append("")
@@ -122,7 +129,7 @@ class MarkdownGenerator:
             entities = sorted(unscheduled, key=lambda e: (e.type, e.id))
             for entity in entities:
                 anchor = self._make_anchor(entity.id)
-                type_label = f" [{self._pretty_type(entity.type)}]"
+                type_label = self._format_type_label(entity)
                 lines.append(f"- [{entity.name}](#{anchor}){type_label}")
 
             lines.append("")
@@ -349,3 +356,17 @@ class MarkdownGenerator:
             anchor = anchor.replace("--", "-")
         # Remove leading/trailing hyphens
         return anchor.strip("-")
+
+    def _format_type_label(self, entity: Entity) -> str:
+        """Format type label with styling applied."""
+        from . import styling
+
+        # Apply user styling
+        user_label = styling.apply_label_styles(entity, self.styling_context)  # type: ignore
+
+        # If user styling returned a label, use it
+        if user_label:
+            return f" {user_label}"
+
+        # Otherwise use default type label
+        return f" [{self._pretty_type(entity.type)}]"

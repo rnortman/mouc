@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from . import styling
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -25,6 +27,10 @@ class GraphGenerator:
     def __init__(self, feature_map: FeatureMap):
         """Initialize with a feature map."""
         self.feature_map = feature_map
+        # Create styling context
+        from . import styling
+
+        self.styling_context = styling.create_styling_context(feature_map)
 
     def generate(
         self,
@@ -56,34 +62,18 @@ class GraphGenerator:
         lines.append("  node [shape=oval];")
         lines.append("")
 
-        # Group entities by type for consistent rendering
-        capabilities = self.feature_map.get_entities_by_type("capability")
-        user_stories = self.feature_map.get_entities_by_type("user_story")
-        outcomes = self.feature_map.get_entities_by_type("outcome")
-
-        # Add capabilities
-        for entity in capabilities:
-            label = self._escape_label(entity.name)
-            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightblue];')
-        lines.append("")
-
-        # Add user stories
-        for entity in user_stories:
-            label = self._escape_label(entity.name)
-            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightgreen];')
-        lines.append("")
-
-        # Add outcomes
-        for entity in outcomes:
-            label = self._escape_label(entity.name)
-            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor=lightyellow];')
+        # Add all entities
+        for entity in self.feature_map.entities:
+            node_def = self._format_node(entity)
+            lines.append(f"  {node_def}")
         lines.append("")
 
         # Add edges (unblocks direction)
         lines.append("  // Dependencies (unblocks direction)")
         for entity in self.feature_map.entities:
             for dep_id in entity.requires:
-                lines.append(f"  {dep_id} -> {entity.id};")
+                edge_def = self._format_edge(dep_id, entity.id, "requires")
+                lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -99,29 +89,14 @@ class GraphGenerator:
         lines.append("  node [shape=oval];")
         lines.append("")
 
-        # Highlight the target
-        lines.append(f"  {target} [style=filled, fillcolor=red, fontcolor=white];")
-        lines.append("")
-
         # Add all nodes in the critical path
         for node_id in dependencies:
-            if node_id == target:
-                continue
-
             entity = self.feature_map.get_entity_by_id(node_id)
             if not entity:
                 continue
 
-            # Determine node color by type
-            color_map = {
-                "capability": "lightblue",
-                "user_story": "lightgreen",
-                "outcome": "lightyellow",
-            }
-            color = color_map.get(entity.type, "white")
-
-            label = self._escape_label(entity.name)
-            lines.append(f'  {node_id} [label="{label}", style=filled, fillcolor={color}];')
+            node_def = self._format_node(entity)
+            lines.append(f"  {node_def}")
 
         lines.append("")
 
@@ -131,7 +106,8 @@ class GraphGenerator:
                 continue
             for dep_id in entity.requires:
                 if dep_id in dependencies:
-                    lines.append(f"  {dep_id} -> {entity.id};")
+                    edge_def = self._format_edge(dep_id, entity.id, "requires")
+                    lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -161,22 +137,8 @@ class GraphGenerator:
             if not entity:
                 continue
 
-            # Determine node color by type
-            color_map = {
-                "capability": "lightblue",
-                "user_story": "lightgreen",
-                "outcome": "lightyellow",
-            }
-            color = color_map.get(entity.type, "white")
-
-            label = self._escape_label(entity.name)
-            # Highlight nodes that match the filter
-            if node_id in matching_ids:
-                lines.append(
-                    f'  {node_id} [label="{label}", style=filled, fillcolor={color}, penwidth=3];'
-                )
-            else:
-                lines.append(f'  {node_id} [label="{label}", style=filled, fillcolor={color}];')
+            node_def = self._format_node(entity)
+            lines.append(f"  {node_def}")
 
         lines.append("")
 
@@ -186,7 +148,8 @@ class GraphGenerator:
                 continue
             for dep_id in entity.requires:
                 if dep_id in expanded_ids:
-                    lines.append(f"  {dep_id} -> {entity.id};")
+                    edge_def = self._format_edge(dep_id, entity.id, "requires")
+                    lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -224,66 +187,77 @@ class GraphGenerator:
         """Escape special characters in DOT labels."""
         return label.replace('"', '\\"').replace("\n", "\\n")
 
-    def _hsl_to_hex(self, h: float, s: float, lightness: float) -> str:
-        """Convert HSL color to hex format for Graphviz.
+    def _format_node(self, entity: Entity, override_style: dict[str, Any] | None = None) -> str:
+        """Format a node with styling applied."""
+        from . import styling
 
-        Args:
-            h: Hue in degrees (0-360)
-            s: Saturation as percentage (0-100)
-            lightness: Lightness as percentage (0-100)
+        label = self._escape_label(entity.name)
 
-        Returns:
-            Hex color string like "#RRGGBB"
-        """
-        h = h / 360
-        s = s / 100
-        lightness = lightness / 100
+        # Get default style based on entity type
+        default_style = self._get_default_node_style(entity)
 
-        if s == 0:
-            r = g = b = lightness
-        else:
+        # Apply override style if provided (for view-specific styling)
+        if override_style:
+            default_style.update(override_style)
 
-            def hue_to_rgb(p: float, q: float, t: float) -> float:
-                if t < 0:
-                    t += 1
-                if t > 1:
-                    t -= 1
-                if t < 1 / 6:
-                    return p + (q - p) * 6 * t
-                if t < 1 / 2:
-                    return q
-                if t < 2 / 3:
-                    return p + (q - p) * (2 / 3 - t) * 6
-                return p
+        # Apply user styling
+        user_style = styling.apply_node_styles(entity, self.styling_context)
 
-            q = lightness * (1 + s) if lightness < 0.5 else lightness + s - lightness * s
-            p = 2 * lightness - q
-            r = hue_to_rgb(p, q, h + 1 / 3)
-            g = hue_to_rgb(p, q, h)
-            b = hue_to_rgb(p, q, h - 1 / 3)
+        # Merge styles (user overrides default)
+        final_style = {**default_style, **user_style}
 
-        return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
+        # Build attribute string
+        attrs = [f'label="{label}"']
+        if "shape" in final_style:
+            attrs.append(f"shape={final_style['shape']}")
+        if "fill_color" in final_style:
+            attrs.append("style=filled")
+            attrs.append(f'fillcolor="{final_style["fill_color"]}"')
+        if "text_color" in final_style:
+            attrs.append(f'fontcolor="{final_style["text_color"]}"')
+        if "border_color" in final_style:
+            attrs.append(f'color="{final_style["border_color"]}"')
+        if "border_width" in final_style:
+            attrs.append(f"penwidth={final_style['border_width']}")
+        if "fontsize" in final_style:
+            attrs.append(f"fontsize={final_style['fontsize']}")
+        if "fontname" in final_style:
+            attrs.append(f'fontname="{final_style["fontname"]}"')
 
-    def _get_timeframe_color(self, timeframe_index: int, total_timeframes: int) -> str:
-        """Generate a color for a timeframe based on its position in the sequence."""
-        if total_timeframes == 0:
-            return "lightgray"
+        return f"{entity.id} [{', '.join(attrs)}];"
 
-        start_hue = 120
-        end_hue = 230
+    def _format_edge(self, from_id: str, to_id: str, edge_type: str) -> str:
+        """Format an edge with styling applied."""
+        from . import styling
 
-        start_lightness = 95
-        end_lightness = 70
+        # Apply user styling
+        user_style = styling.apply_edge_styles(from_id, to_id, edge_type, self.styling_context)
 
-        if total_timeframes == 1:
-            hue = (start_hue + end_hue) / 2
-            lightness = (start_lightness + end_lightness) / 2
-        else:
-            progress = timeframe_index / (total_timeframes - 1)
-            hue = start_hue + (end_hue - start_hue) * progress
-            lightness = start_lightness + (end_lightness - start_lightness) * progress
+        # Build attribute string
+        attrs: list[str] = []
+        if "color" in user_style:
+            attrs.append(f'color="{user_style["color"]}"')
+        if "style" in user_style:
+            attrs.append(f"style={user_style['style']}")
+        if "penwidth" in user_style:
+            attrs.append(f"penwidth={user_style['penwidth']}")
+        if "arrowhead" in user_style:
+            attrs.append(f"arrowhead={user_style['arrowhead']}")
 
-        return self._hsl_to_hex(hue, 60, lightness)
+        if attrs:
+            return f"{from_id} -> {to_id} [{', '.join(attrs)}];"
+        return f"{from_id} -> {to_id};"
+
+    def _get_default_node_style(self, entity: Entity) -> dict[str, Any]:
+        """Get default style for an entity based on type."""
+        # Default colors by type
+        color_map = {
+            "capability": "lightblue",
+            "user_story": "lightgreen",
+            "outcome": "lightyellow",
+        }
+
+        return {"shape": "oval", "fill_color": color_map.get(entity.type, "white")}
 
     def _generate_timeline(self) -> str:
         """Generate a timeline graph grouped by timeframe."""
@@ -319,16 +293,8 @@ class GraphGenerator:
 
             # Add entities in this timeframe
             for entity in timeframe_groups[timeframe]:
-                # Determine node color by type
-                color_map = {
-                    "capability": "lightblue",
-                    "user_story": "lightgreen",
-                    "outcome": "lightyellow",
-                }
-                color = color_map.get(entity.type, "white")
-
-                label = self._escape_label(entity.name)
-                lines.append(f'    {entity.id} [label="{label}", style=filled, fillcolor={color}];')
+                node_def = self._format_node(entity)
+                lines.append(f"    {node_def}")
 
             lines.append("  }")
             lines.append("")
@@ -342,16 +308,8 @@ class GraphGenerator:
             lines.append("")
 
             for entity in unscheduled:
-                # Determine node color by type
-                color_map = {
-                    "capability": "lightblue",
-                    "user_story": "lightgreen",
-                    "outcome": "lightyellow",
-                }
-                color = color_map.get(entity.type, "white")
-
-                label = self._escape_label(entity.name)
-                lines.append(f'    {entity.id} [label="{label}", style=filled, fillcolor={color}];')
+                node_def = self._format_node(entity)
+                lines.append(f"    {node_def}")
 
             lines.append("  }")
             lines.append("")
@@ -360,7 +318,8 @@ class GraphGenerator:
         lines.append("  // Dependencies")
         for entity in self.feature_map.entities:
             for dep_id in entity.requires:
-                lines.append(f"  {dep_id} -> {entity.id};")
+                edge_def = self._format_edge(dep_id, entity.id, "requires")
+                lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -382,12 +341,13 @@ class GraphGenerator:
 
         # Sort timeframes for consistent ordering
         sorted_timeframes = sorted(timeframe_groups.keys())
-        total_timeframes = len(sorted_timeframes)
 
-        # Build a map of entity ID to color
+        # Build a map of entity ID to color using sequential_hue
         entity_colors: dict[str, str] = {}
-        for idx, timeframe in enumerate(sorted_timeframes):
-            color = self._get_timeframe_color(idx, total_timeframes)
+        for timeframe in sorted_timeframes:
+            color = styling.sequential_hue(
+                timeframe, sorted_timeframes, hue_range=(120, 230), lightness_range=(95, 70)
+            )
             for entity in timeframe_groups[timeframe]:
                 entity_colors[entity.id] = color
 
@@ -403,8 +363,8 @@ class GraphGenerator:
         # Add all nodes with colors based on timeframe
         for entity in self.feature_map.entities:
             color = entity_colors.get(entity.id, "white")
-            label = self._escape_label(entity.name)
-            lines.append(f'  {entity.id} [label="{label}", style=filled, fillcolor="{color}"];')
+            node_def = self._format_node(entity, override_style={"fill_color": color})
+            lines.append(f"  {node_def}")
 
         lines.append("")
 
@@ -412,7 +372,8 @@ class GraphGenerator:
         lines.append("  // Dependencies")
         for entity in self.feature_map.entities:
             for dep_id in entity.requires:
-                lines.append(f"  {dep_id} -> {entity.id};")
+                edge_def = self._format_edge(dep_id, entity.id, "requires")
+                lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)

@@ -9,10 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Bidirectional edge specification: can now use `requires` and `enables` fields to specify dependencies from either direction
+- **Styling system**: Flexible styling system for customizing graph and markdown output
+  - User-defined styling functions via Python decorators (`@style_node`, `@style_edge`, `@style_label`)
+  - Protocol-based API compatible with mypy/pyright
+  - Priority-based composition of multiple style functions
+  - Graph analysis context with transitive dependency queries
+  - Utility functions for sequential color generation and contrast calculation
+  - CLI options `--style-module` and `--style-file` for loading styling functions
 
 ### Changed
 - Renamed `dependencies` field to `requires` (old field still works with deprecation warning)
 - Markdown section headers changed from "Dependencies" to "Requires" and "Required by" to "Enables"
+- Graph output now includes default styling that can be overridden by user styling functions
 
 ### Deprecated
 - `dependencies` field is deprecated in favor of `requires` (backward compatible with warning to stderr)

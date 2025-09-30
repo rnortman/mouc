@@ -251,6 +251,68 @@ entities:
 
 All three examples create the same dependency graph. The system automatically resolves bidirectional edges.
 
+## Styling System
+
+Mouc provides a flexible styling system that lets you customize how graphs and markdown output are rendered. You can write Python functions to compute styles based on entity data and graph structure.
+
+### Basic Usage
+
+```bash
+# Import from Python module (must be on PYTHONPATH)
+mouc graph --style-module myproject.docs.styling
+
+# Import from file path
+mouc graph --style-file ./my_styles.py
+
+# Same for markdown
+mouc doc --style-module myproject.docs.styling
+mouc doc --style-file ./my_styles.py
+```
+
+### Quick Example
+
+```python
+# my_styles.py
+from mouc.styling import *
+
+@style_node
+def timeframe_colors(entity, context):
+    """Color entities by their timeframe."""
+    if 'timeframe' in entity.meta:
+        timeframes = context.collect_metadata_values('timeframe')
+        return {
+            'fill_color': sequential_hue(
+                entity.meta['timeframe'],
+                timeframes,
+                hue_range=(120, 230)
+            )
+        }
+    return {}
+
+@style_node(priority=20)
+def highlight_blockers(entity, context):
+    """Highlight entities that block company priorities."""
+    priority_outcomes = [
+        e for e in context.get_entities_by_type('outcome')
+        if 'company_priority' in e.tags
+    ]
+
+    enabled = context.transitively_enables(entity.id)
+    for outcome in priority_outcomes:
+        if outcome.id in enabled:
+            return {'border_color': '#ff0000', 'border_width': 3}
+    return {}
+
+@style_label
+def custom_labels(entity, context):
+    """Show custom labels in markdown output."""
+    if entity.type == 'capability' and 'critical' in entity.tags:
+        return '[🔥 Critical Capability]'
+    return ''  # Use default label
+```
+
+See also the [full styling documentation](docs/styling.md).
+
 ## Use Cases
 
 ### Find Critical Path
