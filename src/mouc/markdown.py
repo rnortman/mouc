@@ -142,15 +142,21 @@ class MarkdownGenerator:
         for entity in self.feature_map.entities:
             entity_timeframe = timeframe_map.get(entity.id)
 
-            # Skip if entity has no timeframe
+            # Skip if entity has no timeframe (unscheduled entities can depend on anything)
             if not entity_timeframe:
                 continue
 
             for dep_id in entity.dependencies:
                 dep_timeframe = timeframe_map.get(dep_id)
 
-                # Skip if dependency has no timeframe
+                # If dependency has no timeframe (unscheduled), it's always backward
                 if not dep_timeframe:
+                    dep_entity = self.feature_map.get_entity_by_id(dep_id)
+                    dep_name = dep_entity.name if dep_entity else dep_id
+                    msg = f"`{entity.name}` ({entity_timeframe}) depends on `{dep_name}` (Unscheduled)"
+                    warnings.append(msg)
+                    # Also print to console
+                    sys.stderr.write(f"WARNING: Backward dependency - {msg}\n")
                     continue
 
                 # Check if dependency comes after entity in lexical order

@@ -424,3 +424,97 @@ class TestMarkdownGenerator:
         assert "2024-Q1" in captured.err
         assert "Cap 2" in captured.err
         assert "2024-Q2" in captured.err
+
+    def test_scheduled_depending_on_unscheduled_is_backward(self) -> None:
+        """Test that scheduled entities depending on unscheduled entities are flagged."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            # No timeframe - unscheduled
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            dependencies=["cap1"],  # Scheduled depending on unscheduled
+            meta={"timeframe": "2024-Q2"},
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # Check warning section exists
+        assert "## ⚠️ Timeline Warnings" in markdown
+        assert "`Cap 2` (2024-Q2) depends on `Cap 1` (Unscheduled)" in markdown
+
+    def test_unscheduled_depending_on_scheduled_is_ok(self) -> None:
+        """Test that unscheduled entities can depend on scheduled entities without warning."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            dependencies=["cap1"],  # Unscheduled depending on scheduled - OK
+            # No timeframe
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # No warning section should be generated
+        assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_unscheduled_depending_on_unscheduled_is_ok(self) -> None:
+        """Test that unscheduled entities depending on other unscheduled entities is OK."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            # No timeframe
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            dependencies=["cap1"],  # Unscheduled depending on unscheduled - OK
+            # No timeframe
+        )
+
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=[cap1, cap2],
+        )
+
+        generator = MarkdownGenerator(feature_map)
+        markdown = generator.generate()
+
+        # No warning section should be generated
+        assert "## ⚠️ Timeline Warnings" not in markdown

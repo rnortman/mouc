@@ -4,9 +4,9 @@ A lightweight dependency tracking system for software development that maps rela
 
 ## Overview
 
-Mouc helps engineering teams, especially infrastructure and middleware teams, track and visualize dependencies between:
+Mouc helps engineering teams track and visualize dependencies between:
 
-- **Capabilities** - Technical work your team builds (infrastructure, middleware, platform features)
+- **Capabilities** - Technical work your team builds
 - **User Stories** - What other teams need from you
 - **Outcomes** - Business/organizational goals that depend on the work
 
