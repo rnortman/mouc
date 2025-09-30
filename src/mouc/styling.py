@@ -183,7 +183,7 @@ class EdgeStyle(TypedDict, total=False):
 
 NodeStylerFunc = Callable[[Entity, StylingContext], NodeStyle]
 EdgeStylerFunc = Callable[[str, str, str, StylingContext], EdgeStyle]
-LabelStylerFunc = Callable[[Entity, StylingContext], str]
+LabelStylerFunc = Callable[[Entity, StylingContext], str | None]
 
 
 # ============================================================================
@@ -297,12 +297,12 @@ def style_label(
     The function receives an entity and context, and returns a string that
     replaces the default type label (e.g., '[Capability]') in markdown output.
 
-    Return empty string to hide the label entirely.
+    Return empty string to hide the label entirely or None to use default (or apply next styler)
 
-    Multiple functions are applied in priority order. The last non-empty
+    Multiple functions are applied in priority order. The last non-None
     result is used.
 
-    Signature: (entity: Entity, context: StylingContext) -> str
+    Signature: (entity: Entity, context: StylingContext) -> str | None
 
     Example:
         @style_label
@@ -507,19 +507,19 @@ def apply_edge_styles(
     return final_style
 
 
-def apply_label_styles(entity: Entity, context: StylingContext) -> str:
+def apply_label_styles(entity: Entity, context: StylingContext) -> str | None:
     """Apply all registered label styling functions in priority order.
 
-    Returns the last non-empty result, or empty string if all return empty.
+    Returns the last non-None result, or None if no stylers or all return None.
     """
     # Sort by priority (lower numbers first)
     stylers = sorted(_label_stylers, key=lambda x: x[0])
 
-    # Apply in order, keeping track of last non-empty result
-    label = ""
+    # Apply in order, keeping track of last non-None result
+    label = None
     for _priority, styler in stylers:
         result = styler(entity, context)
-        if result:
+        if result is not None:
             label = result
 
     return label

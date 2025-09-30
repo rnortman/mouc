@@ -182,10 +182,15 @@ def custom_labels(entity, context):
         return ''  # Empty string hides the label
 
     # Use default for others
-    return ''  # Empty means use default
+    return None  # None means use default label
 ```
 
-Multiple label functions are applied in priority order. The last non-empty result is used.
+Multiple label functions are applied in priority order. The last non-`None` result is used.
+
+**Return values:**
+- Return a string to use as the label (e.g., `"[Custom]"`)
+- Return `""` (empty string) to hide the label entirely
+- Return `None` to use the default label (or let the next styler decide)
 
 ## API Reference
 
@@ -382,7 +387,7 @@ def show_milestone_labels(entity, context):
         names = [m.name for m in milestones]
         return ' → ' + ', '.join(names)
 
-    return ''  # Use default label
+    return None  # Use default label
 ```
 
 ### Example 6: Complex Multi-Function Styling
@@ -442,7 +447,7 @@ def label_styling(entity, context):
     """Show custom labels for critical entities."""
     if 'critical' in entity.tags:
         return '[🔥 CRITICAL]'
-    return ''
+    return None  # Use default label for non-critical entities
 ```
 
 ## Best Practices

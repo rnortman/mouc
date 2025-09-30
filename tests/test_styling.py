@@ -94,6 +94,72 @@ def test_style_label_decorator() -> None:
     assert result == "[Custom Label]"
 
 
+def test_style_label_return_none_uses_default() -> None:
+    """Test that returning None from a label styler allows default label."""
+    styling.clear_registrations()
+
+    @styling.style_label
+    def my_label_styler(entity: styling.Entity, context: styling.StylingContext) -> str | None:
+        # Return None to use default label
+        return None
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - should return None to indicate default should be used
+    result = styling.apply_label_styles(entities[0], ctx)
+    assert result is None
+
+
+def test_style_label_return_empty_string_hides_label() -> None:
+    """Test that returning empty string from a label styler hides the label."""
+    styling.clear_registrations()
+
+    @styling.style_label
+    def my_label_styler(entity: styling.Entity, context: styling.StylingContext) -> str | None:
+        # Return empty string to hide label
+        return ""
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - should return empty string to hide label
+    result = styling.apply_label_styles(entities[0], ctx)
+    assert result == ""
+
+
+def test_style_label_priority_with_none() -> None:
+    """Test that None values don't override later stylers."""
+    styling.clear_registrations()
+
+    @styling.style_label(priority=10)
+    def first_styler(entity: styling.Entity, context: styling.StylingContext) -> str | None:
+        return None
+
+    @styling.style_label(priority=20)
+    def second_styler(entity: styling.Entity, context: styling.StylingContext) -> str | None:
+        return "[Override]"
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - second styler should override None from first
+    result = styling.apply_label_styles(entities[0], ctx)
+    assert result == "[Override]"
+
+
 def test_sequential_hue() -> None:
     """Test sequential hue color generation."""
     values = ["Q1", "Q2", "Q3", "Q4"]

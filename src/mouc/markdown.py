@@ -364,9 +364,9 @@ class MarkdownGenerator:
         # Apply user styling
         user_label = styling.apply_label_styles(entity, self.styling_context)  # type: ignore
 
-        # If user styling returned a label, use it
-        if user_label:
-            return f" {user_label}"
+        # If user styling returned a label (including empty string to hide), use it
+        if user_label is not None:
+            return f" {user_label}" if user_label else ""
 
         # Otherwise use default type label
         return f" [{self._pretty_type(entity.type)}]"
