@@ -91,6 +91,28 @@ mouc doc --output docs.md          # Output to file
 mouc feature_map.yaml doc          # Specify input file
 ```
 
+### Gantt Chart Scheduling
+
+Generate Mermaid Gantt charts with resource-aware scheduling:
+
+```bash
+mouc gantt                         # Output to stdout
+mouc gantt --output schedule.md    # Output to markdown file
+mouc gantt --start-date 2025-01-01 # Set project start date
+mouc gantt --title "Q1 Schedule"  # Custom chart title
+```
+
+Add scheduling metadata to entities in your YAML:
+```yaml
+meta:
+  effort: "2w"                     # Duration (days, weeks, months)
+  resources: ["alice", "bob"]      # Assigned people/teams
+  timeframe: "2025q1"              # Quarter, week, month, etc.
+  end_before: "2025-03-31"         # Hard deadline
+```
+
+See [docs/gantt.md](docs/gantt.md) for detailed documentation.
+
 ### Graph Generation
 
 Generate dependency graphs in DOT format:

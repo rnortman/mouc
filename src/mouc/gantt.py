@@ -14,6 +14,130 @@ if TYPE_CHECKING:
     from .models import Entity, FeatureMap
 
 
+def parse_timeframe(
+    timeframe_str: str, fiscal_year_start: int = 1
+) -> tuple[date | None, date | None]:
+    """Parse timeframe string to (start_date, end_date).
+
+    Supported formats:
+    - "2025q1", "2025Q1" - Calendar quarter (Q1=Jan-Mar, Q2=Apr-Jun, etc)
+    - "2025w01", "2025W52" - Calendar week (ISO week numbers)
+    - "2025h1", "2025H2" - Calendar half (H1=Jan-Jun, H2=Jul-Dec)
+    - "2025" - Full year
+    - "2025-01" - Month
+
+    Args:
+        timeframe_str: The timeframe string to parse
+        fiscal_year_start: Month number (1-12) when fiscal year starts (default: 1 = January)
+
+    Returns:
+        Tuple of (start_date, end_date), or (None, None) if unparseable
+    """
+    timeframe_str = timeframe_str.strip()
+
+    # Quarter: 2025q1, 2025Q3
+    quarter_match = re.match(r"^(\d{4})[qQ]([1-4])$", timeframe_str)
+    if quarter_match:
+        year = int(quarter_match.group(1))
+        quarter = int(quarter_match.group(2))
+
+        # Calculate quarter start month (adjusted for fiscal year)
+        quarter_start_month = ((quarter - 1) * 3 + fiscal_year_start - 1) % 12 + 1
+        quarter_start_year = year if quarter_start_month >= fiscal_year_start else year - 1
+
+        start_date = date(quarter_start_year, quarter_start_month, 1)
+
+        # End is last day of third month in quarter
+        end_month = quarter_start_month + 2
+        end_year = quarter_start_year
+        if end_month > 12:
+            end_month -= 12
+            end_year += 1
+
+        # Get last day of month
+        if end_month == 12:
+            end_date = date(end_year, 12, 31)
+        else:
+            end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
+
+        return (start_date, end_date)
+
+    # Week: 2025w01, 2025W52
+    week_match = re.match(r"^(\d{4})[wW](\d{2})$", timeframe_str)
+    if week_match:
+        year = int(week_match.group(1))
+        week = int(week_match.group(2))
+
+        if week < 1 or week > 53:
+            return (None, None)
+
+        # ISO week date: get Monday of the week
+        # Jan 4 is always in week 1
+        jan4 = date(year, 1, 4)
+        week1_monday = jan4 - timedelta(days=jan4.weekday())
+        start_date = week1_monday + timedelta(weeks=week - 1)
+        end_date = start_date + timedelta(days=6)  # Sunday
+
+        return (start_date, end_date)
+
+    # Half: 2025h1, 2025H2
+    half_match = re.match(r"^(\d{4})[hH]([12])$", timeframe_str)
+    if half_match:
+        year = int(half_match.group(1))
+        half = int(half_match.group(2))
+
+        # Calculate half start month (adjusted for fiscal year)
+        half_start_month = ((half - 1) * 6 + fiscal_year_start - 1) % 12 + 1
+        half_start_year = year if half_start_month >= fiscal_year_start else year - 1
+
+        start_date = date(half_start_year, half_start_month, 1)
+
+        # End is last day of sixth month in half
+        end_month = half_start_month + 5
+        end_year = half_start_year
+        if end_month > 12:
+            end_month -= 12
+            end_year += 1
+
+        # Get last day of month
+        if end_month == 12:
+            end_date = date(end_year, 12, 31)
+        else:
+            end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
+
+        return (start_date, end_date)
+
+    # Month: 2025-01
+    month_match = re.match(r"^(\d{4})-(\d{2})$", timeframe_str)
+    if month_match:
+        year = int(month_match.group(1))
+        month = int(month_match.group(2))
+
+        if month < 1 or month > 12:
+            return (None, None)
+
+        start_date = date(year, month, 1)
+
+        # Get last day of month
+        if month == 12:
+            end_date = date(year, 12, 31)
+        else:
+            end_date = date(year, month + 1, 1) - timedelta(days=1)
+
+        return (start_date, end_date)
+
+    # Year: 2025
+    year_match = re.match(r"^(\d{4})$", timeframe_str)
+    if year_match:
+        year = int(year_match.group(1))
+        start_date = date(year, 1, 1)
+        end_date = date(year, 12, 31)
+        return (start_date, end_date)
+
+    # Unparseable
+    return (None, None)
+
+
 class GanttMetadata(BaseModel):
     """Validated metadata for gantt scheduling."""
 
@@ -21,6 +145,7 @@ class GanttMetadata(BaseModel):
     resources: list[str | tuple[str, float]] = Field(default_factory=list[str | tuple[str, float]])
     start_after: str | None = None
     end_before: str | None = None
+    timeframe: str | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -108,11 +233,16 @@ class GanttScheduler:
                 if resource_name in resource_availability:
                     earliest_start = max(earliest_start, resource_availability[resource_name])
 
-            # Check start_after constraint
+            # Check start_after constraint (explicit takes precedence over timeframe)
             if gantt_meta.start_after:
                 start_after = self._parse_date(gantt_meta.start_after)
                 if start_after:
                     earliest_start = max(earliest_start, start_after)
+            elif gantt_meta.timeframe:
+                # Apply timeframe start if no explicit start_after
+                timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
+                if timeframe_start:
+                    earliest_start = max(earliest_start, timeframe_start)
 
             # Calculate duration and end date
             duration = self._calculate_duration(entity)
@@ -181,13 +311,18 @@ class GanttScheduler:
         """Backward pass: propagate deadlines up the dependency chain."""
         latest: dict[str, date] = {}
 
-        # Initialize with explicit deadlines
+        # Initialize with explicit deadlines (explicit takes precedence over timeframe)
         for entity_id, entity in entities_by_id.items():
             gantt_meta = self._get_gantt_meta(entity)
             if gantt_meta.end_before:
                 end_before = self._parse_date(gantt_meta.end_before)
                 if end_before:
                     latest[entity_id] = end_before
+            elif gantt_meta.timeframe:
+                # Apply timeframe end as deadline if no explicit end_before
+                _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
+                if timeframe_end:
+                    latest[entity_id] = timeframe_end
 
         # Propagate backwards through dependencies (reverse topological order)
         for entity_id in reversed(topo_order):
@@ -363,18 +498,23 @@ class GanttScheduler:
                 entity = entities_by_id[task.entity_id]
                 gantt_meta = self._get_gantt_meta(entity)
 
-                # Check if task has a deadline and if it's violated
+                # Check if task has a deadline (explicit or from timeframe) and if it's violated
                 is_late = False
+                deadline_date = None
+
                 if gantt_meta.end_before is not None:
                     deadline_date = self._parse_date(gantt_meta.end_before)
-                    is_late = deadline_date is not None and task.end_date > deadline_date
-                    if deadline_date:
+                elif gantt_meta.timeframe is not None:
+                    _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+
+                # Check if task is late and create milestone if so
+                if deadline_date is not None:
+                    is_late = task.end_date > deadline_date
+                    if is_late:
                         milestone_label = f"{entity.name} Deadline"
                         deadline_str = deadline_date.strftime("%Y-%m-%d")
-                        # Mark milestone as crit if task will be late
-                        crit_tag = "crit, " if is_late else ""
                         lines.append(
-                            f"    {milestone_label} :milestone, {crit_tag}{task.entity_id}_deadline, "
+                            f"    {milestone_label} :milestone, crit, {task.entity_id}_deadline, "
                             f"{deadline_str}, 0d"
                         )
 

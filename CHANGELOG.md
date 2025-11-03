@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Gantt chart scheduling**: Resource-aware deadline-driven scheduler with Mermaid chart generation
+  - `mouc gantt` command to generate Gantt charts from feature maps
+  - Resource-constrained project scheduling (RCPSP) with configurable capacity
+  - Deadline tracking with automatic propagation through dependency chains
+  - Flexible timeframe parsing: quarters (`2025q1`), weeks (`2025w01`), halves (`2025h1`), years (`2025`), months (`2025-01`)
+  - Visual indicators: deadline milestones for late tasks, `:crit` highlighting for missed deadlines, `:active` for unassigned tasks
+  - Automatic markdown code fence wrapping for `.md` output files
+  - Metadata fields: `effort`, `resources`, `start_after`, `end_before`, `timeframe`
+
 ## [0.1.4] - 2025-09-30
 
 ### Added

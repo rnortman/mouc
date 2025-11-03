@@ -2,7 +2,7 @@
 
 # pyright: reportPrivateUsage=false
 
-from datetime import date
+from datetime import date, timedelta
 
 import pytest
 
@@ -1008,14 +1008,15 @@ class TestMermaidGeneration:
         assert ":launch," in mermaid
 
     def test_mermaid_deadline_milestones(self, base_date: date) -> None:
-        """Test that deadline milestones are added for tasks with end_before."""
+        """Test that deadline milestones are only added for late tasks."""
         metadata = FeatureMapMetadata()
 
+        # Task that finishes on time - should NOT have milestone
         task = Entity(
             type="capability",
             id="task1",
-            name="Important Task",
-            description="Has a deadline",
+            name="On Time Task",
+            description="Finishes on time",
             meta={"effort": "1w", "resources": ["alice"], "end_before": "2025-01-31"},
         )
 
@@ -1026,10 +1027,9 @@ class TestMermaidGeneration:
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
-        # Should have a milestone for the deadline
-        assert ":milestone," in mermaid
-        assert "Important Task Deadline" in mermaid
-        assert "2025-01-31" in mermaid
+        # Should NOT have a milestone (task finishes on time)
+        assert ":milestone," not in mermaid
+        assert "Deadline" not in mermaid
 
     def test_mermaid_deadline_violations_marked_critical(self, base_date: date) -> None:
         """Test that tasks violating deadlines are marked with :crit."""
@@ -1055,8 +1055,10 @@ class TestMermaidGeneration:
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
-        # Task should be marked critical
-        assert ":crit," in mermaid
+        # Task itself should be marked critical
+        lines = mermaid.split("\n")
+        task_line = next(line for line in lines if "Late Task (alice)" in line)
+        assert ":crit," in task_line
         # Milestone should also be marked critical
         assert "milestone, crit," in mermaid
         # Should have warning
@@ -1086,9 +1088,9 @@ class TestMermaidGeneration:
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
-        # Should have milestone but NOT marked critical
-        assert ":milestone," in mermaid
-        assert "On Time Task Deadline" in mermaid
+        # Should NOT have milestone (task is on time)
+        assert ":milestone," not in mermaid
+        assert "Deadline" not in mermaid
         # Task line should not have crit
         lines = mermaid.split("\n")
         task_line = next(line for line in lines if "On Time Task (alice)" in line)
@@ -1149,3 +1151,404 @@ class TestMermaidGeneration:
         task_line = next(line for line in lines if "Late Unassigned (unassigned)" in line)
         assert ":crit," in task_line
         assert ":active," not in task_line
+
+
+class TestTimeframeParsing:
+    """Test timeframe parsing functionality."""
+
+    def test_parse_quarter_q1(self) -> None:
+        """Test parsing Q1 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025q1")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 3, 31)
+
+        # Also test uppercase
+        start, end = parse_timeframe("2025Q1")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 3, 31)
+
+    def test_parse_quarter_q2(self) -> None:
+        """Test parsing Q2 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025q2")
+        assert start == date(2025, 4, 1)
+        assert end == date(2025, 6, 30)
+
+    def test_parse_quarter_q3(self) -> None:
+        """Test parsing Q3 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025q3")
+        assert start == date(2025, 7, 1)
+        assert end == date(2025, 9, 30)
+
+    def test_parse_quarter_q4(self) -> None:
+        """Test parsing Q4 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025q4")
+        assert start == date(2025, 10, 1)
+        assert end == date(2025, 12, 31)
+
+    def test_parse_week_w01(self) -> None:
+        """Test parsing week 1 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025w01")
+        # Jan 4, 2025 is a Saturday, so week 1 starts on Dec 30, 2024 (Monday)
+        assert start == date(2024, 12, 30)
+        assert end == date(2025, 1, 5)  # Sunday
+
+    def test_parse_week_w10(self) -> None:
+        """Test parsing week 10 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025W10")
+        # Week 10 is 9 weeks after week 1
+        week1_start = date(2024, 12, 30)
+        expected_start = week1_start + timedelta(weeks=9)
+        expected_end = expected_start + timedelta(days=6)
+        assert start == expected_start
+        assert end == expected_end
+
+    def test_parse_week_w52(self) -> None:
+        """Test parsing week 52 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025w52")
+        # Week 52 is 51 weeks after week 1
+        week1_start = date(2024, 12, 30)
+        expected_start = week1_start + timedelta(weeks=51)
+        expected_end = expected_start + timedelta(days=6)
+        assert start == expected_start
+        assert end == expected_end
+
+    def test_parse_half_h1(self) -> None:
+        """Test parsing H1 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025h1")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 6, 30)
+
+        # Also test uppercase
+        start, end = parse_timeframe("2025H1")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 6, 30)
+
+    def test_parse_half_h2(self) -> None:
+        """Test parsing H2 format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025h2")
+        assert start == date(2025, 7, 1)
+        assert end == date(2025, 12, 31)
+
+    def test_parse_year(self) -> None:
+        """Test parsing full year format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 12, 31)
+
+    def test_parse_month_january(self) -> None:
+        """Test parsing January format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025-01")
+        assert start == date(2025, 1, 1)
+        assert end == date(2025, 1, 31)
+
+    def test_parse_month_february(self) -> None:
+        """Test parsing February (non-leap year)."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025-02")
+        assert start == date(2025, 2, 1)
+        assert end == date(2025, 2, 28)
+
+    def test_parse_month_february_leap_year(self) -> None:
+        """Test parsing February in a leap year."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2024-02")
+        assert start == date(2024, 2, 1)
+        assert end == date(2024, 2, 29)
+
+    def test_parse_month_december(self) -> None:
+        """Test parsing December format."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("2025-12")
+        assert start == date(2025, 12, 1)
+        assert end == date(2025, 12, 31)
+
+    def test_parse_invalid_format(self) -> None:
+        """Test parsing invalid format returns None."""
+        from mouc.gantt import parse_timeframe
+
+        start, end = parse_timeframe("invalid")
+        assert start is None
+        assert end is None
+
+    def test_parse_invalid_quarter(self) -> None:
+        """Test parsing invalid quarter number."""
+        from mouc.gantt import parse_timeframe
+
+        # Q5 doesn't exist
+        start, end = parse_timeframe("2025q5")
+        assert start is None
+        assert end is None
+
+    def test_parse_invalid_week(self) -> None:
+        """Test parsing invalid week number."""
+        from mouc.gantt import parse_timeframe
+
+        # Week 54 doesn't exist
+        start, end = parse_timeframe("2025w54")
+        assert start is None
+        assert end is None
+
+    def test_parse_invalid_half(self) -> None:
+        """Test parsing invalid half number."""
+        from mouc.gantt import parse_timeframe
+
+        # H3 doesn't exist
+        start, end = parse_timeframe("2025h3")
+        assert start is None
+        assert end is None
+
+    def test_parse_invalid_month(self) -> None:
+        """Test parsing invalid month number."""
+        from mouc.gantt import parse_timeframe
+
+        # Month 13 doesn't exist
+        start, end = parse_timeframe("2025-13")
+        assert start is None
+        assert end is None
+
+
+class TestTimeframeScheduling:
+    """Test timeframe integration with scheduler."""
+
+    @pytest.fixture
+    def base_date(self) -> date:
+        """Base date for testing."""
+        return date(2025, 1, 1)
+
+    def test_timeframe_as_start_constraint(self, base_date: date) -> None:
+        """Test that timeframe acts as start_after constraint."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q2 Task",
+            description="Should start in Q2",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "timeframe": "2025q2",
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # Should not start before Q2 (April 1)
+        assert task_result.start_date >= date(2025, 4, 1)
+
+    def test_timeframe_as_end_constraint(self, base_date: date) -> None:
+        """Test that timeframe acts as end_before constraint and creates deadline."""
+        metadata = FeatureMapMetadata()
+
+        # Task that can't finish in Q1
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q1 Task",
+            description="Should finish in Q1",
+            meta={
+                "effort": "20w",  # Way too long for Q1
+                "resources": ["alice"],
+                "timeframe": "2025q1",
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        # Should have a warning about deadline violation
+        assert len(result.warnings) == 1
+        assert "task1" in result.warnings[0]
+        assert "after required date" in result.warnings[0]
+        # The warning should mention the correct Q1 end date (March 31)
+        assert "2025-03-31" in result.warnings[0]
+
+    def test_explicit_dates_override_timeframe(self, base_date: date) -> None:
+        """Test that explicit start_after and end_before override timeframe."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Explicit Override",
+            description="Explicit dates win",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "timeframe": "2025q2",  # Q2 is Apr-Jun
+                "start_after": "2025-07-01",  # But we override to July
+                "end_before": "2025-08-01",  # And set a different deadline
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # Should respect explicit start_after, not timeframe start
+        assert task_result.start_date >= date(2025, 7, 1)
+        # Should finish before explicit end_before
+        assert task_result.end_date <= date(2025, 8, 1)
+
+    def test_timeframe_creates_milestone_for_late_task(self, base_date: date) -> None:
+        """Test that timeframe creates deadline milestone only for late tasks."""
+        metadata = FeatureMapMetadata()
+
+        # Task that will be late (finishes after Q1 ends)
+        late_task = Entity(
+            type="capability",
+            id="task1",
+            name="Q1 Late Task",
+            description="Will miss Q1 deadline",
+            meta={
+                "effort": "20w",  # Way too long for Q1
+                "resources": ["alice"],
+                "timeframe": "2025q1",
+            },
+        )
+
+        entities = [late_task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # Should have a deadline milestone because task is late
+        assert "Q1 Late Task Deadline" in mermaid
+        assert ":milestone," in mermaid
+        # Deadline should be end of Q1 (March 31), NOT the start (Jan 1)
+        assert "2025-03-31" in mermaid
+        # Should NOT show the start date as the deadline
+        lines = mermaid.split("\n")
+        deadline_line = next(line for line in lines if "Q1 Late Task Deadline" in line)
+        assert "2025-03-31" in deadline_line
+        assert "2025-01-01" not in deadline_line
+
+    def test_timeframe_no_milestone_for_on_time_task(self, base_date: date) -> None:
+        """Test that timeframe does NOT create milestone for on-time tasks."""
+        metadata = FeatureMapMetadata()
+
+        # Task that finishes on time
+        on_time_task = Entity(
+            type="capability",
+            id="task1",
+            name="Q1 On-Time Task",
+            description="Will finish on time",
+            meta={
+                "effort": "1w",  # Short enough to finish in Q1
+                "resources": ["alice"],
+                "timeframe": "2025q1",
+            },
+        )
+
+        entities = [on_time_task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # Should NOT have a deadline milestone (task is on time)
+        assert "Deadline" not in mermaid
+        assert ":milestone," not in mermaid
+
+    def test_timeframe_week_deadline_is_end_of_week(self, base_date: date) -> None:
+        """Test that week timeframe uses end of week as deadline for late tasks."""
+        metadata = FeatureMapMetadata()
+
+        # Task that will be late (too long for week 1)
+        late_task = Entity(
+            type="capability",
+            id="task1",
+            name="Week 1 Late Task",
+            description="Will miss week 1 deadline",
+            meta={
+                "effort": "3w",  # Way too long for 1 week
+                "resources": ["alice"],
+                "timeframe": "2025w01",  # Week 1: Dec 30, 2024 - Jan 5, 2025
+            },
+        )
+
+        entities = [late_task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # Deadline should be end of week (Jan 5), not start (Dec 30)
+        assert "2025-01-05" in mermaid
+        lines = mermaid.split("\n")
+        deadline_line = next(line for line in lines if "Week 1 Late Task Deadline" in line)
+        assert "2025-01-05" in deadline_line
+        # Should NOT show start date as deadline
+        assert "2024-12-30" not in deadline_line
+
+    def test_timeframe_month_deadline_is_end_of_month(self, base_date: date) -> None:
+        """Test that month timeframe uses end of month as deadline for late tasks."""
+        metadata = FeatureMapMetadata()
+
+        # Task that will be late (too long for February)
+        late_task = Entity(
+            type="capability",
+            id="task1",
+            name="February Late Task",
+            description="Will miss February deadline",
+            meta={
+                "effort": "8w",  # Way too long for 1 month
+                "resources": ["alice"],
+                "timeframe": "2025-02",  # February: Feb 1 - Feb 28
+            },
+        )
+
+        entities = [late_task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # Deadline should be end of month (Feb 28), not start (Feb 1)
+        assert "2025-02-28" in mermaid
+        lines = mermaid.split("\n")
+        deadline_line = next(line for line in lines if "February Late Task Deadline" in line)
+        assert "2025-02-28" in deadline_line
+        # Should NOT show start date as deadline
+        assert "2025-02-01" not in deadline_line
