@@ -56,7 +56,7 @@ class TestGanttScheduler:
 
     def test_basic_scheduling(self, simple_feature_map: FeatureMap, base_date: date) -> None:
         """Test basic sequential scheduling."""
-        scheduler = GanttScheduler(simple_feature_map, start_date=base_date)
+        scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 3
@@ -108,7 +108,7 @@ class TestGanttScheduler:
         entities = [task_5d, task_2w, task_1m]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_5d_result = next(t for t in result.tasks if t.entity_id == "task_5d")
@@ -153,7 +153,7 @@ class TestGanttScheduler:
         entities = [task_full, task_mixed, task_half]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_full_result = next(t for t in result.tasks if t.entity_id == "task_full")
@@ -189,7 +189,7 @@ class TestGanttScheduler:
         entities = [task_a, task_b]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_a_result = next(t for t in result.tasks if t.entity_id == "task_a")
@@ -235,7 +235,7 @@ class TestGanttScheduler:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
 
         # Test that latest_dates are calculated
         entities_by_id = {e.id: e for e in entities}
@@ -273,7 +273,7 @@ class TestGanttScheduler:
         entities = [task_normal, task_urgent]  # Intentionally wrong order
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_urgent_result = next(t for t in result.tasks if t.entity_id == "task_urgent")
@@ -297,7 +297,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_result = result.tasks[0]
@@ -328,7 +328,7 @@ class TestGanttScheduler:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should have at least one warning
@@ -381,7 +381,7 @@ class TestGanttScheduler:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 4
@@ -417,7 +417,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 1
@@ -470,7 +470,7 @@ class TestGanttScheduler:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
 
         entities_by_id = {e.id: e for e in entities}
         topo_order = scheduler._topological_sort()
@@ -502,7 +502,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should have exactly one warning
@@ -534,7 +534,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should have no warnings
@@ -573,7 +573,7 @@ class TestGanttScheduler:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
 
         # Test deadline propagation
         entities_by_id = {e.id: e for e in entities}
@@ -616,7 +616,7 @@ class TestGanttScheduler:
         entities = [chain1_task, chain2_task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should schedule both
@@ -648,7 +648,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Check warning format
@@ -678,7 +678,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should warn about deadline violation
@@ -705,7 +705,7 @@ class TestGanttScheduler:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -738,7 +738,7 @@ class TestMermaidGeneration:
         entities = [cap1]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -784,7 +784,7 @@ class TestMermaidGeneration:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -839,7 +839,7 @@ class TestMermaidGeneration:
         entities = [task1, task2, task3]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -863,7 +863,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -887,7 +887,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result, title="My Custom Schedule")
 
@@ -908,7 +908,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -934,7 +934,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -985,7 +985,7 @@ class TestMermaidGeneration:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1023,7 +1023,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1051,7 +1051,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1084,7 +1084,7 @@ class TestMermaidGeneration:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1113,7 +1113,7 @@ class TestMermaidGeneration:
         entities = [unassigned]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1140,7 +1140,7 @@ class TestMermaidGeneration:
         entities = [unassigned_late]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1359,7 +1359,7 @@ class TestTimeframeScheduling:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_result = result.tasks[0]
@@ -1386,7 +1386,7 @@ class TestTimeframeScheduling:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         # Should have a warning about deadline violation
@@ -1417,7 +1417,7 @@ class TestTimeframeScheduling:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_result = result.tasks[0]
@@ -1446,7 +1446,7 @@ class TestTimeframeScheduling:
         entities = [late_task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1481,7 +1481,7 @@ class TestTimeframeScheduling:
         entities = [on_time_task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1509,7 +1509,7 @@ class TestTimeframeScheduling:
         entities = [late_task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1541,7 +1541,7 @@ class TestTimeframeScheduling:
         entities = [late_task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1581,7 +1581,7 @@ class TestFixedScheduleTasks:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 1
@@ -1609,7 +1609,7 @@ class TestFixedScheduleTasks:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 1
@@ -1637,7 +1637,7 @@ class TestFixedScheduleTasks:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 1
@@ -1666,7 +1666,7 @@ class TestFixedScheduleTasks:
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
         # Even with early start_date, fixed task should stay at June 1
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         task_result = result.tasks[0]
@@ -1704,7 +1704,7 @@ class TestFixedScheduleTasks:
         resolve_graph_edges(entities)
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 2
@@ -1740,7 +1740,7 @@ class TestFixedScheduleTasks:
         entities = [task]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
         assert len(result.tasks) == 1

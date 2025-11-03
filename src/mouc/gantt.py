@@ -172,10 +172,50 @@ class ScheduleResult:
 class GanttScheduler:
     """Resource-aware deadline-driven scheduler for Mouc entities."""
 
-    def __init__(self, feature_map: FeatureMap, start_date: date | None = None):
-        """Initialize scheduler with a feature map and optional start date."""
+    def __init__(
+        self,
+        feature_map: FeatureMap,
+        start_date: date | None = None,
+        current_date: date | None = None,
+    ):
+        """Initialize scheduler with a feature map and optional dates.
+
+        Args:
+            feature_map: The feature map to schedule
+            start_date: Chart start date (left edge of visualization).
+                       If None, defaults to min(first fixed task date, current_date)
+            current_date: Current/as-of date for scheduling.
+                         If None, defaults to today
+        """
         self.feature_map = feature_map
-        self.start_date = start_date or date.today()  # noqa: DTZ011
+        self.current_date = current_date or date.today()  # noqa: DTZ011
+
+        # Calculate start_date if not provided
+        if start_date is None:
+            self.start_date = self._calculate_chart_start_date()
+        else:
+            self.start_date = start_date
+
+    def _calculate_chart_start_date(self) -> date:
+        """Calculate chart start date from fixed task dates and current date.
+
+        Returns minimum of:
+        - All explicit start_date values from fixed tasks
+        - current_date
+
+        If no fixed tasks exist, returns current_date.
+        """
+        min_date = self.current_date
+
+        # Check all entities for fixed start_date
+        for entity in self.feature_map.entities:
+            gantt_meta = self._get_gantt_meta(entity)
+            if gantt_meta.start_date is not None:
+                parsed_date = self._parse_date(gantt_meta.start_date)
+                if parsed_date is not None:
+                    min_date = min(min_date, parsed_date)
+
+        return min_date
 
     def _get_gantt_meta(self, entity: Entity) -> GanttMetadata:
         """Extract and validate gantt metadata from entity."""
@@ -238,8 +278,8 @@ class GanttScheduler:
             entity = entities_by_id[entity_id]
 
             # Calculate when this entity can start
-            # Must be after: start_date, all dependencies, all resources available, start_after constraint
-            earliest_start: date = self.start_date
+            # Must be after: current_date, all dependencies, all resources available, start_after constraint
+            earliest_start: date = self.current_date
 
             # Check dependency completion
             for dep_id in entity.requires:
@@ -254,16 +294,19 @@ class GanttScheduler:
                 if resource_name in resource_availability:
                     earliest_start = max(earliest_start, resource_availability[resource_name])
 
-            # Check start_after constraint (explicit takes precedence over timeframe)
+            # Check start_after constraint (apply max with current_date)
+            # Explicit takes precedence over timeframe
             if gantt_meta.start_after:
                 start_after = self._parse_date(gantt_meta.start_after)
                 if start_after:
-                    earliest_start = max(earliest_start, start_after)
+                    # Use max of specified start_after and current_date (can't start in past)
+                    earliest_start = max(earliest_start, start_after, self.current_date)
             elif gantt_meta.timeframe:
                 # Apply timeframe start if no explicit start_after
                 timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
                 if timeframe_start:
-                    earliest_start = max(earliest_start, timeframe_start)
+                    # Use max of timeframe start and current_date (can't start in past)
+                    earliest_start = max(earliest_start, timeframe_start, self.current_date)
 
             # Calculate duration and end date
             duration = self._calculate_duration(entity)
@@ -446,7 +489,7 @@ class GanttScheduler:
 
             # Factor 1: Deadline urgency (higher score = more urgent)
             if entity_id in latest_dates:
-                days_until_deadline = (latest_dates[entity_id] - self.start_date).days
+                days_until_deadline = (latest_dates[entity_id] - self.current_date).days
                 # More urgent if deadline is sooner (inverse relationship)
                 if days_until_deadline > 0:
                     score += 1000.0 / days_until_deadline
@@ -565,10 +608,14 @@ class GanttScheduler:
         Returns:
             Mermaid gantt chart syntax as a string
         """
+        # Set todayMarker to current_date so the red line appears at the right position
+        current_date_str = self.current_date.strftime("%Y-%m-%d")
+
         lines = [
             "gantt",
             f"    title {title}",
             "    dateFormat YYYY-MM-DD",
+            f"    todayMarker {current_date_str}",
             "",
         ]
 

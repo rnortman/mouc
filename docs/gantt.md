@@ -5,11 +5,14 @@ Mouc includes a resource-aware, deadline-driven scheduler that generates Mermaid
 ## Quick Start
 
 ```bash
-# Generate a Gantt chart
+# Generate a Gantt chart (tasks scheduled from today)
 mouc gantt --output schedule.md
 
-# Set a project start date (important for historical scheduling)
-mouc gantt --start-date 2025-01-01 --output q1-schedule.md
+# Set both chart start and current date for historical planning
+mouc gantt --start-date 2025-01-01 --current-date 2025-01-01 --output q1-schedule.md
+
+# Show historical work (chart starts earlier, but schedule from today)
+mouc gantt --start-date 2024-01-01 --current-date 2025-01-01 --output historical.md
 
 # Customize the chart title
 mouc gantt --title "Q1 2025 Platform Roadmap" --output roadmap.md
@@ -37,6 +40,31 @@ entities:
 ```
 
 ### Metadata Fields
+
+#### `start_date` and `end_date` (optional)
+Fixed schedule dates that bypass the scheduler entirely. Use these when a task has predetermined dates that can't be changed.
+
+```yaml
+# Both dates specified - task runs exactly on these dates
+start_date: "2025-02-01"
+end_date: "2025-02-15"
+
+# Only start_date - end_date computed from effort
+start_date: "2025-02-01"
+effort: "2w"  # Will end on 2025-02-15
+
+# Only end_date - start_date computed from effort
+end_date: "2025-02-15"
+effort: "2w"  # Will start on 2025-02-01
+```
+
+**When to use fixed dates:**
+- External deadlines (conferences, product launches)
+- Work already in progress
+- Contracted delivery dates
+- Historical tracking of completed work
+
+**Note:** Fixed-schedule tasks are NOT rescheduled based on dependencies or resource conflicts. Use `start_after` and `end_before` for flexible constraints instead.
 
 #### `effort` (required)
 Work duration. Formats:
@@ -108,19 +136,84 @@ If a task can't meet its deadline, the scheduler:
 3. Marks the task with `:crit` (red) in the Gantt chart
 4. Shows a deadline milestone marker (red diamond)
 
+## Dual Date System
+
+Mouc uses separate dates for **visualization** (chart start) and **scheduling** (current date):
+
+### Chart Start Date (`--start-date`)
+Controls the left edge of the Gantt chart visualization.
+
+**Default behavior**: Automatically calculated as the minimum of:
+- The earliest fixed task `start_date`
+- The current date
+
+**Use cases**:
+- Show historical work alongside future planning
+- Create charts that span multiple quarters/years
+- Display work that started before today
+
+### Current Date (`--current-date`)
+Controls the "as-of" date for scheduling decisions.
+
+**Default behavior**: Today's date
+
+**Use cases**:
+- Planning "what if" scenarios ("what if we started today?")
+- Historical analysis ("what would the schedule have looked like on Jan 1?")
+- Preventing tasks from being scheduled in the past
+
+### How Tasks Are Scheduled
+
+1. **Tasks with fixed `start_date`/`end_date`**: Use exact dates (bypass scheduler)
+2. **Tasks with `start_after`**: Start at `max(start_after, current_date)` (respects whichever is later)
+3. **Tasks with `timeframe`**: Start at `max(timeframe_start, current_date)`
+4. **Tasks with no constraints**: Start at `current_date` or when dependencies complete
+
+**Key principle**: Tasks without explicit dates can't start before the current date (no scheduling in the past).
+
+### Examples
+
+#### Planning from today (default):
+```bash
+mouc gantt --output schedule.md
+# Chart starts at earliest fixed task date or today
+# New work scheduled from today
+```
+
+#### Historical planning:
+```bash
+mouc gantt --start-date 2024-01-01 --current-date 2025-01-01 --output history.md
+# Chart shows work from 2024-01-01 onward
+# New work scheduled from 2025-01-01 (not backdated to 2024)
+```
+
+#### Future planning:
+```bash
+mouc gantt --start-date 2025-06-01 --current-date 2025-06-01 --output q2-plan.md
+# Both chart and scheduling start at Q2
+```
+
+### The Red "Today" Line
+
+The vertical red line in Mermaid charts (the `todayMarker`) is positioned at the **current date**, not the chart start date. This makes it easy to see:
+- What work is in progress
+- What's completed vs. upcoming
+- Whether you're on track with the current date
+
 ## Scheduling Algorithm
 
 The scheduler uses a priority-based resource-constrained project scheduling (RCPSP) algorithm:
 
-1. **Dependency resolution**: Validates no circular dependencies
-2. **Deadline propagation**: Backward pass through dependency chains to compute latest allowed dates
-3. **Priority calculation**: Combines deadline urgency and dependent count
-4. **Forward scheduling**: Schedules tasks respecting:
-   - Project start date
+1. **Fixed-schedule tasks**: Process tasks with explicit `start_date`/`end_date` first (bypass scheduler)
+2. **Dependency resolution**: Validates no circular dependencies
+3. **Deadline propagation**: Backward pass through dependency chains to compute latest allowed dates
+4. **Priority calculation**: Combines deadline urgency and dependent count (relative to current date)
+5. **Forward scheduling**: Schedules tasks respecting:
+   - Current date (baseline for all scheduling)
    - Dependency completion
    - Resource availability
-   - Start/end constraints
-   - Timeframe constraints
+   - Start/end constraints (`start_after`, `end_before`)
+   - Timeframe constraints (with current date floor)
 
 ### Task Priority
 
@@ -334,7 +427,10 @@ mouc gantt [OPTIONS] [FILE]
 - `FILE` - Path to feature map YAML (default: `feature_map.yaml`)
 
 ### Options
-- `--start-date, -s DATE` - Project start date in `YYYY-MM-DD` format (default: today)
+- `--start-date, -s DATE` - Chart start date (left edge of visualization) in `YYYY-MM-DD` format.
+  - Default: min(earliest fixed task date, current date)
+- `--current-date, -c DATE` - Current/as-of date for scheduling in `YYYY-MM-DD` format.
+  - Default: today
 - `--title, -t TEXT` - Chart title (default: "Project Schedule")
 - `--output, -o PATH` - Output file path
   - Files ending in `.md` are wrapped in ` ```mermaid ` code fences
@@ -343,11 +439,14 @@ mouc gantt [OPTIONS] [FILE]
 ### Examples
 
 ```bash
-# Basic usage
+# Basic usage (schedule from today)
 mouc gantt
 
-# Custom start date and title
-mouc gantt --start-date 2025-01-01 --title "Q1 Platform Roadmap"
+# Plan from specific date
+mouc gantt --start-date 2025-01-01 --current-date 2025-01-01 --title "Q1 Platform Roadmap"
+
+# Show historical work with current planning
+mouc gantt --start-date 2024-01-01 --current-date 2025-01-01
 
 # Output to markdown file (auto-wrapped in code fence)
 mouc gantt --output schedule.md
@@ -356,24 +455,36 @@ mouc gantt --output schedule.md
 mouc gantt --output schedule.mmd
 
 # Different input file
-mouc project.yaml gantt --output project-schedule.md
+mouc gantt project.yaml --output project-schedule.md
 ```
 
 ## Tips and Best Practices
 
-### 1. Set a Project Start Date
-Always use `--start-date` when generating charts for planning purposes. The default (today) causes past timeframes to be ignored.
+### 1. Use Both Dates for Historical Planning
+To see work that started in the past alongside current planning, set both dates:
 
 ```bash
-mouc gantt --start-date 2025-01-01  # Good
-mouc gantt                          # Uses today, may skip past work
+# Show Q1 work alongside Q2 planning
+mouc gantt --start-date 2025-01-01 --current-date 2025-04-01
+
+# Just plan from today
+mouc gantt  # Chart and scheduling both start at today
 ```
 
-### 2. Use Timeframes for Flexibility
+### 2. Choose the Right Date Fields
+
+- **Fixed schedule** (`start_date`/`end_date`): Use for work with immovable dates
+  - External deadlines, contracts, historical tracking
+- **Flexible constraints** (`start_after`/`end_before`): Use for work that can adapt
+  - "Can't start until X is ready", "Must finish by Y"
+- **Timeframes** (`timeframe`): Use for quarter/month targets that respect current date
+  - "Target Q1", "Aim for February"
+
+### 3. Use Timeframes for Flexibility
 Prefer `timeframe` over explicit dates when you want constraints to adjust automatically:
 
 ```yaml
-# Flexible - adjusts to quarter boundaries
+# Flexible - adjusts to quarter boundaries and current date
 meta:
   timeframe: "2025q1"
 
@@ -383,7 +494,7 @@ meta:
   end_before: "2025-03-31"
 ```
 
-### 3. Assign Resources
+### 4. Assign Resources
 Unassigned tasks are hard to schedule. Always specify who's doing the work:
 
 ```yaml
@@ -396,14 +507,14 @@ meta:
   resources: []  # Unassigned!
 ```
 
-### 4. Use Realistic Effort Estimates
+### 5. Use Realistic Effort Estimates
 The scheduler assumes work happens continuously during business days:
 - 1 week = 5 days
 - 1 month = 20 days
 
 Account for interruptions, meetings, and context switching by padding estimates.
 
-### 5. Review Deadline Warnings
+### 6. Review Deadline Warnings
 Pay attention to stderr output - it shows which tasks can't meet their deadlines:
 
 ```bash
@@ -411,7 +522,7 @@ mouc gantt 2>&1 | grep Warning
 # Warning: Entity 'api_gateway' finishes 5 days after required date (2025-04-05 vs 2025-03-31)
 ```
 
-### 6. Leverage Deadline Propagation
+### 7. Leverage Deadline Propagation
 Set deadlines on outcomes, they automatically propagate backward:
 
 ```yaml

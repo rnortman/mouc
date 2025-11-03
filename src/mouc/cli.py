@@ -142,7 +142,20 @@ def gantt(
     ),
     start_date: Annotated[
         str | None,
-        typer.Option("--start-date", "-s", help="Start date for scheduling (YYYY-MM-DD)"),
+        typer.Option(
+            "--start-date",
+            "-s",
+            help="Chart start date (left edge of visualization, YYYY-MM-DD). "
+            "Defaults to min(first fixed task date, current date)",
+        ),
+    ] = None,
+    current_date: Annotated[
+        str | None,
+        typer.Option(
+            "--current-date",
+            "-c",
+            help="Current/as-of date for scheduling (YYYY-MM-DD). Defaults to today",
+        ),
     ] = None,
     title: Annotated[str, typer.Option("--title", "-t", help="Chart title")] = "Project Schedule",
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
@@ -161,12 +174,26 @@ def gantt(
                 )
                 raise typer.Exit(1) from None
 
+        # Parse current date if provided
+        parsed_current_date: date | None = None
+        if current_date:
+            try:
+                parsed_current_date = date.fromisoformat(current_date)
+            except ValueError:
+                typer.echo(
+                    f"Error: Invalid date format '{current_date}'. Use YYYY-MM-DD format.",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
+
         # Parse the feature map
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
         # Schedule tasks
-        scheduler = GanttScheduler(feature_map, start_date=parsed_start_date)
+        scheduler = GanttScheduler(
+            feature_map, start_date=parsed_start_date, current_date=parsed_current_date
+        )
         result = scheduler.schedule()
 
         # Generate Mermaid chart

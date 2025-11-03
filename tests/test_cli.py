@@ -25,9 +25,17 @@ class TestGanttCommand:
         assert "Lock-Free Queue Implementation" in result.stdout
 
     def test_gantt_with_start_date(self, tmp_path: Path) -> None:
-        """Test gantt chart with custom start date."""
+        """Test gantt chart with custom start date and current date."""
         result = runner.invoke(
-            app, ["gantt", "examples/feature_map.yaml", "--start-date", "2025-02-01"]
+            app,
+            [
+                "gantt",
+                "examples/feature_map.yaml",
+                "--start-date",
+                "2025-02-01",
+                "--current-date",
+                "2025-02-01",
+            ],
         )
 
         assert result.exit_code == 0

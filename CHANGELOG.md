@@ -15,7 +15,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Flexible timeframe parsing: quarters (`2025q1`), weeks (`2025w01`), halves (`2025h1`), years (`2025`), months (`2025-01`)
   - Visual indicators: deadline milestones for late tasks, `:crit` highlighting for missed deadlines, `:active` for unassigned tasks
   - Automatic markdown code fence wrapping for `.md` output files
-  - Metadata fields: `effort`, `resources`, `start_after`, `end_before`, `timeframe`
+  - Metadata fields: `effort`, `resources`, `start_date`, `end_date`, `start_after`, `end_before`, `timeframe`
+  - **Dual date system**: Separate chart start date and current date for historical scheduling
+    - `--start-date` controls visualization left edge (defaults to min of fixed task dates and current date)
+    - `--current-date` controls scheduling baseline (defaults to today)
+    - Tasks without explicit dates start at current date (prevents scheduling in the past)
+    - Mermaid `todayMarker` (red line) positioned at current date
+  - **Fixed-schedule tasks**: Tasks with explicit `start_date` and/or `end_date` bypass scheduler
+    - Both dates: use exact dates
+    - Only start_date: compute end_date from effort
+    - Only end_date: compute start_date from effort
 
 ## [0.1.4] - 2025-09-30
 
