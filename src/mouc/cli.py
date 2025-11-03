@@ -158,10 +158,26 @@ def gantt(
         ),
     ] = None,
     title: Annotated[str, typer.Option("--title", "-t", help="Chart title")] = "Project Schedule",
+    group_by: Annotated[
+        str,
+        typer.Option(
+            "--group-by",
+            "-g",
+            help="Group tasks by 'type' (capability/user story/outcome) or 'resource' (person/team)",
+        ),
+    ] = "type",
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
     try:
+        # Validate group_by parameter
+        if group_by not in ("type", "resource"):
+            typer.echo(
+                f"Error: Invalid group-by value '{group_by}'. Must be 'type' or 'resource'.",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+
         # Parse start date if provided
         parsed_start_date: date | None = None
         if start_date:
@@ -197,7 +213,7 @@ def gantt(
         result = scheduler.schedule()
 
         # Generate Mermaid chart
-        mermaid_output = scheduler.generate_mermaid(result, title=title)
+        mermaid_output = scheduler.generate_mermaid(result, title=title, group_by=group_by)
 
         # Output the result
         if output:

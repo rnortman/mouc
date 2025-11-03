@@ -16,6 +16,9 @@ mouc gantt --start-date 2024-01-01 --current-date 2025-01-01 --output historical
 
 # Customize the chart title
 mouc gantt --title "Q1 2025 Platform Roadmap" --output roadmap.md
+
+# Group by resource instead of entity type
+mouc gantt --group-by resource --output resource-view.md
 ```
 
 The output is a Mermaid Gantt chart that can be rendered in Markdown viewers, GitHub, GitLab, and many documentation tools.
@@ -301,11 +304,65 @@ gantt
 
 **Note**: If a task is both late AND unassigned, `:crit` takes precedence (deadline violations are more important).
 
-### Sections
-Tasks are grouped by entity type:
+## Grouping Options
+
+Gantt charts can be organized in two ways using the `--group-by` option:
+
+### Group by Type (Default)
+
+```bash
+mouc gantt --group-by type  # or omit (default)
+```
+
+Tasks are grouped into sections by entity type:
 - **Capability**: Technical work
 - **User Story**: Customer requests
 - **Outcome**: Business goals
+
+This view is useful for:
+- Understanding the distribution of work across different types
+- Seeing how technical capabilities support user stories
+- Tracking outcomes separately from implementation details
+
+### Group by Resource
+
+```bash
+mouc gantt --group-by resource
+```
+
+Tasks are grouped into sections by assigned resource (person/team):
+- Each resource gets their own section
+- Tasks with multiple resources appear in **each** resource's section
+- Resources are sorted alphabetically
+- Unassigned tasks appear in an "unassigned" section at the end
+
+**Example:**
+```yaml
+entities:
+  backend:
+    type: capability
+    name: Backend API
+    meta:
+      effort: "10d"
+      resources: ["alice", "bob"]  # Appears in both sections
+
+  frontend:
+    type: capability
+    name: Frontend UI
+    meta:
+      effort: "5d"
+      resources: ["alice"]  # Only in alice's section
+```
+
+Generated chart will have:
+- `section alice` - Shows both "Backend API" and "Frontend UI"
+- `section bob` - Shows "Backend API" only
+
+This view is useful for:
+- Resource capacity planning and workload balancing
+- Identifying overallocated or underutilized team members
+- Understanding each person's task queue
+- Spotting tasks that require collaboration (appear in multiple sections)
 
 ## Examples
 
@@ -432,6 +489,9 @@ mouc gantt [OPTIONS] [FILE]
 - `--current-date, -c DATE` - Current/as-of date for scheduling in `YYYY-MM-DD` format.
   - Default: today
 - `--title, -t TEXT` - Chart title (default: "Project Schedule")
+- `--group-by, -g GROUPING` - How to organize chart sections: `type` or `resource`
+  - `type` - Group by entity type (capability, user story, outcome). Default.
+  - `resource` - Group by resource (person/team). Tasks with multiple resources appear in each section.
 - `--output, -o PATH` - Output file path
   - Files ending in `.md` are wrapped in ` ```mermaid ` code fences
   - Other files get raw Mermaid syntax
@@ -453,6 +513,12 @@ mouc gantt --output schedule.md
 
 # Output to .mmd file (raw Mermaid syntax)
 mouc gantt --output schedule.mmd
+
+# Group by resource for capacity planning
+mouc gantt --group-by resource --output resource-view.md
+
+# Group by type (explicit, same as default)
+mouc gantt --group-by type --output type-view.md
 
 # Different input file
 mouc gantt project.yaml --output project-schedule.md

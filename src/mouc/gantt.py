@@ -598,12 +598,15 @@ class GanttScheduler:
         except ValueError:
             return None
 
-    def generate_mermaid(self, result: ScheduleResult, title: str = "Project Schedule") -> str:
+    def generate_mermaid(
+        self, result: ScheduleResult, title: str = "Project Schedule", group_by: str = "type"
+    ) -> str:
         """Generate Mermaid gantt chart from schedule result.
 
         Args:
             result: The scheduling result containing tasks
             title: Chart title (default: "Project Schedule")
+            group_by: How to group tasks - "type" (entity type) or "resource" (person/team)
 
         Returns:
             Mermaid gantt chart syntax as a string
@@ -619,73 +622,109 @@ class GanttScheduler:
             "",
         ]
 
-        tasks_by_type: dict[str, list[ScheduledTask]] = {}
         entities_by_id = {e.id: e for e in self.feature_map.entities}
 
-        for task in result.tasks:
-            entity = entities_by_id[task.entity_id]
-            entity_type = entity.type
-            if entity_type not in tasks_by_type:
-                tasks_by_type[entity_type] = []
-            tasks_by_type[entity_type].append(task)
+        if group_by == "type":
+            # Group by entity type (original behavior)
+            tasks_by_type: dict[str, list[ScheduledTask]] = {}
 
-        type_order = {"capability": 0, "user_story": 1, "outcome": 2}
-        sorted_types = sorted(
-            tasks_by_type.keys(),
-            key=lambda t: type_order.get(t, 99),  # noqa: PLR2004
-        )
-
-        for entity_type in sorted_types:
-            section_name = entity_type.replace("_", " ").title()
-            lines.append(f"    section {section_name}")
-
-            tasks = tasks_by_type[entity_type]
-            for task in tasks:
+            for task in result.tasks:
                 entity = entities_by_id[task.entity_id]
-                gantt_meta = self._get_gantt_meta(entity)
+                entity_type = entity.type
+                if entity_type not in tasks_by_type:
+                    tasks_by_type[entity_type] = []
+                tasks_by_type[entity_type].append(task)
 
-                # Check if task has a deadline (explicit or from timeframe) and if it's violated
-                is_late = False
-                deadline_date = None
+            type_order = {"capability": 0, "user_story": 1, "outcome": 2}
+            sorted_types = sorted(
+                tasks_by_type.keys(),
+                key=lambda t: type_order.get(t, 99),  # noqa: PLR2004
+            )
 
-                if gantt_meta.end_before is not None:
-                    deadline_date = self._parse_date(gantt_meta.end_before)
-                elif gantt_meta.timeframe is not None:
-                    _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+            for entity_type in sorted_types:
+                section_name = entity_type.replace("_", " ").title()
+                lines.append(f"    section {section_name}")
 
-                # Check if task is late and create milestone if so
-                if deadline_date is not None:
-                    is_late = task.end_date > deadline_date
-                    if is_late:
-                        milestone_label = f"{entity.name} Deadline"
-                        deadline_str = deadline_date.strftime("%Y-%m-%d")
-                        lines.append(
-                            f"    {milestone_label} :milestone, crit, {task.entity_id}_deadline, "
-                            f"{deadline_str}, 0d"
-                        )
+                tasks = tasks_by_type[entity_type]
+                for task in tasks:
+                    self._add_task_to_mermaid(lines, task, entities_by_id)
 
-                label = entity.name
+        elif group_by == "resource":
+            # Group by resource (tasks with multiple resources appear in each resource's section)
+            tasks_by_resource: dict[str, list[ScheduledTask]] = {}
 
-                is_unassigned = task.resources == ["unassigned"] or not task.resources
+            for task in result.tasks:
+                for resource in task.resources:
+                    if resource not in tasks_by_resource:
+                        tasks_by_resource[resource] = []
+                    tasks_by_resource[resource].append(task)
 
-                if task.resources:
-                    if is_unassigned:
-                        label += " (unassigned)"
-                    else:
-                        label += f" ({', '.join(task.resources)})"
+            # Sort resources alphabetically, but put "unassigned" last
+            sorted_resources = sorted(tasks_by_resource.keys())
+            if "unassigned" in sorted_resources:
+                sorted_resources.remove("unassigned")
+                sorted_resources.append("unassigned")
 
-                tags: list[str] = []
-                if is_late:
-                    tags.append("crit")
-                elif is_unassigned:
-                    tags.append("active")
+            for resource in sorted_resources:
+                lines.append(f"    section {resource}")
 
-                tags_str = ", ".join(tags) + ", " if tags else ""
-                start_str = task.start_date.strftime("%Y-%m-%d")
-                duration_str = f"{int(task.duration_days)}d"
-
-                lines.append(
-                    f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}"
-                )
+                tasks = tasks_by_resource[resource]
+                for task in tasks:
+                    self._add_task_to_mermaid(lines, task, entities_by_id)
 
         return "\n".join(lines)
+
+    def _add_task_to_mermaid(
+        self, lines: list[str], task: ScheduledTask, entities_by_id: dict[str, Entity]
+    ) -> None:
+        """Add a task to the Mermaid lines list.
+
+        Args:
+            lines: The list of Mermaid lines to append to
+            task: The scheduled task to add
+            entities_by_id: Map of entity IDs to entities
+        """
+        entity = entities_by_id[task.entity_id]
+        gantt_meta = self._get_gantt_meta(entity)
+
+        # Check if task has a deadline (explicit or from timeframe) and if it's violated
+        is_late = False
+        deadline_date = None
+
+        if gantt_meta.end_before is not None:
+            deadline_date = self._parse_date(gantt_meta.end_before)
+        elif gantt_meta.timeframe is not None:
+            _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+
+        # Check if task is late and create milestone if so
+        if deadline_date is not None:
+            is_late = task.end_date > deadline_date
+            if is_late:
+                milestone_label = f"{entity.name} Deadline"
+                deadline_str = deadline_date.strftime("%Y-%m-%d")
+                lines.append(
+                    f"    {milestone_label} :milestone, crit, {task.entity_id}_deadline, "
+                    f"{deadline_str}, 0d"
+                )
+
+        label = entity.name
+
+        is_unassigned = task.resources == ["unassigned"] or not task.resources
+
+        if task.resources:
+            if is_unassigned:
+                label += " (unassigned)"
+            else:
+                label += f" ({', '.join(task.resources)})"
+
+        tags: list[str] = []
+        if is_late:
+            tags.append("crit")
+        elif is_unassigned:
+            tags.append("active")
+
+        tags_str = ", ".join(tags) + ", " if tags else ""
+        start_str = task.start_date.strftime("%Y-%m-%d")
+        duration_str = f"{int(task.duration_days)}d"
+
+        lines.append(f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}")

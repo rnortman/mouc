@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **Gantt chart scheduling**: Resource-aware deadline-driven scheduler with Mermaid chart generation
+  - **Resource-based grouping**: New `--group-by resource` option to organize chart by person/team
+    - Tasks with multiple resources appear in each resource's section
+    - Resources sorted alphabetically, with "unassigned" last
+    - Default remains `--group-by type` (capability/user story/outcome)
   - `mouc gantt` command to generate Gantt charts from feature maps
   - Resource-constrained project scheduling (RCPSP) with configurable capacity
   - Deadline tracking with automatic propagation through dependency chains
