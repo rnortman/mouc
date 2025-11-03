@@ -1552,3 +1552,199 @@ class TestTimeframeScheduling:
         assert "2025-02-28" in deadline_line
         # Should NOT show start date as deadline
         assert "2025-02-01" not in deadline_line
+
+
+class TestFixedScheduleTasks:
+    """Test fixed-schedule tasks (with start_date and/or end_date)."""
+
+    @pytest.fixture
+    def base_date(self) -> date:
+        """Base date for testing."""
+        return date(2025, 1, 1)
+
+    def test_fixed_start_and_end_date(self, base_date: date) -> None:
+        """Test task with both start_date and end_date specified."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Fixed Task",
+            description="Has fixed dates",
+            meta={
+                "start_date": "2025-02-01",
+                "end_date": "2025-02-15",
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 1
+        task_result = result.tasks[0]
+        assert task_result.start_date == date(2025, 2, 1)
+        assert task_result.end_date == date(2025, 2, 15)
+        assert task_result.duration_days == 14.0
+
+    def test_fixed_start_date_only(self, base_date: date) -> None:
+        """Test task with only start_date (end computed from effort)."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Fixed Start",
+            description="Has fixed start, computed end",
+            meta={
+                "start_date": "2025-02-01",
+                "effort": "2w",  # 10 days
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 1
+        task_result = result.tasks[0]
+        assert task_result.start_date == date(2025, 2, 1)
+        assert task_result.end_date == date(2025, 2, 11)  # 2w = 10 days
+        assert task_result.duration_days == 10.0
+
+    def test_fixed_end_date_only(self, base_date: date) -> None:
+        """Test task with only end_date (start computed from effort)."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Fixed End",
+            description="Has fixed end, computed start",
+            meta={
+                "end_date": "2025-02-15",
+                "effort": "1w",  # 5 days
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 1
+        task_result = result.tasks[0]
+        assert task_result.start_date == date(2025, 2, 10)  # 5 days before Feb 15
+        assert task_result.end_date == date(2025, 2, 15)
+        assert task_result.duration_days == 5.0
+
+    def test_fixed_task_not_rescheduled(self, base_date: date) -> None:
+        """Test that fixed tasks are not affected by scheduler start_date."""
+        metadata = FeatureMapMetadata()
+
+        fixed_task = Entity(
+            type="capability",
+            id="task1",
+            name="Fixed Task",
+            description="Should stay fixed",
+            meta={
+                "start_date": "2025-06-01",
+                "effort": "1w",
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [fixed_task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Even with early start_date, fixed task should stay at June 1
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        assert task_result.start_date == date(2025, 6, 1)
+
+    def test_fixed_and_scheduled_tasks_together(self, base_date: date) -> None:
+        """Test mix of fixed and scheduled tasks."""
+        metadata = FeatureMapMetadata()
+
+        fixed_task = Entity(
+            type="capability",
+            id="task1",
+            name="Fixed Task",
+            description="Fixed dates",
+            meta={
+                "start_date": "2025-02-01",
+                "end_date": "2025-02-10",
+                "resources": ["alice"],
+            },
+        )
+
+        scheduled_task = Entity(
+            type="capability",
+            id="task2",
+            name="Scheduled Task",
+            description="Normal scheduling",
+            requires={"task1"},
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [fixed_task, scheduled_task]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 2
+        task1_result = next(t for t in result.tasks if t.entity_id == "task1")
+        task2_result = next(t for t in result.tasks if t.entity_id == "task2")
+
+        # Fixed task should have its fixed dates
+        assert task1_result.start_date == date(2025, 2, 1)
+        assert task1_result.end_date == date(2025, 2, 10)
+
+        # Scheduled task should start after fixed task
+        assert task2_result.start_date > task1_result.end_date
+
+    def test_fixed_dates_as_date_objects(self, base_date: date) -> None:
+        """Test that date objects (as YAML would parse them) work correctly."""
+        from datetime import date as date_type
+
+        metadata = FeatureMapMetadata()
+
+        # Simulate what happens when YAML parses "2025-02-01" - it creates a date object
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="YAML Date Task",
+            description="Uses date objects not strings",
+            meta={
+                "start_date": date_type(2025, 2, 1),  # date object, not string
+                "end_date": date_type(2025, 2, 15),  # date object, not string
+                "resources": ["alice"],
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 1
+        task_result = result.tasks[0]
+        assert task_result.start_date == date(2025, 2, 1)
+        assert task_result.end_date == date(2025, 2, 15)
+        assert task_result.duration_days == 14.0

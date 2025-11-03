@@ -143,9 +143,11 @@ class GanttMetadata(BaseModel):
 
     effort: str = "1w"
     resources: list[str | tuple[str, float]] = Field(default_factory=list[str | tuple[str, float]])
-    start_after: str | None = None
-    end_before: str | None = None
-    timeframe: str | None = None
+    start_date: str | date | None = None  # Fixed start date (task won't be scheduled)
+    end_date: str | date | None = None  # Fixed end date (task won't be scheduled)
+    start_after: str | date | None = None  # Constraint: earliest possible start
+    end_before: str | date | None = None  # Constraint: hard deadline
+    timeframe: str | None = None  # Convenience: sets start_after and end_before from timeframe
 
 
 @dataclass(slots=True, frozen=True)
@@ -191,14 +193,18 @@ class GanttScheduler:
             result.warnings.append(str(e))
             return result
 
-        # Step 2: Backward pass - propagate deadlines up dependency chains
+        # Step 2: Handle fixed-schedule tasks (those with start_date and/or end_date)
+        scheduled_dates: dict[str, tuple[date, date]] = {}
+        fixed_tasks = self._schedule_fixed_tasks(entities_by_id, result)
+        scheduled_dates.update(fixed_tasks)
+
+        # Step 3: Backward pass - propagate deadlines up dependency chains
         latest_dates = self._calculate_latest_dates(entities_by_id, topo_order)
 
-        # Step 3: Calculate urgency scores
+        # Step 4: Calculate urgency scores
         urgency_scores = self._calculate_urgency(entities_by_id, latest_dates, topo_order)
 
-        # Step 4: Forward pass with resource tracking
-        scheduled_dates: dict[str, tuple[date, date]] = {}
+        # Step 5: Forward pass with resource tracking (skip fixed tasks)
         resource_availability: dict[str, date] = {}
 
         # Priority queue: (urgency_score, entity_id)
@@ -206,14 +212,29 @@ class GanttScheduler:
         ready_queue: list[tuple[float, str]] = []
         dependencies_remaining = {eid: len(entities_by_id[eid].requires) for eid in entities_by_id}
 
-        # Initialize queue with entities that have no dependencies
+        # Initialize queue with entities that have no dependencies (skip fixed tasks)
+        # Also update dependency counts for tasks depending on fixed tasks
         for entity_id in entities_by_id:
+            if entity_id in scheduled_dates:
+                # Already scheduled as fixed task, update dependents
+                entity = entities_by_id[entity_id]
+                for dependent_id in entity.enables:
+                    dependencies_remaining[dependent_id] -= 1
+                    if dependencies_remaining[dependent_id] == 0:
+                        urgency = urgency_scores.get(dependent_id, 0.0)
+                        heapq.heappush(ready_queue, (-urgency, dependent_id))
+                continue
             if dependencies_remaining[entity_id] == 0:
                 urgency = urgency_scores.get(entity_id, 0.0)
                 heapq.heappush(ready_queue, (-urgency, entity_id))
 
         while ready_queue:
             _, entity_id = heapq.heappop(ready_queue)
+
+            # Skip if already scheduled (as a fixed task)
+            if entity_id in scheduled_dates:
+                continue
+
             entity = entities_by_id[entity_id]
 
             # Calculate when this entity can start
@@ -282,6 +303,73 @@ class GanttScheduler:
                     heapq.heappush(ready_queue, (-urgency, dependent_id))
 
         return result
+
+    def _schedule_fixed_tasks(
+        self, entities_by_id: dict[str, Entity], result: ScheduleResult
+    ) -> dict[str, tuple[date, date]]:
+        """Schedule tasks with fixed start_date and/or end_date.
+
+        Returns dict of entity_id -> (start_date, end_date) for fixed tasks.
+        """
+        fixed_schedules: dict[str, tuple[date, date]] = {}
+
+        for entity_id, entity in entities_by_id.items():
+            gantt_meta = self._get_gantt_meta(entity)
+
+            # Skip if neither start_date nor end_date is specified
+            if gantt_meta.start_date is None and gantt_meta.end_date is None:
+                continue
+
+            # Parse the dates
+            start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
+            end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
+
+            # If both are specified, use them
+            if start is not None and end is not None:
+                duration = (end - start).days
+                fixed_schedules[entity_id] = (start, end)
+                resources = self._parse_resources(gantt_meta.resources)
+                result.tasks.append(
+                    ScheduledTask(
+                        entity_id=entity_id,
+                        start_date=start,
+                        end_date=end,
+                        duration_days=float(duration),
+                        resources=[r for r, _ in resources],
+                    )
+                )
+            # If only start_date is specified, compute end_date from effort
+            elif start is not None:
+                duration = self._calculate_duration(entity)
+                end = start + timedelta(days=duration)
+                fixed_schedules[entity_id] = (start, end)
+                resources = self._parse_resources(gantt_meta.resources)
+                result.tasks.append(
+                    ScheduledTask(
+                        entity_id=entity_id,
+                        start_date=start,
+                        end_date=end,
+                        duration_days=duration,
+                        resources=[r for r, _ in resources],
+                    )
+                )
+            # If only end_date is specified, compute start_date from effort
+            elif end is not None:
+                duration = self._calculate_duration(entity)
+                start = end - timedelta(days=duration)
+                fixed_schedules[entity_id] = (start, end)
+                resources = self._parse_resources(gantt_meta.resources)
+                result.tasks.append(
+                    ScheduledTask(
+                        entity_id=entity_id,
+                        start_date=start,
+                        end_date=end,
+                        duration_days=duration,
+                        resources=[r for r, _ in resources],
+                    )
+                )
+
+        return fixed_schedules
 
     def _topological_sort(self) -> list[str]:
         """Return entities in topological order (dependencies first)."""
@@ -448,8 +536,19 @@ class GanttScheduler:
 
         return result
 
-    def _parse_date(self, date_str: str) -> date | None:
-        """Parse a date string to date object."""
+    def _parse_date(self, date_str: str | date) -> date | None:
+        """Parse a date string or date object to date object.
+
+        Args:
+            date_str: Either a string in ISO format (YYYY-MM-DD) or a date object
+
+        Returns:
+            date object or None if parsing fails
+        """
+        # If already a date object, return it
+        if isinstance(date_str, date):
+            return date_str
+
         try:
             # ISO format YYYY-MM-DD
             return date.fromisoformat(date_str.strip())
