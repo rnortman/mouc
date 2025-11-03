@@ -320,3 +320,86 @@ class GanttScheduler:
             return date.fromisoformat(date_str.strip())
         except ValueError:
             return None
+
+    def generate_mermaid(self, result: ScheduleResult, title: str = "Project Schedule") -> str:
+        """Generate Mermaid gantt chart from schedule result.
+
+        Args:
+            result: The scheduling result containing tasks
+            title: Chart title (default: "Project Schedule")
+
+        Returns:
+            Mermaid gantt chart syntax as a string
+        """
+        lines = [
+            "gantt",
+            f"    title {title}",
+            "    dateFormat YYYY-MM-DD",
+            "",
+        ]
+
+        tasks_by_type: dict[str, list[ScheduledTask]] = {}
+        entities_by_id = {e.id: e for e in self.feature_map.entities}
+
+        for task in result.tasks:
+            entity = entities_by_id[task.entity_id]
+            entity_type = entity.type
+            if entity_type not in tasks_by_type:
+                tasks_by_type[entity_type] = []
+            tasks_by_type[entity_type].append(task)
+
+        type_order = {"capability": 0, "user_story": 1, "outcome": 2}
+        sorted_types = sorted(
+            tasks_by_type.keys(),
+            key=lambda t: type_order.get(t, 99),  # noqa: PLR2004
+        )
+
+        for entity_type in sorted_types:
+            section_name = entity_type.replace("_", " ").title()
+            lines.append(f"    section {section_name}")
+
+            tasks = tasks_by_type[entity_type]
+            for task in tasks:
+                entity = entities_by_id[task.entity_id]
+                gantt_meta = self._get_gantt_meta(entity)
+
+                # Check if task has a deadline and if it's violated
+                is_late = False
+                if gantt_meta.end_before is not None:
+                    deadline_date = self._parse_date(gantt_meta.end_before)
+                    is_late = deadline_date is not None and task.end_date > deadline_date
+                    if deadline_date:
+                        milestone_label = f"{entity.name} Deadline"
+                        deadline_str = deadline_date.strftime("%Y-%m-%d")
+                        # Mark milestone as crit if task will be late
+                        crit_tag = "crit, " if is_late else ""
+                        lines.append(
+                            f"    {milestone_label} :milestone, {crit_tag}{task.entity_id}_deadline, "
+                            f"{deadline_str}, 0d"
+                        )
+
+                label = entity.name
+
+                is_unassigned = task.resources == ["unassigned"] or not task.resources
+
+                if task.resources:
+                    if is_unassigned:
+                        label += " (unassigned)"
+                    else:
+                        label += f" ({', '.join(task.resources)})"
+
+                tags: list[str] = []
+                if is_late:
+                    tags.append("crit")
+                elif is_unassigned:
+                    tags.append("active")
+
+                tags_str = ", ".join(tags) + ", " if tags else ""
+                start_str = task.start_date.strftime("%Y-%m-%d")
+                duration_str = f"{int(task.duration_days)}d"
+
+                lines.append(
+                    f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}"
+                )
+
+        return "\n".join(lines)
