@@ -23,6 +23,8 @@ entities:
     tags: [critical, performance]
     meta:
       timeframe: Sprint 0
+      effort: "2w"
+      resources: ["alice", "bob"]
     
   message_bus:
     type: capability
@@ -36,6 +38,8 @@ entities:
     tags: [infrastructure]
     meta:
       timeframe: Sprint 1
+      effort: "3w"
+      resources: ["charlie"]
 
   data_sync:
     type: capability
@@ -49,6 +53,8 @@ entities:
     tags: [api_support, critical]
     meta:
       timeframe: Sprint 2
+      effort: "2w"
+      resources: ["alice:0.5", "dave"]
 
   realtime_monitor:
     type: capability
@@ -63,6 +69,8 @@ entities:
     tags: [monitoring, tech_debt]
     meta:
       timeframe: Sprint 3
+      effort: "1w"
+      resources: ["eve"]
 
   analytics_realtime:
     type: user_story
@@ -75,6 +83,8 @@ entities:
     meta:
       requestor: analytics_team
       timeframe: Sprint 4
+      effort: "2w"
+      resources: ["alice", "bob"]
     links:
       - jira:STORY-100
     tags: [q2_commitment]
@@ -89,6 +99,8 @@ entities:
     meta:
       requestor: sre_team
       timeframe: Sprint 5
+      effort: "1w"
+      resources: ["eve"]
     links:
       - jira:STORY-200
     tags: [monitoring]
@@ -103,6 +115,8 @@ entities:
     meta:
       requestor: api_team
       timeframe: Sprint 6
+      effort: "1.5w"
+      resources: ["charlie", "dave"]
     links:
       - jira:STORY-300
 
@@ -117,6 +131,10 @@ entities:
       - jira:EPIC-1000
       - doc:[Product Brief](https://confluence.company.com/display/PROD/Mobile-App-Launch)
     tags: [company_priority, safety_critical]
+    meta:
+      effort: "1d"
+      resources: ["product_team"]
+      end_before: "2025-09-30"
 
   production_observability:
     type: outcome
@@ -130,3 +148,6 @@ entities:
     tags: [operational_excellence]
     meta:
       timeframe: Sprint 7
+      effort: "3d"
+      resources: ["sre_team"]
+      end_before: "2025-06-30"

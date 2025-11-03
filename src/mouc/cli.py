@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+from datetime import date
 from pathlib import Path
 from typing import Annotated
 
 import typer
 
 from .exceptions import MoucError
+from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
 from .markdown import MarkdownGenerator
 from .parser import FeatureMapParser
@@ -124,6 +126,69 @@ def doc(
             typer.echo(f"Documentation written to {output}")
         else:
             typer.echo(markdown_output)
+
+    except MoucError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Unexpected error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+
+@app.command()
+def gantt(
+    file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
+        "feature_map.yaml"
+    ),
+    start_date: Annotated[
+        str | None,
+        typer.Option("--start-date", "-s", help="Start date for scheduling (YYYY-MM-DD)"),
+    ] = None,
+    title: Annotated[str, typer.Option("--title", "-t", help="Chart title")] = "Project Schedule",
+    output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
+) -> None:
+    """Generate Gantt chart in Mermaid format."""
+    try:
+        # Parse start date if provided
+        parsed_start_date: date | None = None
+        if start_date:
+            try:
+                parsed_start_date = date.fromisoformat(start_date)
+            except ValueError:
+                typer.echo(
+                    f"Error: Invalid date format '{start_date}'. Use YYYY-MM-DD format.",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
+
+        # Parse the feature map
+        parser = FeatureMapParser()
+        feature_map = parser.parse_file(file)
+
+        # Schedule tasks
+        scheduler = GanttScheduler(feature_map, start_date=parsed_start_date)
+        result = scheduler.schedule()
+
+        # Generate Mermaid chart
+        mermaid_output = scheduler.generate_mermaid(result, title=title)
+
+        # Output the result
+        if output:
+            # Wrap in markdown code fence if output is a .md file
+            if output.suffix.lower() == ".md":
+                output_content = f"```mermaid\n{mermaid_output}\n```\n"
+            else:
+                output_content = mermaid_output
+            output.write_text(output_content, encoding="utf-8")
+            typer.echo(f"Gantt chart written to {output}")
+        else:
+            typer.echo(mermaid_output)
+
+        # Show warnings if any
+        if result.warnings:
+            typer.echo("\nWarnings:", err=True)
+            for warning in result.warnings:
+                typer.echo(f"  - {warning}", err=True)
 
     except MoucError as e:
         typer.echo(f"Error: {e}", err=True)
