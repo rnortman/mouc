@@ -7,28 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.5] - 2025-11-04
+
 ### Added
-- **Gantt chart scheduling**: Resource-aware deadline-driven scheduler with Mermaid chart generation
-  - **Resource-based grouping**: New `--group-by resource` option to organize chart by person/team
-    - Tasks with multiple resources appear in each resource's section
-    - Resources sorted alphabetically, with "unassigned" last
-    - Default remains `--group-by type` (capability/user story/outcome)
-  - `mouc gantt` command to generate Gantt charts from feature maps
-  - Resource-constrained project scheduling (RCPSP) with configurable capacity
-  - Deadline tracking with automatic propagation through dependency chains
-  - Flexible timeframe parsing: quarters (`2025q1`), weeks (`2025w01`), halves (`2025h1`), years (`2025`), months (`2025-01`)
-  - Visual indicators: deadline milestones for late tasks, `:crit` highlighting for missed deadlines, `:active` for unassigned tasks
-  - Automatic markdown code fence wrapping for `.md` output files
-  - Metadata fields: `effort`, `resources`, `start_date`, `end_date`, `start_after`, `end_before`, `timeframe`
-  - **Dual date system**: Separate chart start date and current date for historical scheduling
-    - `--start-date` controls visualization left edge (defaults to min of fixed task dates and current date)
-    - `--current-date` controls scheduling baseline (defaults to today)
-    - Tasks without explicit dates start at current date (prevents scheduling in the past)
-    - Mermaid `todayMarker` (red line) positioned at current date
-  - **Fixed-schedule tasks**: Tasks with explicit `start_date` and/or `end_date` bypass scheduler
-    - Both dates: use exact dates
-    - Only start_date: compute end_date from effort
-    - Only end_date: compute start_date from effort
+- **Gantt chart scheduling**: New `mouc gantt` command generates resource-aware Gantt charts in Mermaid format
+  - Resource-constrained project scheduling with deadline tracking and propagation
+  - Support for effort estimates (`1d`, `2w`, `1.5m`, `L`) and resource allocations (`alice:0.5`)
+  - Flexible timeframe parsing: quarters (`2025q1`), weeks (`2025w01`), months (`2025-01`)
+  - Resource grouping option: `--group-by resource` to organize by person/team
+  - Fixed-date tasks with `start_date`/`end_date` metadata
+  - Visual indicators for deadline violations and unassigned tasks
+  - Dual date system: `--start-date` for chart start, `--current-date` for scheduling baseline
 
 ## [0.1.4] - 2025-09-30
 
