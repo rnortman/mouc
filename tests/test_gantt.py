@@ -69,11 +69,11 @@ class TestGanttScheduler:
 
         # cap1 starts immediately
         assert cap1_task.start_date == base_date
-        assert cap1_task.duration_days == 5.0  # 1 week = 5 days
+        assert cap1_task.duration_days == 7.0  # 1 week = 7 calendar days
 
         # cap2 starts after cap1 finishes
         assert cap2_task.start_date > cap1_task.end_date
-        assert cap2_task.duration_days == 10.0  # 2 weeks = 10 days
+        assert cap2_task.duration_days == 14.0  # 2 weeks = 14 calendar days
 
         # story1 starts after cap2 finishes
         assert story1_task.start_date > cap2_task.end_date
@@ -116,14 +116,14 @@ class TestGanttScheduler:
         task_1m_result = next(t for t in result.tasks if t.entity_id == "task_1m")
 
         assert task_5d_result.duration_days == 5.0
-        assert task_2w_result.duration_days == 10.0  # 2 weeks * 5 days
-        assert task_1m_result.duration_days == 20.0  # 1 month * 20 days
+        assert task_2w_result.duration_days == 14.0  # 2 weeks * 7 calendar days
+        assert task_1m_result.duration_days == 30.0  # 1 month * 30 calendar days
 
     def test_resource_capacity_calculation(self, base_date: date) -> None:
         """Test duration calculation with multiple resources."""
         metadata = FeatureMapMetadata()
 
-        # 2 people at full time on 2w effort = 1w duration
+        # 2 people at full time on 2w effort (14 days) = 7 days duration
         task_full = Entity(
             type="capability",
             id="task_full",
@@ -132,7 +132,7 @@ class TestGanttScheduler:
             meta={"effort": "2w", "resources": ["alice", "bob"]},
         )
 
-        # 1 person full time + 1 half time on 2w effort = 6.67 days
+        # 1 person full time + 1 half time on 2w effort (14 days) = 9.33 days
         task_mixed = Entity(
             type="capability",
             id="task_mixed",
@@ -141,7 +141,7 @@ class TestGanttScheduler:
             meta={"effort": "2w", "resources": ["alice:1.0", "bob:0.5"]},
         )
 
-        # 1 person half time on 1w effort = 10 days
+        # 1 person half time on 1w effort (7 days) = 14 days
         task_half = Entity(
             type="capability",
             id="task_half",
@@ -160,11 +160,11 @@ class TestGanttScheduler:
         task_mixed_result = next(t for t in result.tasks if t.entity_id == "task_mixed")
         task_half_result = next(t for t in result.tasks if t.entity_id == "task_half")
 
-        assert task_full_result.duration_days == pytest.approx(5.0)  # pyright: ignore[reportUnknownMemberType] # 10 days / 2 people
+        assert task_full_result.duration_days == pytest.approx(7.0)  # pyright: ignore[reportUnknownMemberType] # 14 days / 2 people
         assert task_mixed_result.duration_days == pytest.approx(  # pyright: ignore[reportUnknownMemberType]
-            6.67, rel=0.01
-        )  # 10 days / 1.5 capacity
-        assert task_half_result.duration_days == pytest.approx(10.0)  # pyright: ignore[reportUnknownMemberType] # 5 days / 0.5 capacity
+            9.33, rel=0.01
+        )  # 14 days / 1.5 capacity
+        assert task_half_result.duration_days == pytest.approx(14.0)  # pyright: ignore[reportUnknownMemberType] # 7 days / 0.5 capacity
 
     def test_resource_conflict_avoidance(self, base_date: date) -> None:
         """Test that scheduler avoids resource conflicts."""
@@ -202,11 +202,11 @@ class TestGanttScheduler:
         )
 
     def test_deadline_propagation(self, base_date: date) -> None:
-        """Test backward pass deadline propagation."""
+        """Test that deadline propagation works correctly through dependency chain."""
         metadata = FeatureMapMetadata()
 
         # Chain: cap1 -> cap2 -> story1
-        # story1 has tight deadline
+        # story1 has tight deadline, which should cause all tasks to schedule ASAP
         cap1 = Entity(
             type="capability",
             id="cap1",
@@ -228,7 +228,7 @@ class TestGanttScheduler:
             name="Final",
             description="End",
             requires={"cap2"},
-            meta={"effort": "1w", "resources": ["charlie"], "end_before": "2025-01-20"},
+            meta={"effort": "1w", "resources": ["charlie"], "end_before": "2025-01-25"},
         )
 
         entities = [cap1, cap2, story1]
@@ -236,19 +236,18 @@ class TestGanttScheduler:
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
         scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
 
-        # Test that latest_dates are calculated
-        entities_by_id = {e.id: e for e in entities}
-        topo_order = scheduler._topological_sort()
-        latest_dates = scheduler._calculate_latest_dates(entities_by_id, topo_order)
+        # Verify the chain schedules correctly to meet deadline
+        cap1_result = next(t for t in result.tasks if t.entity_id == "cap1")
+        cap2_result = next(t for t in result.tasks if t.entity_id == "cap2")
+        story1_result = next(t for t in result.tasks if t.entity_id == "story1")
 
-        # story1 should have explicit deadline
-        assert "story1" in latest_dates
-        assert latest_dates["story1"] == date(2025, 1, 20)
-
-        # cap2 and cap1 should have propagated deadlines
-        assert "cap2" in latest_dates
-        assert "cap1" in latest_dates
+        # All should complete before deadline
+        assert story1_result.end_date <= date(2025, 1, 25)
+        # Dependencies should be respected
+        assert cap2_result.start_date > cap1_result.end_date
+        assert story1_result.start_date > cap2_result.end_date
 
     def test_deadline_based_prioritization(self, base_date: date) -> None:
         """Test that urgent tasks are scheduled first."""
@@ -424,14 +423,14 @@ class TestGanttScheduler:
         task_result = result.tasks[0]
 
         # Should use defaults: 1w effort, 1 unassigned resource
-        assert task_result.duration_days == 5.0  # 1w default
+        assert task_result.duration_days == 7.0  # 1w default (7 calendar days)
         assert task_result.resources == ["unassigned"]
 
     def test_urgency_calculation(self, base_date: date) -> None:
-        """Test urgency score calculation."""
+        """Test that tasks with many dependents are scheduled appropriately."""
         metadata = FeatureMapMetadata()
 
-        # Task with many dependents vs task with deadline
+        # Task with many dependents
         cap_popular = Entity(
             type="capability",
             id="cap_popular",
@@ -471,16 +470,16 @@ class TestGanttScheduler:
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
         scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
 
-        entities_by_id = {e.id: e for e in entities}
-        topo_order = scheduler._topological_sort()
-        latest_dates = scheduler._calculate_latest_dates(entities_by_id, topo_order)
-        urgency_scores = scheduler._calculate_urgency(entities_by_id, latest_dates, topo_order)
+        # cap_popular should be scheduled (dependencies should work)
+        cap_result = next(t for t in result.tasks if t.entity_id == "cap_popular")
+        assert cap_result.start_date == base_date  # Should start immediately
 
-        # cap_popular should have high urgency due to 3 dependents
-        assert urgency_scores["cap_popular"] > 0
-        # Each dependent adds 10.0 to urgency
-        assert urgency_scores["cap_popular"] >= 30.0
+        # All dependents should start after cap_popular finishes
+        for story_id in ["story1", "story2", "story3"]:
+            story_result = next(t for t in result.tasks if t.entity_id == story_id)
+            assert story_result.start_date > cap_result.end_date
 
     def test_deadline_detection_late_task(self, base_date: date) -> None:
         """Test that scheduler detects when tasks miss deadlines."""
@@ -493,7 +492,7 @@ class TestGanttScheduler:
             name="Late Task",
             description="Has impossible deadline",
             meta={
-                "effort": "4w",  # Takes 4 weeks (20 days)
+                "effort": "4w",  # Takes 4 weeks (28 calendar days)
                 "resources": ["alice"],
                 "end_before": "2025-01-10",  # Only 9 days from start
             },
@@ -510,9 +509,9 @@ class TestGanttScheduler:
         assert "task" in result.warnings[0]
         assert "after required date" in result.warnings[0]
 
-        # Task should finish on Jan 21 (1 + 20 days)
+        # Task should finish on Jan 29 (1 + 28 days)
         task_result = result.tasks[0]
-        assert task_result.end_date == date(2025, 1, 21)
+        assert task_result.end_date == date(2025, 1, 29)
 
     def test_deadline_detection_on_time_task(self, base_date: date) -> None:
         """Test that scheduler correctly identifies tasks meeting deadlines."""
@@ -574,23 +573,22 @@ class TestGanttScheduler:
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
         scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
 
-        # Test deadline propagation
-        entities_by_id = {e.id: e for e in entities}
-        topo_order = scheduler._topological_sort()
-        latest_dates = scheduler._calculate_latest_dates(entities_by_id, topo_order)
+        # Test that the chain schedules correctly to meet the deadline
+        task1_result = next(t for t in result.tasks if t.entity_id == "task1")
+        task2_result = next(t for t in result.tasks if t.entity_id == "task2")
+        task3_result = next(t for t in result.tasks if t.entity_id == "task3")
 
-        # task3 should have explicit deadline
-        assert "task3" in latest_dates
-        assert latest_dates["task3"] == date(2025, 2, 1)
+        # task3 should meet its deadline
+        assert task3_result.end_date <= date(2025, 2, 1)
 
-        # task2 must finish before task3 can start (6 days buffer: 5 for task3 + 1 day gap)
-        assert "task2" in latest_dates
-        assert latest_dates["task2"] == date(2025, 1, 26)  # Feb 1 - 5 days - 1 day
+        # Dependencies should be respected
+        assert task2_result.start_date > task1_result.end_date
+        assert task3_result.start_date > task2_result.end_date
 
-        # task1 must finish before task2 can start
-        assert "task1" in latest_dates
-        assert latest_dates["task1"] == date(2025, 1, 20)  # Jan 26 - 5 days - 1 day
+        # Tasks should start as soon as possible (no unnecessary delays)
+        assert task1_result.start_date == base_date
 
     def test_multiple_deadlines_different_chains(self, base_date: date) -> None:
         """Test handling multiple independent deadlines."""
@@ -655,7 +653,7 @@ class TestGanttScheduler:
         assert len(result.warnings) == 1
         warning = result.warnings[0]
         assert "task" in warning
-        assert "2025-01-11" in warning  # Actual finish date (Jan 1 + 10 days)
+        assert "2025-01-15" in warning  # Actual finish date (Jan 1 + 14 days)
         assert "2025-01-10" in warning  # Required date
 
     def test_deadline_with_start_after_constraint(self, base_date: date) -> None:
@@ -687,8 +685,8 @@ class TestGanttScheduler:
         # Task should start on Jan 15 (start_after constraint)
         task_result = result.tasks[0]
         assert task_result.start_date == date(2025, 1, 15)
-        # And finish on Jan 20 (15 + 5 days) which violates Jan 18 deadline
-        assert task_result.end_date == date(2025, 1, 20)
+        # And finish on Jan 22 (15 + 7 days) which violates Jan 18 deadline
+        assert task_result.end_date == date(2025, 1, 22)
 
     def test_no_deadline_no_milestone(self, base_date: date) -> None:
         """Test that tasks without deadlines don't get milestones."""
@@ -750,7 +748,7 @@ class TestMermaidGeneration:
         assert "Database Setup (alice)" in mermaid
         assert "cap1" in mermaid
         assert "2025-01-01" in mermaid
-        assert "5d" in mermaid  # 1 week = 5 days
+        assert "7d" in mermaid  # 1 week = 7 calendar days
 
     def test_mermaid_multiple_sections(self, base_date: date) -> None:
         """Test that different entity types appear in separate sections."""
@@ -922,7 +920,7 @@ class TestMermaidGeneration:
         """Test that fractional durations are rounded to integers."""
         metadata = FeatureMapMetadata()
 
-        # This will result in 6.67 days duration
+        # This will result in 9.33 days duration (14 days / 1.5 capacity)
         task = Entity(
             type="capability",
             id="task",
@@ -939,10 +937,10 @@ class TestMermaidGeneration:
         mermaid = scheduler.generate_mermaid(result)
 
         # Duration should be rounded to integer
-        assert "6d" in mermaid or "7d" in mermaid  # Either round down or up is acceptable
+        assert "9d" in mermaid or "10d" in mermaid  # Either round down or up is acceptable
         # Should not have fractional days
-        assert ".67d" not in mermaid
-        assert "6.67d" not in mermaid
+        assert ".33d" not in mermaid
+        assert "9.33d" not in mermaid
 
     def test_mermaid_complex_schedule(self, base_date: date) -> None:
         """Test complete Mermaid output with complex dependency graph."""
@@ -1601,7 +1599,7 @@ class TestFixedScheduleTasks:
             description="Has fixed start, computed end",
             meta={
                 "start_date": "2025-02-01",
-                "effort": "2w",  # 10 days
+                "effort": "2w",  # 14 calendar days
                 "resources": ["alice"],
             },
         )
@@ -1615,8 +1613,8 @@ class TestFixedScheduleTasks:
         assert len(result.tasks) == 1
         task_result = result.tasks[0]
         assert task_result.start_date == date(2025, 2, 1)
-        assert task_result.end_date == date(2025, 2, 11)  # 2w = 10 days
-        assert task_result.duration_days == 10.0
+        assert task_result.end_date == date(2025, 2, 15)  # 2w = 14 days
+        assert task_result.duration_days == 14.0
 
     def test_fixed_end_date_only(self, base_date: date) -> None:
         """Test task with only end_date (start computed from effort)."""
@@ -1629,7 +1627,7 @@ class TestFixedScheduleTasks:
             description="Has fixed end, computed start",
             meta={
                 "end_date": "2025-02-15",
-                "effort": "1w",  # 5 days
+                "effort": "1w",  # 7 calendar days
                 "resources": ["alice"],
             },
         )
@@ -1642,9 +1640,9 @@ class TestFixedScheduleTasks:
 
         assert len(result.tasks) == 1
         task_result = result.tasks[0]
-        assert task_result.start_date == date(2025, 2, 10)  # 5 days before Feb 15
+        assert task_result.start_date == date(2025, 2, 8)  # 7 days before Feb 15
         assert task_result.end_date == date(2025, 2, 15)
-        assert task_result.duration_days == 5.0
+        assert task_result.duration_days == 7.0
 
     def test_fixed_task_not_rescheduled(self, base_date: date) -> None:
         """Test that fixed tasks are not affected by scheduler start_date."""

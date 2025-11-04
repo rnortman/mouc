@@ -1,14 +1,15 @@
-"""Gantt chart scheduling for Mouc."""
+"""Gantt chart scheduling for Mouc - data preparation and rendering."""
 
 from __future__ import annotations
 
-import heapq
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+from .scheduler import ParallelScheduler, Task
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -169,57 +170,12 @@ class ScheduleResult:
     warnings: list[str] = field(default_factory=list[str])
 
 
-class ResourceSchedule:
-    """Tracks busy periods for a resource using sorted intervals."""
-
-    def __init__(self) -> None:
-        """Initialize with empty busy periods."""
-        # List of (start_date, end_date) tuples, sorted by start_date
-        self.busy_periods: list[tuple[date, date]] = []
-
-    def add_busy_period(self, start: date, end: date) -> None:
-        """Add a busy period and maintain sorted order.
-
-        Args:
-            start: Start date of busy period (inclusive)
-            end: End date of busy period (inclusive)
-        """
-        # Insert in sorted position
-        import bisect
-
-        bisect.insort(self.busy_periods, (start, end), key=lambda x: x[0])
-
-    def find_next_available(self, earliest: date, duration_days: float) -> date:
-        """Find the next date when resource is available for the given duration.
-
-        Args:
-            earliest: Earliest date to consider
-            duration_days: Duration needed in days
-
-        Returns:
-            Start date when resource is available for the full duration
-        """
-        candidate_start = earliest
-        end_needed = candidate_start + timedelta(days=duration_days)
-
-        # Check each busy period to see if it conflicts with our candidate slot
-        for busy_start, busy_end in self.busy_periods:
-            # If busy period is entirely after our candidate slot, we're done
-            if busy_start > end_needed:
-                break
-
-            # If busy period overlaps with our candidate slot, move candidate after it
-            # Overlap occurs if: busy_start <= end_needed AND busy_end >= candidate_start
-            if busy_start <= end_needed and busy_end >= candidate_start:
-                # Move candidate to day after this busy period ends
-                candidate_start = busy_end + timedelta(days=1)
-                end_needed = candidate_start + timedelta(days=duration_days)
-
-        return candidate_start
-
-
 class GanttScheduler:
-    """Resource-aware deadline-driven scheduler for Mouc entities."""
+    """Resource-aware deadline-driven scheduler for Mouc entities.
+
+    This class handles data preparation and rendering. The core scheduling
+    algorithm is implemented in the scheduler module.
+    """
 
     def __init__(
         self,
@@ -275,319 +231,165 @@ class GanttScheduler:
         result = ScheduleResult()
         entities_by_id = {e.id: e for e in self.feature_map.entities}
 
-        # Step 1: Calculate topological order (validate no cycles)
-        try:
-            topo_order = self._topological_sort()
-        except ValueError as e:
-            result.warnings.append(str(e))
-            return result
+        # First pass: identify all fixed tasks that are in the past
+        fixed_in_past: dict[str, tuple[date, date]] = {}  # Tasks that are already done
 
-        # Step 2: Handle fixed-schedule tasks (those with start_date and/or end_date)
-        scheduled_dates: dict[str, tuple[date, date]] = {}
-        fixed_tasks = self._schedule_fixed_tasks(entities_by_id, result)
-        scheduled_dates.update(fixed_tasks)
-
-        # Step 3: Backward pass - propagate deadlines up dependency chains
-        latest_dates = self._calculate_latest_dates(entities_by_id, topo_order)
-
-        # Step 4: Calculate urgency scores
-        urgency_scores = self._calculate_urgency(entities_by_id, latest_dates, topo_order)
-
-        # Step 5: Forward pass with resource tracking (skip fixed tasks)
-        resource_schedules: dict[str, ResourceSchedule] = {}
-
-        # Add fixed tasks to resource schedules
-        for entity_id, (start, end) in fixed_tasks.items():
-            entity = entities_by_id[entity_id]
+        for entity in self.feature_map.entities:
             gantt_meta = self._get_gantt_meta(entity)
-            resources = self._parse_resources(gantt_meta.resources)
-            for resource_name, _ in resources:
-                if resource_name not in resource_schedules:
-                    resource_schedules[resource_name] = ResourceSchedule()
-                resource_schedules[resource_name].add_busy_period(start, end)
 
-        # Priority queue: (urgency_score, entity_id)
-        # Using negative urgency for max-heap behavior
-        ready_queue: list[tuple[float, str]] = []
-        dependencies_remaining = {eid: len(entities_by_id[eid].requires) for eid in entities_by_id}
+            # Check for fixed tasks that are entirely in the past
+            if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
+                start, end = self._schedule_fixed_task(entity)
 
-        # Initialize queue with entities that have no dependencies (skip fixed tasks)
-        # Also update dependency counts for tasks depending on fixed tasks
-        for entity_id in entities_by_id:
-            if entity_id in scheduled_dates:
-                # Already scheduled as fixed task, update dependents
-                entity = entities_by_id[entity_id]
-                for dependent_id in entity.enables:
-                    dependencies_remaining[dependent_id] -= 1
-                    if dependencies_remaining[dependent_id] == 0:
-                        urgency = urgency_scores.get(dependent_id, 0.0)
-                        heapq.heappush(ready_queue, (-urgency, dependent_id))
-                continue
-            if dependencies_remaining[entity_id] == 0:
-                urgency = urgency_scores.get(entity_id, 0.0)
-                heapq.heappush(ready_queue, (-urgency, entity_id))
+                # If the task is entirely in the past, record it
+                if end < self.current_date:
+                    fixed_in_past[entity.id] = (start, end)
+                    result.tasks.append(
+                        ScheduledTask(
+                            entity_id=entity.id,
+                            start_date=start,
+                            end_date=end,
+                            duration_days=(end - start).days,
+                            resources=[r for r, _ in self._parse_resources(gantt_meta.resources)],
+                        )
+                    )
 
-        while ready_queue:
-            _, entity_id = heapq.heappop(ready_queue)
+        # Second pass: convert all non-past entities to scheduler tasks
+        tasks_to_schedule: list[Task] = []
 
-            # Skip if already scheduled (as a fixed task)
-            if entity_id in scheduled_dates:
+        for entity in self.feature_map.entities:
+            gantt_meta = self._get_gantt_meta(entity)
+
+            # Skip tasks that are already in fixed_in_past
+            if entity.id in fixed_in_past:
                 continue
 
-            entity = entities_by_id[entity_id]
+            # Handle future/ongoing fixed tasks
+            if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
+                start, end = self._schedule_fixed_task(entity)
 
-            # Calculate when this entity can start
-            # Must be after: current_date, all dependencies, all resources available, start_after constraint
-            earliest_start: date = self.current_date
+                # Filter out dependencies that are already complete (fixed in past)
+                active_dependencies = [
+                    dep_id for dep_id in entity.requires if dep_id not in fixed_in_past
+                ]
 
-            # Check dependency completion
-            for dep_id in entity.requires:
-                if dep_id in scheduled_dates:
-                    dep_end = scheduled_dates[dep_id][1]
-                    earliest_start = max(earliest_start, dep_end + timedelta(days=1))
-
-            # Check start_after constraint (apply max with current_date)
-            # Explicit takes precedence over timeframe
-            gantt_meta = self._get_gantt_meta(entity)
-            if gantt_meta.start_after:
-                start_after = self._parse_date(gantt_meta.start_after)
-                if start_after:
-                    # Use max of specified start_after and current_date (can't start in past)
-                    earliest_start = max(earliest_start, start_after, self.current_date)
-            elif gantt_meta.timeframe:
-                # Apply timeframe start if no explicit start_after
-                timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
-                if timeframe_start:
-                    # Use max of timeframe start and current_date (can't start in past)
-                    earliest_start = max(earliest_start, timeframe_start, self.current_date)
-
-            # Calculate duration
-            duration = self._calculate_duration(entity)
-
-            # Check resource availability and find next available slot
-            # We need to find a slot where ALL resources are available simultaneously
-            resources = self._parse_resources(gantt_meta.resources)
-            actual_start: date = earliest_start
-
-            # Find the earliest start where all resources are available
-            max_attempts = 100  # Prevent infinite loops
-            for _ in range(max_attempts):
-                # Check if all resources are available starting at actual_start
-                conflicts: list[date] = []
-                for resource_name, _ in resources:
-                    if resource_name not in resource_schedules:
-                        resource_schedules[resource_name] = ResourceSchedule()
-
-                    resource_available: date = resource_schedules[
-                        resource_name
-                    ].find_next_available(actual_start, duration)
-                    if resource_available > actual_start:
-                        conflicts.append(resource_available)
-
-                if not conflicts:
-                    # All resources available at actual_start
-                    break
-
-                # Move to the earliest conflict date and try again
-                actual_start = min(conflicts)
-            else:
-                # Should never happen, but fallback to earliest_start if we hit max attempts
-                actual_start = earliest_start
-
-            # Calculate end date
-            end_date: date = actual_start + timedelta(days=duration)
-
-            # Update resource schedules with this busy period
-            for resource_name, _ in resources:
-                resource_schedules[resource_name].add_busy_period(actual_start, end_date)
-
-            # Record schedule
-            scheduled_dates[entity_id] = (actual_start, end_date)
-            result.tasks.append(
-                ScheduledTask(
-                    entity_id=entity_id,
-                    start_date=actual_start,
-                    end_date=end_date,
-                    duration_days=duration,
-                    resources=[r for r, _ in resources],
+                task = Task(
+                    id=entity.id,
+                    duration_days=(end - start).days,
+                    resources=self._parse_resources(gantt_meta.resources),
+                    dependencies=active_dependencies,
+                    start_after=start,
+                    end_before=end,
                 )
-            )
+                tasks_to_schedule.append(task)
+            else:
+                # Regular task: calculate duration and constraints
+                duration = self._calculate_duration(entity)
+                resources = self._parse_resources(gantt_meta.resources)
+                start_after = None
+                end_before = None
+
+                if gantt_meta.start_after:
+                    start_after = self._parse_date(gantt_meta.start_after)
+                elif gantt_meta.timeframe:
+                    timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
+                    if timeframe_start:
+                        start_after = timeframe_start
+
+                if gantt_meta.end_before:
+                    end_before = self._parse_date(gantt_meta.end_before)
+                elif gantt_meta.timeframe:
+                    _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
+                    if timeframe_end:
+                        end_before = timeframe_end
+
+                # Filter out dependencies that are already complete (fixed in past)
+                active_dependencies = [
+                    dep_id for dep_id in entity.requires if dep_id not in fixed_in_past
+                ]
+
+                task = Task(
+                    id=entity.id,
+                    duration_days=duration,
+                    resources=resources,
+                    dependencies=active_dependencies,
+                    start_after=start_after,
+                    end_before=end_before,
+                )
+                tasks_to_schedule.append(task)
+
+        # Run the scheduler
+        try:
+            scheduler = ParallelScheduler(tasks_to_schedule, self.current_date)
+            scheduled_tasks = scheduler.schedule()
+
+            # Convert scheduler results to our format
+            for scheduled_task in scheduled_tasks:
+                result.tasks.append(
+                    ScheduledTask(
+                        entity_id=scheduled_task.task_id,
+                        start_date=scheduled_task.start_date,
+                        end_date=scheduled_task.end_date,
+                        duration_days=scheduled_task.duration_days,
+                        resources=scheduled_task.resources,
+                    )
+                )
 
             # Check for deadline violations
-            if entity_id in latest_dates:
-                required_end = latest_dates[entity_id]
-                if end_date > required_end:
-                    days_late = (end_date - required_end).days
+            for task in result.tasks:
+                entity = entities_by_id[task.entity_id]
+                gantt_meta = self._get_gantt_meta(entity)
+
+                deadline = None
+                if gantt_meta.end_before:
+                    deadline = self._parse_date(gantt_meta.end_before)
+                elif gantt_meta.timeframe:
+                    _, deadline = parse_timeframe(gantt_meta.timeframe)
+
+                if deadline and task.end_date > deadline:
+                    days_late = (task.end_date - deadline).days
                     result.warnings.append(
-                        f"Entity '{entity_id}' finishes {days_late} days after required date "
-                        f"({end_date} vs {required_end})"
+                        f"Entity '{task.entity_id}' finishes {days_late} days after required date "
+                        f"({task.end_date} vs {deadline})"
                     )
 
-            # Update queue with newly ready entities
-            for dependent_id in entity.enables:
-                dependencies_remaining[dependent_id] -= 1
-                if dependencies_remaining[dependent_id] == 0:
-                    urgency = urgency_scores.get(dependent_id, 0.0)
-                    heapq.heappush(ready_queue, (-urgency, dependent_id))
+        except ValueError as e:
+            result.warnings.append(str(e))
 
         return result
 
-    def _schedule_fixed_tasks(
-        self, entities_by_id: dict[str, Entity], result: ScheduleResult
-    ) -> dict[str, tuple[date, date]]:
-        """Schedule tasks with fixed start_date and/or end_date.
+    def _schedule_fixed_task(self, entity: Entity) -> tuple[date, date]:
+        """Schedule a task with fixed start_date and/or end_date.
 
-        Returns dict of entity_id -> (start_date, end_date) for fixed tasks.
+        Args:
+            entity: The entity to schedule
+
+        Returns:
+            Tuple of (start_date, end_date)
         """
-        fixed_schedules: dict[str, tuple[date, date]] = {}
+        gantt_meta = self._get_gantt_meta(entity)
 
-        for entity_id, entity in entities_by_id.items():
-            gantt_meta = self._get_gantt_meta(entity)
+        start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
+        end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
 
-            # Skip if neither start_date nor end_date is specified
-            if gantt_meta.start_date is None and gantt_meta.end_date is None:
-                continue
+        # If both are specified, use them
+        if start is not None and end is not None:
+            return (start, end)
 
-            # Parse the dates
-            start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
-            end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
+        # If only start_date is specified, compute end_date from effort
+        if start is not None:
+            duration = self._calculate_duration(entity)
+            end = start + timedelta(days=duration)
+            return (start, end)
 
-            # If both are specified, use them
-            if start is not None and end is not None:
-                duration = (end - start).days
-                fixed_schedules[entity_id] = (start, end)
-                resources = self._parse_resources(gantt_meta.resources)
-                result.tasks.append(
-                    ScheduledTask(
-                        entity_id=entity_id,
-                        start_date=start,
-                        end_date=end,
-                        duration_days=float(duration),
-                        resources=[r for r, _ in resources],
-                    )
-                )
-            # If only start_date is specified, compute end_date from effort
-            elif start is not None:
-                duration = self._calculate_duration(entity)
-                end = start + timedelta(days=duration)
-                fixed_schedules[entity_id] = (start, end)
-                resources = self._parse_resources(gantt_meta.resources)
-                result.tasks.append(
-                    ScheduledTask(
-                        entity_id=entity_id,
-                        start_date=start,
-                        end_date=end,
-                        duration_days=duration,
-                        resources=[r for r, _ in resources],
-                    )
-                )
-            # If only end_date is specified, compute start_date from effort
-            elif end is not None:
-                duration = self._calculate_duration(entity)
-                start = end - timedelta(days=duration)
-                fixed_schedules[entity_id] = (start, end)
-                resources = self._parse_resources(gantt_meta.resources)
-                result.tasks.append(
-                    ScheduledTask(
-                        entity_id=entity_id,
-                        start_date=start,
-                        end_date=end,
-                        duration_days=duration,
-                        resources=[r for r, _ in resources],
-                    )
-                )
+        # If only end_date is specified, compute start_date from effort
+        if end is not None:
+            duration = self._calculate_duration(entity)
+            start = end - timedelta(days=duration)
+            return (start, end)
 
-        return fixed_schedules
-
-    def _topological_sort(self) -> list[str]:
-        """Return entities in topological order (dependencies first)."""
-        entities_by_id = {e.id: e for e in self.feature_map.entities}
-        in_degree = {eid: len(entities_by_id[eid].requires) for eid in entities_by_id}
-        queue = [eid for eid, degree in in_degree.items() if degree == 0]
-        result: list[str] = []
-
-        while queue:
-            entity_id = queue.pop(0)
-            result.append(entity_id)  # pyright: ignore[reportUnknownMemberType]
-
-            entity = entities_by_id[entity_id]
-            for dependent_id in entity.enables:
-                in_degree[dependent_id] -= 1
-                if in_degree[dependent_id] == 0:
-                    queue.append(dependent_id)
-
-        if len(result) != len(entities_by_id):  # pyright: ignore[reportUnknownArgumentType]
-            raise ValueError("Circular dependency detected in feature map")
-
-        return result
-
-    def _calculate_latest_dates(
-        self, entities_by_id: dict[str, Entity], topo_order: list[str]
-    ) -> dict[str, date]:
-        """Backward pass: propagate deadlines up the dependency chain."""
-        latest: dict[str, date] = {}
-
-        # Initialize with explicit deadlines (explicit takes precedence over timeframe)
-        for entity_id, entity in entities_by_id.items():
-            gantt_meta = self._get_gantt_meta(entity)
-            if gantt_meta.end_before:
-                end_before = self._parse_date(gantt_meta.end_before)
-                if end_before:
-                    latest[entity_id] = end_before
-            elif gantt_meta.timeframe:
-                # Apply timeframe end as deadline if no explicit end_before
-                _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
-                if timeframe_end:
-                    latest[entity_id] = timeframe_end
-
-        # Propagate backwards through dependencies (reverse topological order)
-        for entity_id in reversed(topo_order):
-            if entity_id not in latest:
-                continue
-
-            entity = entities_by_id[entity_id]
-            entity_deadline = latest[entity_id]
-            entity_duration = self._calculate_duration(entity)
-
-            # Propagate to dependencies
-            for dep_id in entity.requires:
-                # Dependency must finish at least entity_duration + 1 day before this entity's deadline
-                dep_deadline = entity_deadline - timedelta(days=entity_duration + 1)
-                if dep_id in latest:
-                    latest[dep_id] = min(latest[dep_id], dep_deadline)
-                else:
-                    latest[dep_id] = dep_deadline
-
-        return latest
-
-    def _calculate_urgency(
-        self,
-        entities_by_id: dict[str, Entity],
-        latest_dates: dict[str, date],
-        topo_order: list[str],
-    ) -> dict[str, float]:
-        """Calculate urgency scores based on deadlines and dependent count."""
-        urgency: dict[str, float] = {}
-
-        for entity_id in entities_by_id:
-            score = 0.0
-
-            # Factor 1: Deadline urgency (higher score = more urgent)
-            if entity_id in latest_dates:
-                days_until_deadline = (latest_dates[entity_id] - self.current_date).days
-                # More urgent if deadline is sooner (inverse relationship)
-                if days_until_deadline > 0:
-                    score += 1000.0 / days_until_deadline
-                else:
-                    score += 10000.0  # Already late!
-
-            # Factor 2: Number of dependents (more dependents = more critical)
-            entity = entities_by_id[entity_id]
-            score += len(entity.enables) * 10.0
-
-            urgency[entity_id] = score
-
-        return urgency
+        # Shouldn't reach here
+        raise ValueError(f"Entity {entity.id} has neither start_date nor end_date")
 
     def _calculate_duration(self, entity: Entity) -> float:
         """Calculate duration in days from effort and resource allocation."""
@@ -603,17 +405,25 @@ class GanttScheduler:
         return effort_days / total_capacity
 
     def _parse_effort(self, effort_str: str) -> float:
-        """Parse effort string to days.
+        """Parse effort string to calendar days for scheduling.
 
         Supported formats:
-        - "5d" = 5 days
-        - "2w" = 10 working days (2 weeks * 5 days)
-        - "1.5m" = 30 working days (1.5 months * 20 days)
+        - "5d" = 5 calendar days
+        - "2w" = 14 calendar days (2 weeks * 7 days)
+        - "1.5m" = 45 calendar days (1.5 months * 30 days)
+        - "L" = Large (equivalent to 60 days, or 2 months)
+
+        Note: We use calendar days for Gantt chart scheduling, not working days.
         """
         effort_str = effort_str.strip().lower()
+
+        # Check for size labels first
+        if effort_str == "l":
+            return 60.0  # 2 months
+
         match = re.match(r"^([\d.]+)([dwm])$", effort_str)
         if not match:
-            return 5.0  # Default to 1 week
+            return 7.0  # Default to 1 week
 
         value, unit = match.groups()
         num = float(value)
@@ -621,10 +431,10 @@ class GanttScheduler:
         if unit == "d":
             return num
         if unit == "w":
-            return num * 5  # 5 working days per week
+            return num * 7  # 7 calendar days per week
         if unit == "m":
-            return num * 20  # ~20 working days per month
-        return 5.0
+            return num * 30  # 30 calendar days per month (approximation)
+        return 7.0
 
     def _parse_resources(
         self, resources_raw: list[str | tuple[str, float]]

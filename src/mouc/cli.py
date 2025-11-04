@@ -83,7 +83,10 @@ def graph(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
+        import traceback
+
         typer.echo(f"Unexpected error: {e}", err=True)
+        traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -131,7 +134,10 @@ def doc(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
+        import traceback
+
         typer.echo(f"Unexpected error: {e}", err=True)
+        traceback.print_exc()
         raise typer.Exit(1) from None
 
 
@@ -237,7 +243,10 @@ def gantt(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
+        import traceback
+
         typer.echo(f"Unexpected error: {e}", err=True)
+        traceback.print_exc()
         raise typer.Exit(1) from None
 
 
