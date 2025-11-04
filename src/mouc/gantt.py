@@ -169,6 +169,55 @@ class ScheduleResult:
     warnings: list[str] = field(default_factory=list[str])
 
 
+class ResourceSchedule:
+    """Tracks busy periods for a resource using sorted intervals."""
+
+    def __init__(self) -> None:
+        """Initialize with empty busy periods."""
+        # List of (start_date, end_date) tuples, sorted by start_date
+        self.busy_periods: list[tuple[date, date]] = []
+
+    def add_busy_period(self, start: date, end: date) -> None:
+        """Add a busy period and maintain sorted order.
+
+        Args:
+            start: Start date of busy period (inclusive)
+            end: End date of busy period (inclusive)
+        """
+        # Insert in sorted position
+        import bisect
+
+        bisect.insort(self.busy_periods, (start, end), key=lambda x: x[0])
+
+    def find_next_available(self, earliest: date, duration_days: float) -> date:
+        """Find the next date when resource is available for the given duration.
+
+        Args:
+            earliest: Earliest date to consider
+            duration_days: Duration needed in days
+
+        Returns:
+            Start date when resource is available for the full duration
+        """
+        candidate_start = earliest
+        end_needed = candidate_start + timedelta(days=duration_days)
+
+        # Check each busy period to see if it conflicts with our candidate slot
+        for busy_start, busy_end in self.busy_periods:
+            # If busy period is entirely after our candidate slot, we're done
+            if busy_start > end_needed:
+                break
+
+            # If busy period overlaps with our candidate slot, move candidate after it
+            # Overlap occurs if: busy_start <= end_needed AND busy_end >= candidate_start
+            if busy_start <= end_needed and busy_end >= candidate_start:
+                # Move candidate to day after this busy period ends
+                candidate_start = busy_end + timedelta(days=1)
+                end_needed = candidate_start + timedelta(days=duration_days)
+
+        return candidate_start
+
+
 class GanttScheduler:
     """Resource-aware deadline-driven scheduler for Mouc entities."""
 
@@ -245,7 +294,17 @@ class GanttScheduler:
         urgency_scores = self._calculate_urgency(entities_by_id, latest_dates, topo_order)
 
         # Step 5: Forward pass with resource tracking (skip fixed tasks)
-        resource_availability: dict[str, date] = {}
+        resource_schedules: dict[str, ResourceSchedule] = {}
+
+        # Add fixed tasks to resource schedules
+        for entity_id, (start, end) in fixed_tasks.items():
+            entity = entities_by_id[entity_id]
+            gantt_meta = self._get_gantt_meta(entity)
+            resources = self._parse_resources(gantt_meta.resources)
+            for resource_name, _ in resources:
+                if resource_name not in resource_schedules:
+                    resource_schedules[resource_name] = ResourceSchedule()
+                resource_schedules[resource_name].add_busy_period(start, end)
 
         # Priority queue: (urgency_score, entity_id)
         # Using negative urgency for max-heap behavior
@@ -287,15 +346,9 @@ class GanttScheduler:
                     dep_end = scheduled_dates[dep_id][1]
                     earliest_start = max(earliest_start, dep_end + timedelta(days=1))
 
-            # Check resource availability
-            gantt_meta = self._get_gantt_meta(entity)
-            resources = self._parse_resources(gantt_meta.resources)
-            for resource_name, _ in resources:
-                if resource_name in resource_availability:
-                    earliest_start = max(earliest_start, resource_availability[resource_name])
-
             # Check start_after constraint (apply max with current_date)
             # Explicit takes precedence over timeframe
+            gantt_meta = self._get_gantt_meta(entity)
             if gantt_meta.start_after:
                 start_after = self._parse_date(gantt_meta.start_after)
                 if start_after:
@@ -308,20 +361,52 @@ class GanttScheduler:
                     # Use max of timeframe start and current_date (can't start in past)
                     earliest_start = max(earliest_start, timeframe_start, self.current_date)
 
-            # Calculate duration and end date
+            # Calculate duration
             duration = self._calculate_duration(entity)
-            end_date = earliest_start + timedelta(days=duration)
 
-            # Update resource availability
+            # Check resource availability and find next available slot
+            # We need to find a slot where ALL resources are available simultaneously
+            resources = self._parse_resources(gantt_meta.resources)
+            actual_start: date = earliest_start
+
+            # Find the earliest start where all resources are available
+            max_attempts = 100  # Prevent infinite loops
+            for _ in range(max_attempts):
+                # Check if all resources are available starting at actual_start
+                conflicts: list[date] = []
+                for resource_name, _ in resources:
+                    if resource_name not in resource_schedules:
+                        resource_schedules[resource_name] = ResourceSchedule()
+
+                    resource_available: date = resource_schedules[
+                        resource_name
+                    ].find_next_available(actual_start, duration)
+                    if resource_available > actual_start:
+                        conflicts.append(resource_available)
+
+                if not conflicts:
+                    # All resources available at actual_start
+                    break
+
+                # Move to the earliest conflict date and try again
+                actual_start = min(conflicts)
+            else:
+                # Should never happen, but fallback to earliest_start if we hit max attempts
+                actual_start = earliest_start
+
+            # Calculate end date
+            end_date: date = actual_start + timedelta(days=duration)
+
+            # Update resource schedules with this busy period
             for resource_name, _ in resources:
-                resource_availability[resource_name] = end_date + timedelta(days=1)
+                resource_schedules[resource_name].add_busy_period(actual_start, end_date)
 
             # Record schedule
-            scheduled_dates[entity_id] = (earliest_start, end_date)
+            scheduled_dates[entity_id] = (actual_start, end_date)
             result.tasks.append(
                 ScheduledTask(
                     entity_id=entity_id,
-                    start_date=earliest_start,
+                    start_date=actual_start,
                     end_date=end_date,
                     duration_days=duration,
                     resources=[r for r, _ in resources],
