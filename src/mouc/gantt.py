@@ -638,10 +638,15 @@ class GanttScheduler:
             tasks_by_resource: dict[str, list[ScheduledTask]] = {}
 
             for task in result.tasks:
-                for resource in task.resources:
-                    if resource not in tasks_by_resource:
-                        tasks_by_resource[resource] = []
-                    tasks_by_resource[resource].append(task)
+                if not task.resources:
+                    if "unassigned" not in tasks_by_resource:
+                        tasks_by_resource["unassigned"] = []
+                    tasks_by_resource["unassigned"].append(task)
+                else:
+                    for resource in task.resources:
+                        if resource not in tasks_by_resource:
+                            tasks_by_resource[resource] = []
+                        tasks_by_resource[resource].append(task)
 
             sorted_resources = sorted(tasks_by_resource.keys())
             if "unassigned" in sorted_resources:
