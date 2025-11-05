@@ -172,6 +172,27 @@ def gantt(
             help="Group tasks by 'type' (capability/user story/outcome) or 'resource' (person/team)",
         ),
     ] = "type",
+    tick_interval: Annotated[
+        str | None,
+        typer.Option(
+            "--tick-interval",
+            help="Mermaid tickInterval for x-axis (e.g., '1week', '1month', '3month' for quarters)",
+        ),
+    ] = None,
+    axis_format: Annotated[
+        str | None,
+        typer.Option(
+            "--axis-format",
+            help="Mermaid axisFormat for date display (e.g., '%%Y-%%m-%%d', '%%b %%Y')",
+        ),
+    ] = None,
+    vertical_dividers: Annotated[
+        str | None,
+        typer.Option(
+            "--vertical-dividers",
+            help="Add vertical dividers at intervals: 'quarter', 'halfyear', or 'year'",
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -180,6 +201,15 @@ def gantt(
         if group_by not in ("type", "resource"):
             typer.echo(
                 f"Error: Invalid group-by value '{group_by}'. Must be 'type' or 'resource'.",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+
+        # Validate vertical_dividers parameter
+        if vertical_dividers and vertical_dividers not in ("quarter", "halfyear", "year"):
+            typer.echo(
+                f"Error: Invalid vertical-dividers value '{vertical_dividers}'. "
+                "Must be 'quarter', 'halfyear', or 'year'.",
                 err=True,
             )
             raise typer.Exit(1) from None
@@ -219,7 +249,14 @@ def gantt(
         result = scheduler.schedule()
 
         # Generate Mermaid chart
-        mermaid_output = scheduler.generate_mermaid(result, title=title, group_by=group_by)
+        mermaid_output = scheduler.generate_mermaid(
+            result,
+            title=title,
+            group_by=group_by,
+            tick_interval=tick_interval,
+            axis_format=axis_format,
+            vertical_dividers=vertical_dividers,
+        )
 
         # Output the result
         if output:

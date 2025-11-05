@@ -494,7 +494,13 @@ class GanttScheduler:
             return None
 
     def generate_mermaid(
-        self, result: ScheduleResult, title: str = "Project Schedule", group_by: str = "type"
+        self,
+        result: ScheduleResult,
+        title: str = "Project Schedule",
+        group_by: str = "type",
+        tick_interval: str | None = None,
+        axis_format: str | None = None,
+        vertical_dividers: str | None = None,
     ) -> str:
         """Generate Mermaid gantt chart from schedule result.
 
@@ -502,6 +508,9 @@ class GanttScheduler:
             result: The scheduling result containing tasks
             title: Chart title (default: "Project Schedule")
             group_by: How to group tasks - "type" (entity type) or "resource" (person/team)
+            tick_interval: Mermaid tickInterval (e.g., "1week", "1month", "3month" for quarters)
+            axis_format: Mermaid axisFormat string (e.g., "%Y-%m-%d", "%b %Y")
+            vertical_dividers: Add vertical dividers at intervals: "quarter", "halfyear", or "year"
 
         Returns:
             Mermaid gantt chart syntax as a string
@@ -513,14 +522,27 @@ class GanttScheduler:
             "gantt",
             f"    title {title}",
             "    dateFormat YYYY-MM-DD",
-            f"    todayMarker {current_date_str}",
-            "",
         ]
+
+        if tick_interval:
+            lines.append(f"    tickInterval {tick_interval}")
+
+        if axis_format:
+            lines.append(f"    axisFormat {axis_format}")
+
+        lines.append(f"    todayMarker {current_date_str}")
+        lines.append("")
+
+        # Add vertical dividers if requested
+        if vertical_dividers and result.tasks:
+            divider_lines = self._generate_vertical_dividers(result.tasks, vertical_dividers)
+            lines.extend(divider_lines)
+            if divider_lines:
+                lines.append("")
 
         entities_by_id = {e.id: e for e in self.feature_map.entities}
 
         if group_by == "type":
-            # Group by entity type (original behavior)
             tasks_by_type: dict[str, list[ScheduledTask]] = {}
 
             for task in result.tasks:
@@ -533,7 +555,7 @@ class GanttScheduler:
             type_order = {"capability": 0, "user_story": 1, "outcome": 2}
             sorted_types = sorted(
                 tasks_by_type.keys(),
-                key=lambda t: type_order.get(t, 99),  # noqa: PLR2004
+                key=lambda t: type_order.get(t, 99),
             )
 
             for entity_type in sorted_types:
@@ -545,7 +567,6 @@ class GanttScheduler:
                     self._add_task_to_mermaid(lines, task, entities_by_id)
 
         elif group_by == "resource":
-            # Group by resource (tasks with multiple resources appear in each resource's section)
             tasks_by_resource: dict[str, list[ScheduledTask]] = {}
 
             for task in result.tasks:
@@ -554,7 +575,6 @@ class GanttScheduler:
                         tasks_by_resource[resource] = []
                     tasks_by_resource[resource].append(task)
 
-            # Sort resources alphabetically, but put "unassigned" last
             sorted_resources = sorted(tasks_by_resource.keys())
             if "unassigned" in sorted_resources:
                 sorted_resources.remove("unassigned")
@@ -568,6 +588,70 @@ class GanttScheduler:
                     self._add_task_to_mermaid(lines, task, entities_by_id)
 
         return "\n".join(lines)
+
+    def _generate_vertical_dividers(
+        self, tasks: list[ScheduledTask], divider_type: str
+    ) -> list[str]:
+        """Generate vertical divider lines for the Mermaid chart.
+
+        Args:
+            tasks: List of scheduled tasks to determine date range
+            divider_type: Type of dividers - "quarter", "halfyear", or "year"
+
+        Returns:
+            List of Mermaid vert lines
+        """
+        if not tasks:
+            return []
+
+        # Find the date range from tasks
+        min_date = min(task.start_date for task in tasks)
+        max_date = max(task.end_date for task in tasks)
+
+        dividers: list[str] = []
+
+        if divider_type == "quarter":
+            current = date(min_date.year, 1, 1)
+            while current <= max_date:
+                if current >= min_date:
+                    quarter = (current.month - 1) // 3 + 1
+                    label = f"Q{quarter} {current.year}"
+                    vert_id = f"q{quarter}_{current.year}"
+                    dividers.append(
+                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                    )
+                if current.month == 10:
+                    current = date(current.year + 1, 1, 1)
+                else:
+                    current = date(current.year, current.month + 3, 1)
+
+        elif divider_type == "halfyear":
+            current = date(min_date.year, 1, 1)
+            while current <= max_date:
+                if current >= min_date:
+                    half = 1 if current.month == 1 else 2
+                    label = f"H{half} {current.year}"
+                    vert_id = f"h{half}_{current.year}"
+                    dividers.append(
+                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                    )
+                if current.month == 1:
+                    current = date(current.year, 7, 1)
+                else:
+                    current = date(current.year + 1, 1, 1)
+
+        elif divider_type == "year":
+            current = date(min_date.year, 1, 1)
+            while current <= max_date:
+                if current >= min_date:
+                    label = str(current.year)
+                    vert_id = f"y{current.year}"
+                    dividers.append(
+                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                    )
+                current = date(current.year + 1, 1, 1)
+
+        return dividers
 
     def _add_task_to_mermaid(
         self, lines: list[str], task: ScheduledTask, entities_by_id: dict[str, Entity]

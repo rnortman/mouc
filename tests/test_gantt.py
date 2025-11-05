@@ -1150,6 +1150,214 @@ class TestMermaidGeneration:
         assert ":crit," in task_line
         assert ":active," not in task_line
 
+    def test_mermaid_with_tick_interval(self, base_date: date) -> None:
+        """Test Mermaid chart generation with custom tick interval."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, tick_interval="3month")
+
+        # Check that tickInterval is present
+        assert "tickInterval 3month" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
+    def test_mermaid_with_axis_format(self, base_date: date) -> None:
+        """Test Mermaid chart generation with custom axis format."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, axis_format="%b %Y")
+
+        # Check that axisFormat is present
+        assert "axisFormat %b %Y" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
+    def test_mermaid_with_both_tick_and_axis(self, base_date: date) -> None:
+        """Test Mermaid chart generation with both tick interval and axis format."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, tick_interval="1month", axis_format="%Y-%m")
+
+        # Check that both are present
+        assert "tickInterval 1month" in mermaid
+        assert "axisFormat %Y-%m" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
+    def test_mermaid_without_tick_and_axis(self, base_date: date) -> None:
+        """Test Mermaid chart generation without tick interval or axis format (default behavior)."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # Check that neither is present when not specified
+        assert "tickInterval" not in mermaid
+        assert "axisFormat" not in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
+    def test_mermaid_with_quarterly_dividers(self, base_date: date) -> None:
+        """Test Mermaid chart generation with quarterly vertical dividers."""
+        metadata = FeatureMapMetadata()
+
+        # Create tasks spanning multiple quarters, starting exactly on Q1
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Q1 Task",
+            description="Task in Q1",
+            meta={"effort": "4w", "resources": ["alice"], "start_date": "2025-01-01"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Q2 Task",
+            description="Task in Q2",
+            meta={"effort": "4w", "resources": ["alice"], "start_date": "2025-04-15"},
+        )
+
+        entities = [cap1, cap2]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, vertical_dividers="quarter")
+
+        # Check that quarterly dividers are present (only those >= min_date)
+        assert "Q1 2025 : vert, q1_2025, 2025-01-01, 0d" in mermaid
+        assert "Q2 2025 : vert, q2_2025, 2025-04-01, 0d" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+
+    def test_mermaid_with_halfyear_dividers(self, base_date: date) -> None:
+        """Test Mermaid chart generation with half-year vertical dividers."""
+        metadata = FeatureMapMetadata()
+
+        # Create tasks spanning multiple half-years, starting exactly on H1
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="H1 Task",
+            description="Task in H1",
+            meta={"effort": "12w", "resources": ["alice"], "start_date": "2025-01-01"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="H2 Task",
+            description="Task in H2",
+            meta={"effort": "12w", "resources": ["alice"], "start_date": "2025-07-15"},
+        )
+
+        entities = [cap1, cap2]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, vertical_dividers="halfyear")
+
+        # Check that half-year dividers are present (only those >= min_date)
+        assert "H1 2025 : vert, h1_2025, 2025-01-01, 0d" in mermaid
+        assert "H2 2025 : vert, h2_2025, 2025-07-01, 0d" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+
+    def test_mermaid_with_year_dividers(self, base_date: date) -> None:
+        """Test Mermaid chart generation with yearly vertical dividers."""
+        metadata = FeatureMapMetadata()
+
+        # Create tasks spanning multiple years, starting exactly on year boundary
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="2025 Task",
+            description="Task in 2025",
+            meta={"effort": "26w", "resources": ["alice"], "start_date": "2025-01-01"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="2026 Task",
+            description="Task in 2026",
+            meta={"effort": "26w", "resources": ["alice"], "start_date": "2026-01-15"},
+        )
+
+        entities = [cap1, cap2]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, vertical_dividers="year")
+
+        # Check that yearly dividers are present (only those >= min_date)
+        assert "2025 : vert, y2025, 2025-01-01, 0d" in mermaid
+        assert "2026 : vert, y2026, 2026-01-01, 0d" in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+
 
 class TestTimeframeParsing:
     """Test timeframe parsing functionality."""
