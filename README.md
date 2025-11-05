@@ -96,10 +96,11 @@ mouc feature_map.yaml doc          # Specify input file
 Generate Mermaid Gantt charts with resource-aware scheduling:
 
 ```bash
-mouc gantt                         # Output to stdout
-mouc gantt --output schedule.md    # Output to markdown file
-mouc gantt --start-date 2025-01-01 # Set project start date
-mouc gantt --title "Q1 Schedule"  # Custom chart title
+mouc gantt                                    # Output to stdout
+mouc gantt --output schedule.md               # Output to markdown file
+mouc gantt --start-date 2025-01-01            # Set project start date
+mouc gantt --title "Q1 Schedule"             # Custom chart title
+mouc gantt --resources resources.yaml         # Enable automatic resource assignment
 ```
 
 Add scheduling metadata to entities in your YAML:
@@ -111,7 +112,18 @@ meta:
   end_before: "2025-03-31"         # Hard deadline
 ```
 
-See [docs/gantt.md](docs/gantt.md) for detailed documentation.
+#### Automatic Resource Assignment
+
+Use wildcards and preferences for flexible resource assignment:
+
+```yaml
+meta:
+  resources: ["*"]                 # Assign to any available resource
+  resources: ["alice|bob|charlie"] # Prefer alice, fall back to bob, then charlie
+  resources: ["team_a"]            # Use group alias from resources.yaml
+```
+
+See [docs/gantt.md](docs/gantt.md) for Gantt chart features and [docs/resources.md](docs/resources.md) for resource management and automatic assignment.
 
 ### Graph Generation
 

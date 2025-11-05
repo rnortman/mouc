@@ -3,6 +3,13 @@
 import bisect
 from dataclasses import dataclass
 from datetime import date, timedelta
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from mouc.resources import ResourceConfig
+
+# Magic resource name for tasks with no assigned resources
+UNASSIGNED_RESOURCE = "unassigned"
 
 
 @dataclass
@@ -15,6 +22,9 @@ class Task:
     dependencies: list[str]  # Task IDs that must complete before this task
     start_after: date | None = None  # Earliest allowed start date
     end_before: date | None = None  # Latest allowed end date
+    resource_spec: str | None = (
+        None  # Original resource spec for auto-assignment (e.g., "*", "john|mary")
+    )
 
 
 @dataclass
@@ -31,9 +41,14 @@ class ScheduledTask:
 class ResourceSchedule:
     """Tracks busy periods for a resource using sorted intervals."""
 
-    def __init__(self) -> None:
-        """Initialize with empty busy periods."""
+    def __init__(self, dns_periods: list[tuple[date, date]] | None = None) -> None:
+        """Initialize with empty busy periods and optional DNS periods.
+
+        Args:
+            dns_periods: Optional list of (start, end) tuples for do-not-schedule periods
+        """
         self.busy_periods: list[tuple[date, date]] = []
+        self.dns_periods: list[tuple[date, date]] = dns_periods or []
 
     def add_busy_period(self, start: date, end: date) -> None:
         """Add a busy period and maintain sorted order.
@@ -47,6 +62,8 @@ class ResourceSchedule:
     def is_available(self, start: date, duration_days: float) -> bool:
         """Check if resource is available for the full duration starting at start.
 
+        Considers both busy periods (scheduled tasks) and DNS periods (do-not-schedule).
+
         Args:
             start: Start date to check
             duration_days: Duration needed in days
@@ -55,6 +72,16 @@ class ResourceSchedule:
             True if resource is available for the full duration
         """
         end = start + timedelta(days=duration_days)
+
+        # Check DNS periods first (these are permanent constraints)
+        for dns_start, dns_end in self.dns_periods:
+            # If DNS period is entirely after our window, continue
+            if dns_start > end:
+                continue
+
+            # Check for overlap
+            if dns_start <= end and dns_end >= start:
+                return False
 
         # Check each busy period for overlap
         for busy_start, busy_end in self.busy_periods:
@@ -84,15 +111,18 @@ class ParallelScheduler:
         self,
         tasks: list[Task],
         current_date: date,
+        resource_config: "ResourceConfig | None" = None,
     ):
         """Initialize the scheduler.
 
         Args:
             tasks: List of tasks to schedule
             current_date: The current date (baseline for scheduling)
+            resource_config: Optional resource configuration for auto-assignment
         """
         self.tasks = {task.id: task for task in tasks}
         self.current_date = current_date
+        self.resource_config = resource_config
 
     def schedule(self) -> list[ScheduledTask]:
         """Schedule all tasks using Parallel SGS algorithm.
@@ -207,9 +237,16 @@ class ParallelScheduler:
             for resource_name, _ in task.resources:
                 all_resources.add(resource_name)
 
-        resource_schedules: dict[str, ResourceSchedule] = {
-            resource: ResourceSchedule() for resource in all_resources
-        }
+        # Add resources from config if available
+        if self.resource_config:
+            all_resources.update(self.resource_config.get_resource_order())
+
+        resource_schedules: dict[str, ResourceSchedule] = {}
+        for resource in all_resources:
+            dns_periods = []
+            if self.resource_config:
+                dns_periods = self.resource_config.get_dns_periods(resource)
+            resource_schedules[resource] = ResourceSchedule(dns_periods=dns_periods)
 
         # Start at current date
         current_time = self.current_date
@@ -261,6 +298,27 @@ class ParallelScheduler:
             for task_id in eligible:
                 task = self.tasks[task_id]
 
+                # Auto-assign resources if needed
+                if task.resource_spec and self.resource_config:
+                    # Expand resource spec to ordered candidate list
+                    candidates = self.resource_config.expand_resource_spec(task.resource_spec)
+
+                    # Filter to available resources at current_time
+                    available_candidates = [
+                        r
+                        for r in candidates
+                        if r in resource_schedules
+                        and resource_schedules[r].is_available(current_time, task.duration_days)
+                    ]
+
+                    if not available_candidates:
+                        # No resources available, skip this task for now
+                        continue
+
+                    # Pick first available (preserves order from spec/config)
+                    selected_resource = available_candidates[0]
+                    task.resources = [(selected_resource, 1.0)]
+
                 # Check if all required resources are available
                 resources_available = True
                 if task.resources:
@@ -299,7 +357,7 @@ class ParallelScheduler:
                 next_events: list[date] = []
 
                 # Task completions
-                for _start, end in scheduled.values():
+                for _, end in scheduled.values():
                     if end > current_time:
                         next_events.append(end + timedelta(days=1))
 
@@ -308,15 +366,6 @@ class ParallelScheduler:
                     task = self.tasks[task_id]
                     if task.start_after and task.start_after > current_time:
                         next_events.append(task.start_after)
-
-                # Dependency completions for unscheduled tasks
-                for task_id in unscheduled:
-                    task = self.tasks[task_id]
-                    for dep_id in task.dependencies:
-                        if dep_id in scheduled:
-                            dep_end = scheduled[dep_id][1]
-                            if dep_end >= current_time:
-                                next_events.append(dep_end + timedelta(days=1))
 
                 if next_events:
                     current_time = min(next_events)

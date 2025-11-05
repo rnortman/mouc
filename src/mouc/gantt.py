@@ -5,14 +5,16 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
 
-from .scheduler import ParallelScheduler, Task
+from .scheduler import UNASSIGNED_RESOURCE, ParallelScheduler, Task
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
+    from .resources import ResourceConfig
 
 
 def parse_timeframe(
@@ -182,6 +184,8 @@ class GanttScheduler:
         feature_map: FeatureMap,
         start_date: date | None = None,
         current_date: date | None = None,
+        resource_config: ResourceConfig | None = None,
+        resource_config_path: Path | str | None = None,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -191,9 +195,22 @@ class GanttScheduler:
                        If None, defaults to min(first fixed task date, current_date)
             current_date: Current/as-of date for scheduling.
                          If None, defaults to today
+            resource_config: Optional pre-loaded resource configuration
+            resource_config_path: Optional path to resources.yaml file
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
+
+        # Load resource config if path provided
+        if resource_config is None and resource_config_path is not None:
+            from contextlib import suppress
+
+            from .resources import load_resource_config
+
+            with suppress(FileNotFoundError):
+                resource_config = load_resource_config(resource_config_path)
+
+        self.resource_config = resource_config
 
         # Calculate start_date if not provided
         if start_date is None:
@@ -244,13 +261,14 @@ class GanttScheduler:
                 # If the task is entirely in the past, record it
                 if end < self.current_date:
                     fixed_in_past[entity.id] = (start, end)
+                    resources, _ = self._parse_resources(gantt_meta.resources)
                     result.tasks.append(
                         ScheduledTask(
                             entity_id=entity.id,
                             start_date=start,
                             end_date=end,
                             duration_days=(end - start).days,
-                            resources=[r for r, _ in self._parse_resources(gantt_meta.resources)],
+                            resources=[r for r, _ in resources],
                         )
                     )
 
@@ -273,19 +291,21 @@ class GanttScheduler:
                     dep_id for dep_id in entity.requires if dep_id not in fixed_in_past
                 ]
 
+                resources, resource_spec = self._parse_resources(gantt_meta.resources)
                 task = Task(
                     id=entity.id,
                     duration_days=(end - start).days,
-                    resources=self._parse_resources(gantt_meta.resources),
+                    resources=resources,
                     dependencies=active_dependencies,
                     start_after=start,
                     end_before=end,
+                    resource_spec=resource_spec,
                 )
                 tasks_to_schedule.append(task)
             else:
                 # Regular task: calculate duration and constraints
                 duration = self._calculate_duration(entity)
-                resources = self._parse_resources(gantt_meta.resources)
+                resources, resource_spec = self._parse_resources(gantt_meta.resources)
                 start_after = None
                 end_before = None
 
@@ -315,12 +335,15 @@ class GanttScheduler:
                     dependencies=active_dependencies,
                     start_after=start_after,
                     end_before=end_before,
+                    resource_spec=resource_spec,
                 )
                 tasks_to_schedule.append(task)
 
         # Run the scheduler
         try:
-            scheduler = ParallelScheduler(tasks_to_schedule, self.current_date)
+            scheduler = ParallelScheduler(
+                tasks_to_schedule, self.current_date, resource_config=self.resource_config
+            )
             scheduled_tasks = scheduler.schedule()
 
             # Convert scheduler results to our format
@@ -395,12 +418,16 @@ class GanttScheduler:
         """Calculate duration in days from effort and resource allocation."""
         gantt_meta = self._get_gantt_meta(entity)
         effort_days = self._parse_effort(gantt_meta.effort)
-        resources = self._parse_resources(gantt_meta.resources)
+        resources, resource_spec = self._parse_resources(gantt_meta.resources)
 
         # Total capacity = sum of resource allocations
-        total_capacity = sum(capacity for _, capacity in resources)
-        if total_capacity == 0:
+        # If resource_spec is set (wildcard/group), assume 1.0 capacity for duration calc
+        if resource_spec:
             total_capacity = 1.0
+        else:
+            total_capacity = sum(capacity for _, capacity in resources)
+            if total_capacity == 0:
+                total_capacity = 1.0
 
         return effort_days / total_capacity
 
@@ -438,19 +465,38 @@ class GanttScheduler:
 
     def _parse_resources(
         self, resources_raw: list[str | tuple[str, float]]
-    ) -> list[tuple[str, float]]:
-        """Parse resources list to (name, capacity) tuples.
+    ) -> tuple[list[tuple[str, float]], str | None]:
+        """Parse resources list to (name, capacity) tuples and extract resource spec.
 
         Supported formats:
-        - ["alice"] -> [("alice", 1.0)]
-        - ["alice", "bob"] -> [("alice", 1.0), ("bob", 1.0)]
-        - ["alice:0.5"] -> [("alice", 0.5)]
-        - ["alice:1.0", "bob:0.5"] -> [("alice", 1.0), ("bob", 0.5)]
-        - [("alice", 0.5)] -> [("alice", 0.5)]
+        - ["alice"] -> ([("alice", 1.0)], None)
+        - ["alice", "bob"] -> ([("alice", 1.0), ("bob", 1.0)], None)
+        - ["alice:0.5"] -> ([("alice", 0.5)], None)
+        - ["*"] -> ([], "*")  - wildcard, needs auto-assignment
+        - ["john|mary|susan"] -> ([], "john|mary|susan") - multi-resource, needs auto-assignment
+        - [] -> ([], None) - empty, unassigned (becomes [("unassigned", 1.0)])
+
+        Returns:
+            Tuple of (resource list, resource_spec for auto-assignment)
+            If resource_spec is not None, resource list will be empty and assignment is deferred
         """
         if not resources_raw:
-            return [("unassigned", 1.0)]
+            # Empty resources = use default_resource from config if available
+            if self.resource_config and self.resource_config.default_resource:
+                # Use configured default resource spec for auto-assignment
+                return ([], self.resource_config.default_resource)
+            # Fall back to UNASSIGNED_RESOURCE
+            return ([(UNASSIGNED_RESOURCE, 1.0)], None)
 
+        # Check for special specs that need auto-assignment (only wildcards and pipe-lists)
+        if len(resources_raw) == 1:
+            spec_str = str(resources_raw[0])
+            # Only treat "*" or pipe-separated lists as auto-assignment specs
+            if spec_str == "*" or "|" in spec_str:
+                # Wildcard or pipe-separated list
+                return ([], spec_str)
+
+        # Parse as concrete resources
         result: list[tuple[str, float]] = []
         for resource_str in resources_raw:
             if isinstance(resource_str, tuple):
@@ -470,9 +516,15 @@ class GanttScheduler:
                 result.append((name, capacity))
             else:
                 # Handle plain name: "alice"
-                result.append((str(resource_str).strip(), 1.0))
+                # Check if this could be a group alias (needs resource config to determine)
+                # For now, treat it as a concrete resource
+                spec_str = str(resource_str).strip()
+                # If resource_config exists and this is a group, return as spec
+                if self.resource_config and spec_str in self.resource_config.groups:
+                    return ([], spec_str)
+                result.append((spec_str, 1.0))
 
-        return result
+        return (result, None)
 
     def _parse_date(self, date_str: str | date) -> date | None:
         """Parse a date string or date object to date object.

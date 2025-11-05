@@ -193,6 +193,14 @@ def gantt(
             help="Add vertical dividers at intervals: 'quarter', 'halfyear', or 'year'",
         ),
     ] = None,
+    resources: Annotated[
+        Path | None,
+        typer.Option(
+            "--resources",
+            "-r",
+            help="Path to resources.yaml file for automatic resource assignment",
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -244,7 +252,10 @@ def gantt(
 
         # Schedule tasks
         scheduler = GanttScheduler(
-            feature_map, start_date=parsed_start_date, current_date=parsed_current_date
+            feature_map,
+            start_date=parsed_start_date,
+            current_date=parsed_current_date,
+            resource_config_path=resources,
         )
         result = scheduler.schedule()
 

@@ -1,0 +1,123 @@
+# Example resource configuration for Mouc automatic resource assignment
+#
+# Usage: mouc gantt feature_map.yaml --resources resources.yaml
+
+# Define available resources (people, teams, etc.)
+resources:
+  # Senior developers - tried first for wildcard assignments
+  - name: alice
+    dns_periods:
+      - start: 2025-01-15  # Martin Luther King Jr. Day
+        end: 2025-01-15
+      - start: 2025-07-01  # Summer vacation
+        end: 2025-07-14
+
+  - name: bob
+    dns_periods:
+      - start: 2025-02-10  # Conference attendance
+        end: 2025-02-14
+      - start: 2025-12-20  # Holiday break
+        end: 2025-12-31
+
+  # Mid-level developers
+  - name: charlie
+    dns_periods:
+      - start: 2025-03-17  # Training week
+        end: 2025-03-21
+
+  - name: diana
+    dns_periods: []  # No scheduled time off
+
+  # Specialists
+  - name: security_expert
+    dns_periods:
+      - start: 2025-06-01  # Sabbatical
+        end: 2025-08-31
+
+  - name: database_expert
+    dns_periods: []
+
+# Define resource groups (aliases for convenient assignment)
+groups:
+  # Team-based groups
+  backend_team:
+    - alice
+    - charlie
+    - database_expert
+
+  frontend_team:
+    - bob
+    - diana
+
+  full_stack:
+    - alice
+    - bob
+
+  # Skill-based groups
+  senior_devs:
+    - alice
+    - bob
+
+  database_team:
+    - alice
+    - database_expert
+
+  security_team:
+    - alice
+    - security_expert
+
+  # All developers (for general work)
+  all_devs:
+    - alice
+    - bob
+    - charlie
+    - diana
+
+# Optional: default resource for tasks with no explicit assignment
+# Can be:
+#   "*"                 - any available resource (uses resource list order above)
+#   "alice|bob"         - preference list (try alice, then bob)
+#   "all_devs"          - group alias (expands to group members)
+#   "alice"             - specific resource
+#
+# If not specified, unassigned tasks use the special "unassigned" resource
+# and execute serially.
+default_resource: "*"
+
+# Example feature_map.yaml usage:
+#
+# entities:
+#   api_development:
+#     type: capability
+#     name: API Development
+#     meta:
+#       effort: "2w"
+#       resources: ["backend_team"]  # Assigns to alice, charlie, or database_expert
+#
+#   security_audit:
+#     type: capability
+#     name: Security Audit
+#     meta:
+#       effort: "1w"
+#       resources: ["security_team"]  # Assigns to alice or security_expert
+#
+#   code_review:
+#     type: capability
+#     name: Code Review
+#     meta:
+#       effort: "3d"
+#       resources: ["*"]  # Assigns to any available developer
+#
+#   critical_fix:
+#     type: capability
+#     name: Critical Bug Fix
+#     meta:
+#       effort: "2d"
+#       resources: ["alice|bob"]  # Prefer alice, fall back to bob
+#
+#   documentation:
+#     type: capability
+#     name: Update Documentation
+#     meta:
+#       effort: "1d"
+#       resources: []  # Uses default_resource (*)

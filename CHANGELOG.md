@@ -8,6 +8,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Automatic resource assignment**: Scheduler can now automatically assign tasks to resources
+  - Resource configuration file (`resources.yaml`) defines available resources, DNS periods, and groups
+  - Wildcard assignment: `resources: ["*"]` assigns to first available resource
+  - Preference lists: `resources: ["alice|bob|charlie"]` tries resources in order
+  - Resource groups: define aliases like `team_a: [alice, bob]` for convenient assignment
+  - DNS (Do Not Schedule) periods block resource assignment during specified time ranges
+  - `default_resource` configuration option for tasks with no explicit assignment
+  - CLI option `--resources resources.yaml` to enable automatic assignment
+  - Dynamic assignment respects deadline priorities (high-priority tasks get first pick)
 - Gantt chart customization options for Mermaid output
   - `--tick-interval` option to control x-axis tick spacing (e.g., `1week`, `1month`, `3month`)
   - `--axis-format` option to customize date display format (e.g., `%Y-%m-%d`, `%b %Y`)
