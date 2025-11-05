@@ -248,64 +248,30 @@ class GanttScheduler:
         result = ScheduleResult()
         entities_by_id = {e.id: e for e in self.feature_map.entities}
 
-        # First pass: identify all fixed tasks that are in the past
-        fixed_in_past: dict[str, tuple[date, date]] = {}  # Tasks that are already done
-
-        for entity in self.feature_map.entities:
-            gantt_meta = self._get_gantt_meta(entity)
-
-            # Check for fixed tasks that are entirely in the past
-            if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
-                start, end = self._schedule_fixed_task(entity)
-
-                # If the task is entirely in the past, record it
-                if end < self.current_date:
-                    fixed_in_past[entity.id] = (start, end)
-                    resources, _ = self._parse_resources(gantt_meta.resources)
-                    result.tasks.append(
-                        ScheduledTask(
-                            entity_id=entity.id,
-                            start_date=start,
-                            end_date=end,
-                            duration_days=(end - start).days,
-                            resources=[r for r, _ in resources],
-                        )
-                    )
-
-        # Second pass: convert all non-past entities to scheduler tasks
+        # Convert all entities to scheduler tasks
         tasks_to_schedule: list[Task] = []
 
         for entity in self.feature_map.entities:
             gantt_meta = self._get_gantt_meta(entity)
+            resources, resource_spec = self._parse_resources(gantt_meta.resources)
 
-            # Skip tasks that are already in fixed_in_past
-            if entity.id in fixed_in_past:
-                continue
-
-            # Handle future/ongoing fixed tasks
+            # Handle fixed tasks (with explicit start_date or end_date)
             if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
                 start, end = self._schedule_fixed_task(entity)
 
-                # Filter out dependencies that are already complete (fixed in past)
-                active_dependencies = [
-                    dep_id for dep_id in entity.requires if dep_id not in fixed_in_past
-                ]
-
-                resources, resource_spec = self._parse_resources(gantt_meta.resources)
                 task = Task(
                     id=entity.id,
                     duration_days=(end - start).days,
                     resources=resources,
-                    dependencies=active_dependencies,
-                    start_after=start,
-                    end_before=end,
+                    dependencies=list(entity.requires),
+                    start_on=start,
+                    end_on=end,
                     resource_spec=resource_spec,
                 )
                 tasks_to_schedule.append(task)
             else:
                 # Regular task: calculate duration and constraints
                 duration = self._calculate_duration(entity)
-                resources, resource_spec = self._parse_resources(gantt_meta.resources)
                 start_after = None
                 end_before = None
 
@@ -323,16 +289,11 @@ class GanttScheduler:
                     if timeframe_end:
                         end_before = timeframe_end
 
-                # Filter out dependencies that are already complete (fixed in past)
-                active_dependencies = [
-                    dep_id for dep_id in entity.requires if dep_id not in fixed_in_past
-                ]
-
                 task = Task(
                     id=entity.id,
                     duration_days=duration,
                     resources=resources,
-                    dependencies=active_dependencies,
+                    dependencies=list(entity.requires),
                     start_after=start_after,
                     end_before=end_before,
                     resource_spec=resource_spec,

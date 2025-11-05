@@ -20,8 +20,10 @@ class Task:
     duration_days: float
     resources: list[tuple[str, float]]  # List of (resource_name, allocation) tuples
     dependencies: list[str]  # Task IDs that must complete before this task
-    start_after: date | None = None  # Earliest allowed start date
-    end_before: date | None = None  # Latest allowed end date
+    start_after: date | None = None  # Constraint: earliest allowed start date
+    end_before: date | None = None  # Constraint: latest allowed end date
+    start_on: date | None = None  # Fixed: must start exactly on this date
+    end_on: date | None = None  # Fixed: must end exactly on this date
     resource_spec: str | None = (
         None  # Original resource spec for auto-assignment (e.g., "*", "john|mary")
     )
@@ -41,14 +43,14 @@ class ScheduledTask:
 class ResourceSchedule:
     """Tracks busy periods for a resource using sorted intervals."""
 
-    def __init__(self, dns_periods: list[tuple[date, date]] | None = None) -> None:
-        """Initialize with empty busy periods and optional DNS periods.
+    def __init__(self, unavailable_periods: list[tuple[date, date]] | None = None) -> None:
+        """Initialize with optional pre-defined unavailable periods.
 
         Args:
-            dns_periods: Optional list of (start, end) tuples for do-not-schedule periods
+            unavailable_periods: Optional list of (start, end) tuples for periods when
+                the resource is unavailable (e.g., vacations, do-not-schedule periods)
         """
-        self.busy_periods: list[tuple[date, date]] = []
-        self.dns_periods: list[tuple[date, date]] = dns_periods or []
+        self.busy_periods: list[tuple[date, date]] = unavailable_periods or []
 
     def add_busy_period(self, start: date, end: date) -> None:
         """Add a busy period and maintain sorted order.
@@ -62,8 +64,6 @@ class ResourceSchedule:
     def is_available(self, start: date, duration_days: float) -> bool:
         """Check if resource is available for the full duration starting at start.
 
-        Considers both busy periods (scheduled tasks) and DNS periods (do-not-schedule).
-
         Args:
             start: Start date to check
             duration_days: Duration needed in days
@@ -72,16 +72,6 @@ class ResourceSchedule:
             True if resource is available for the full duration
         """
         end = start + timedelta(days=duration_days)
-
-        # Check DNS periods first (these are permanent constraints)
-        for dns_start, dns_end in self.dns_periods:
-            # If DNS period is entirely after our window, continue
-            if dns_start > end:
-                continue
-
-            # Check for overlap
-            if dns_start <= end and dns_end >= start:
-                return False
 
         # Check each busy period for overlap
         for busy_start, busy_end in self.busy_periods:
@@ -130,14 +120,67 @@ class ParallelScheduler:
         Returns:
             List of scheduled tasks
         """
-        # Phase 1: Topological sort
+        # Phase 0: Process fixed tasks (with start_on/end_on)
+        # These are treated as already scheduled and removed from the scheduling problem
+        fixed_tasks = self._process_fixed_tasks()
+
+        # Phase 1: Topological sort (only remaining tasks)
         topo_order = self._topological_sort()
 
         # Phase 2: Backward pass to calculate deadlines
         latest_dates = self._calculate_latest_dates(topo_order)
 
         # Phase 3: Forward pass with Parallel SGS
-        return self._schedule_forward(latest_dates)
+        scheduled_tasks = self._schedule_forward(latest_dates, fixed_tasks)
+
+        # Combine fixed and scheduled tasks
+        return fixed_tasks + scheduled_tasks
+
+    def _process_fixed_tasks(self) -> list[ScheduledTask]:
+        """Process tasks with fixed dates (start_on/end_on).
+
+        These tasks are treated as already scheduled:
+        - Added to result immediately
+        - Removed from self.tasks (won't be scheduled)
+        - No DNS period checks applied
+
+        Returns:
+            List of fixed scheduled tasks
+        """
+        fixed_results: list[ScheduledTask] = []
+
+        for task_id, task in self.tasks.items():
+            if task.start_on is None and task.end_on is None:
+                continue
+
+            start: date
+            end: date
+            if task.start_on is not None and task.end_on is not None:
+                start = task.start_on
+                end = task.end_on
+            elif task.start_on is not None:
+                start = task.start_on
+                end = start + timedelta(days=task.duration_days)
+            else:
+                assert task.end_on is not None
+                end = task.end_on
+                start = end - timedelta(days=task.duration_days)
+
+            fixed_results.append(
+                ScheduledTask(
+                    task_id=task_id,
+                    start_date=start,
+                    end_date=end,
+                    duration_days=task.duration_days,
+                    resources=[r for r, _ in task.resources],
+                )
+            )
+
+        # Remove fixed tasks from self.tasks
+        for fixed_task in fixed_results:
+            del self.tasks[fixed_task.task_id]
+
+        return fixed_results
 
     def _topological_sort(self) -> list[str]:
         """Compute topological ordering of tasks.
@@ -217,11 +260,14 @@ class ParallelScheduler:
 
         return latest
 
-    def _schedule_forward(self, latest_dates: dict[str, date]) -> list[ScheduledTask]:
+    def _schedule_forward(
+        self, latest_dates: dict[str, date], fixed_tasks: list[ScheduledTask]
+    ) -> list[ScheduledTask]:
         """Schedule tasks using forward pass with Parallel SGS.
 
         Args:
             latest_dates: Latest acceptable finish dates from backward pass
+            fixed_tasks: Already-scheduled fixed tasks to account for
 
         Returns:
             List of scheduled tasks
@@ -231,11 +277,19 @@ class ParallelScheduler:
         unscheduled = set(self.tasks.keys())
         result: list[ScheduledTask] = []
 
+        # Pre-populate scheduled dict with fixed tasks
+        for fixed_task in fixed_tasks:
+            scheduled[fixed_task.task_id] = (fixed_task.start_date, fixed_task.end_date)
+
         # Initialize resource schedules
         all_resources: set[str] = set()
         for task in self.tasks.values():
             for resource_name, _ in task.resources:
                 all_resources.add(resource_name)
+
+        # Also include resources from fixed tasks
+        for fixed_task in fixed_tasks:
+            all_resources.update(fixed_task.resources)
 
         # Add resources from config if available
         if self.resource_config:
@@ -243,10 +297,18 @@ class ParallelScheduler:
 
         resource_schedules: dict[str, ResourceSchedule] = {}
         for resource in all_resources:
-            dns_periods = []
+            unavailable_periods = []
             if self.resource_config:
-                dns_periods = self.resource_config.get_dns_periods(resource)
-            resource_schedules[resource] = ResourceSchedule(dns_periods=dns_periods)
+                unavailable_periods = self.resource_config.get_dns_periods(resource)
+            resource_schedules[resource] = ResourceSchedule(unavailable_periods=unavailable_periods)
+
+        # Mark fixed tasks as busy in resource schedules
+        for fixed_task in fixed_tasks:
+            for resource_name in fixed_task.resources:
+                if resource_name in resource_schedules:
+                    resource_schedules[resource_name].add_busy_period(
+                        fixed_task.start_date, fixed_task.end_date
+                    )
 
         # Start at current date
         current_time = self.current_date
@@ -261,8 +323,11 @@ class ParallelScheduler:
             for task_id in unscheduled:
                 task = self.tasks[task_id]
 
-                # Check dependencies
-                all_deps_complete = all(dep_id in scheduled for dep_id in task.dependencies)
+                # Check dependencies - must be scheduled AND complete by current_time
+                all_deps_complete = all(
+                    dep_id in scheduled and scheduled[dep_id][1] < current_time
+                    for dep_id in task.dependencies
+                )
                 if not all_deps_complete:
                     continue
 
