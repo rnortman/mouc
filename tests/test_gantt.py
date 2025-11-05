@@ -1256,6 +1256,58 @@ class TestMermaidGeneration:
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
+    def test_mermaid_with_compact_mode(self, base_date: date) -> None:
+        """Test Mermaid chart generation with compact display mode."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, compact=True)
+
+        # Check that compact mode YAML frontmatter is present
+        assert mermaid.startswith("---\ndisplayMode: compact\n---\ngantt")
+        # Verify basic structure is still intact
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
+    def test_mermaid_without_compact_mode(self, base_date: date) -> None:
+        """Test Mermaid chart generation without compact mode (default behavior)."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Database Setup",
+            description="Setup database",
+            meta={"effort": "1w", "resources": ["alice"]},
+        )
+
+        entities = [cap1]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result, compact=False)
+
+        # Check that compact mode is NOT present when not specified
+        assert not mermaid.startswith("---")
+        assert "displayMode: compact" not in mermaid
+        # Verify basic structure is still intact
+        assert mermaid.startswith("gantt")
+        assert "title Project Schedule" in mermaid
+        assert "dateFormat YYYY-MM-DD" in mermaid
+
     def test_mermaid_with_quarterly_dividers(self, base_date: date) -> None:
         """Test Mermaid chart generation with quarterly vertical dividers."""
         metadata = FeatureMapMetadata()

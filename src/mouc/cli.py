@@ -193,6 +193,13 @@ def gantt(
             help="Add vertical dividers at intervals: 'quarter', 'halfyear', or 'year'",
         ),
     ] = None,
+    compact: Annotated[
+        bool,
+        typer.Option(
+            "--compact",
+            help="Use compact display mode to show multiple tasks in same row when possible",
+        ),
+    ] = False,
     resources: Annotated[
         Path | None,
         typer.Option(
@@ -267,6 +274,7 @@ def gantt(
             tick_interval=tick_interval,
             axis_format=axis_format,
             vertical_dividers=vertical_dividers,
+            compact=compact,
         )
 
         # Output the result

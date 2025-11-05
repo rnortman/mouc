@@ -553,6 +553,7 @@ class GanttScheduler:
         tick_interval: str | None = None,
         axis_format: str | None = None,
         vertical_dividers: str | None = None,
+        compact: bool = False,
     ) -> str:
         """Generate Mermaid gantt chart from schedule result.
 
@@ -563,6 +564,7 @@ class GanttScheduler:
             tick_interval: Mermaid tickInterval (e.g., "1week", "1month", "3month" for quarters)
             axis_format: Mermaid axisFormat string (e.g., "%Y-%m-%d", "%b %Y")
             vertical_dividers: Add vertical dividers at intervals: "quarter", "halfyear", or "year"
+            compact: Use compact display mode to show multiple tasks in same row when possible
 
         Returns:
             Mermaid gantt chart syntax as a string
@@ -570,11 +572,25 @@ class GanttScheduler:
         # Set todayMarker to current_date so the red line appears at the right position
         current_date_str = self.current_date.strftime("%Y-%m-%d")
 
-        lines = [
-            "gantt",
-            f"    title {title}",
-            "    dateFormat YYYY-MM-DD",
-        ]
+        lines: list[str] = []
+
+        # Add YAML frontmatter for compact mode
+        if compact:
+            lines.extend(
+                [
+                    "---",
+                    "displayMode: compact",
+                    "---",
+                ]
+            )
+
+        lines.extend(
+            [
+                "gantt",
+                f"    title {title}",
+                "    dateFormat YYYY-MM-DD",
+            ]
+        )
 
         if tick_interval:
             lines.append(f"    tickInterval {tick_interval}")
