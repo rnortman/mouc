@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Task completion tracking**: New `status: done` metadata field marks tasks as completed
+  - Tasks with `status: done` and dates render with `:done` tag (gray) in Gantt charts
+  - Tasks with `status: done` but no dates are excluded from Gantt output but satisfy dependencies
+  - Warning generated for done tasks without dates: "Task '{id}' marked done without dates - excluded from schedule"
+  - Done tasks without dates allow dependent tasks to start immediately
+
 ### Fixed
 - Manual scheduling now correctly overrides DNS periods: tasks with explicit `start_date` or `end_date` are always scheduled at those times, even if the assigned resource has a DNS (Do Not Schedule) period during that time
 

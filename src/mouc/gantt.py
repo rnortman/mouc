@@ -151,6 +151,7 @@ class GanttMetadata(BaseModel):
     start_after: str | date | None = None  # Constraint: earliest possible start
     end_before: str | date | None = None  # Constraint: hard deadline
     timeframe: str | None = None  # Convenience: sets start_after and end_before from timeframe
+    status: str | None = None  # Task status: "done" marks task as completed
 
 
 @dataclass(slots=True, frozen=True)
@@ -248,12 +249,28 @@ class GanttScheduler:
         result = ScheduleResult()
         entities_by_id = {e.id: e for e in self.feature_map.entities}
 
+        # Track tasks marked done without dates (excluded from scheduling and Gantt)
+        done_without_dates: set[str] = set()
+
         # Convert all entities to scheduler tasks
         tasks_to_schedule: list[Task] = []
 
         for entity in self.feature_map.entities:
             gantt_meta = self._get_gantt_meta(entity)
             resources, resource_spec = self._parse_resources(gantt_meta.resources)
+
+            # Check if task is marked done without dates
+            if (
+                gantt_meta.status == "done"
+                and gantt_meta.start_date is None
+                and gantt_meta.end_date is None
+            ):
+                # Exclude from scheduling and Gantt, but satisfies dependencies
+                done_without_dates.add(entity.id)
+                result.warnings.append(
+                    f"Task '{entity.id}' marked done without dates - excluded from schedule"
+                )
+                continue
 
             # Handle fixed tasks (with explicit start_date or end_date)
             if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
@@ -303,7 +320,10 @@ class GanttScheduler:
         # Run the scheduler
         try:
             scheduler = ParallelScheduler(
-                tasks_to_schedule, self.current_date, resource_config=self.resource_config
+                tasks_to_schedule,
+                self.current_date,
+                resource_config=self.resource_config,
+                completed_task_ids=done_without_dates,
             )
             scheduled_tasks = scheduler.schedule()
 
@@ -731,7 +751,11 @@ class GanttScheduler:
                 label += f" ({', '.join(task.resources)})"
 
         tags: list[str] = []
-        if is_late:
+
+        # Check if task is marked as done
+        if gantt_meta.status == "done":
+            tags.append("done")
+        elif is_late:
             tags.append("crit")
         elif is_unassigned:
             tags.append("active")

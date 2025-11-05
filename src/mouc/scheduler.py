@@ -102,6 +102,7 @@ class ParallelScheduler:
         tasks: list[Task],
         current_date: date,
         resource_config: "ResourceConfig | None" = None,
+        completed_task_ids: set[str] | None = None,
     ):
         """Initialize the scheduler.
 
@@ -109,10 +110,12 @@ class ParallelScheduler:
             tasks: List of tasks to schedule
             current_date: The current date (baseline for scheduling)
             resource_config: Optional resource configuration for auto-assignment
+            completed_task_ids: Set of task IDs that are already completed (done without dates)
         """
         self.tasks = {task.id: task for task in tasks}
         self.current_date = current_date
         self.resource_config = resource_config
+        self.completed_task_ids = completed_task_ids or set()
 
     def schedule(self) -> list[ScheduledTask]:
         """Schedule all tasks using Parallel SGS algorithm.
@@ -246,8 +249,8 @@ class ParallelScheduler:
 
             # Propagate to dependencies
             for dep_id in task.dependencies:
-                # Skip dependencies that aren't in our task list (e.g., fixed tasks in the past)
-                if dep_id not in self.tasks:
+                # Skip dependencies that aren't in our task list (e.g., fixed tasks, done without dates)
+                if dep_id not in self.tasks or dep_id in self.completed_task_ids:
                     continue
 
                 # Dependency must finish before this task can start
@@ -324,8 +327,10 @@ class ParallelScheduler:
                 task = self.tasks[task_id]
 
                 # Check dependencies - must be scheduled AND complete by current_time
+                # OR in the completed_task_ids set (done without dates)
                 all_deps_complete = all(
-                    dep_id in scheduled and scheduled[dep_id][1] < current_time
+                    (dep_id in scheduled and scheduled[dep_id][1] < current_time)
+                    or dep_id in self.completed_task_ids
                     for dep_id in task.dependencies
                 )
                 if not all_deps_complete:
@@ -336,6 +341,9 @@ class ParallelScheduler:
 
                 # Consider dependency completion
                 for dep_id in task.dependencies:
+                    # Skip completed tasks without dates - they're already done
+                    if dep_id in self.completed_task_ids:
+                        continue
                     dep_end = scheduled[dep_id][1]
                     earliest = max(earliest, dep_end + timedelta(days=1))
 
