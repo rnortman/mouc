@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.6] - 2025-11-05
+
 ### Added
 - **Automatic resource assignment**: Scheduler can now automatically assign tasks to resources
   - Resource configuration file (`resources.yaml`) defines available resources, DNS periods, and groups
@@ -21,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `--tick-interval` option to control x-axis tick spacing (e.g., `1week`, `1month`, `3month`)
   - `--axis-format` option to customize date display format (e.g., `%Y-%m-%d`, `%b %Y`)
   - `--vertical-dividers` option to add visual markers for quarters, half-years, or years
+  - `--compact` option
 
 ## [0.1.5] - 2025-11-04
 
