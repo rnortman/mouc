@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.7] - 2025-11-06
+
 ### Added
 - **Task completion tracking**: New `status: done` metadata field marks tasks as completed
   - Tasks with `status: done` and dates render with `:done` tag (gray) in Gantt charts
