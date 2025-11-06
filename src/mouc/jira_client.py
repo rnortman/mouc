@@ -11,6 +11,7 @@ from atlassian import Jira
 from dotenv import load_dotenv
 
 from mouc.exceptions import MoucError
+from mouc.netrc_utils import get_jira_credentials_from_netrc
 
 # Load environment variables from .env file
 load_dotenv()
@@ -55,9 +56,16 @@ class JiraClient:
         self.api_token = api_token or os.getenv("JIRA_API_TOKEN")
         self._field_name_to_id: dict[str, str] | None = None
 
+        # Fall back to .netrc if environment variables not set
+        if not self.email or not self.api_token:
+            netrc_login, netrc_password = get_jira_credentials_from_netrc(self.base_url)
+            self.email = self.email or netrc_login
+            self.api_token = self.api_token or netrc_password
+
         if not self.email or not self.api_token:
             raise JiraAuthError(
-                "Jira credentials not found. Set JIRA_EMAIL and JIRA_API_TOKEN environment variables."
+                "Jira credentials not found. Set JIRA_EMAIL and JIRA_API_TOKEN environment "
+                "variables or add credentials to ~/.netrc file."
             )
 
         try:

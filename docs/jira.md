@@ -17,14 +17,44 @@ The Jira integration can:
 
 ### 1. Set up credentials
 
-Create a `.env` file in your project root:
+You have three options for providing Jira credentials (in order of precedence):
+
+#### Option A: Environment Variables
+
+Create a `.env` file in your project root, or set these env vars:
 
 ```bash
 JIRA_EMAIL=your.email@company.com
 JIRA_API_TOKEN=your_api_token_here
 ```
 
+#### Option B: .netrc File
+
+Add credentials to `~/.netrc` (Unix/Linux/macOS) or `~/_netrc` (Windows):
+
+```
+machine yourcompany.atlassian.net
+login your.email@company.com
+password your_api_token_here
+```
+
+**Note:** Ensure the file has restrictive permissions:
+```bash
+chmod 600 ~/.netrc
+```
+
+#### Option C: Pass Credentials Explicitly
+
+You can pass credentials directly to `JiraClient` in code (not available via CLI).
+
+---
+
 Get your API token from: https://id.atlassian.com/manage/api-tokens
+
+**Credential Priority:**
+1. Explicitly passed credentials (programmatic use only)
+2. Environment variables (`JIRA_EMAIL` and `JIRA_API_TOKEN`)
+3. `.netrc` file (fallback)
 
 ### 2. Create Jira configuration
 
@@ -292,9 +322,15 @@ jira:
 
 **Authentication:**
 
-Credentials are read from environment variables (not stored in config):
+Credentials are read from multiple sources (not stored in config):
+
+**Environment Variables:**
 - `JIRA_EMAIL` - Your Jira account email
 - `JIRA_API_TOKEN` - API token from https://id.atlassian.com/manage/api-tokens
+
+**Or .netrc file:**
+- Add entry for your Jira hostname with login and password (API token)
+- See [Quick Start](#1-set-up-credentials) for details
 
 ### Field Mappings
 
@@ -594,8 +630,9 @@ git commit -am "Auto-sync from Jira"
 
 **Error:** `Authentication error: Jira credentials not found`
 
-**Solution:** Ensure `JIRA_EMAIL` and `JIRA_API_TOKEN` are set in your `.env` file or environment.
+**Solution:** Ensure credentials are available via one of these methods:
 
+**Option 1: Environment variables**
 ```bash
 # Check environment variables
 echo $JIRA_EMAIL
@@ -607,6 +644,21 @@ JIRA_EMAIL=your.email@company.com
 JIRA_API_TOKEN=your_token_here
 EOF
 ```
+
+**Option 2: .netrc file**
+```bash
+# Create ~/.netrc (or ~/_netrc on Windows)
+cat > ~/.netrc <<EOF
+machine yourcompany.atlassian.net
+login your.email@company.com
+password your_token_here
+EOF
+
+# Set restrictive permissions
+chmod 600 ~/.netrc
+```
+
+**Tip:** Environment variables take precedence over .netrc, so if both are set, the environment variables will be used.
 
 ### Connection Errors
 
