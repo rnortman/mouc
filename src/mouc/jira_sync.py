@@ -7,6 +7,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
+import typer
+
 from mouc.exceptions import MoucError
 from mouc.jira_client import JiraClient, JiraError, JiraIssueData
 from mouc.jira_config import ConflictResolution, JiraConfig
@@ -248,18 +250,22 @@ class FieldExtractor:
 class JiraSynchronizer:
     """Orchestrates syncing between Mouc and Jira."""
 
-    def __init__(self, config: JiraConfig, feature_map: FeatureMap, client: JiraClient):
+    def __init__(
+        self, config: JiraConfig, feature_map: FeatureMap, client: JiraClient, verbosity: int = 0
+    ):
         """Initialize synchronizer.
 
         Args:
             config: Jira configuration
             feature_map: Mouc feature map
             client: Jira API client
+            verbosity: Verbosity level (0=silent, 1=changes only, 2=all checks)
         """
         self.config = config
         self.feature_map = feature_map
         self.client = client
         self.extractor = FieldExtractor(config, client)
+        self.verbosity = verbosity
 
     def sync_all_entities(self) -> list[SyncResult]:
         """Sync all entities that have Jira links.
@@ -307,6 +313,9 @@ class JiraSynchronizer:
         Raises:
             JiraError: If issue fetch fails
         """
+        if self.verbosity >= 2:
+            typer.echo(f"Checking {entity_id} ({ticket_id})...")
+
         issue_data = self.client.fetch_issue(ticket_id)
 
         updated_fields: dict[str, Any] = {}
@@ -361,6 +370,15 @@ class JiraSynchronizer:
             updated_fields,
             conflicts,
         )
+
+        # Show changes at verbosity level 1
+        if self.verbosity >= 1 and (updated_fields or conflicts):
+            if updated_fields:
+                fields_str = ", ".join(updated_fields.keys())
+                typer.echo(f"  {entity_id}: updating {fields_str}")
+            if conflicts:
+                for conflict in conflicts:
+                    typer.echo(f"  {entity_id}: conflict in {conflict.field}")
 
         return SyncResult(
             entity_id=entity_id,

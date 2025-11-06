@@ -23,6 +23,32 @@ app = typer.Typer(
     add_completion=False,
 )
 
+# Global state for verbosity level
+_verbosity_level = 0
+
+
+def get_verbosity() -> int:
+    """Get the current verbosity level."""
+    return _verbosity_level
+
+
+@app.callback()
+def main_callback(
+    verbose: Annotated[
+        int,
+        typer.Option(
+            "--verbose",
+            "-v",
+            help="Verbosity level: 0=silent (default), 1=show changes, 2=show all checks",
+            min=0,
+            max=2,
+        ),
+    ] = 0,
+) -> None:
+    """Global options for mouc commands."""
+    global _verbosity_level
+    _verbosity_level = verbose
+
 
 @app.command()
 def graph(
@@ -30,7 +56,7 @@ def graph(
         "feature_map.yaml"
     ),
     view: Annotated[
-        GraphView, typer.Option("--view", "-v", help="Type of graph to generate")
+        GraphView, typer.Option("--view", help="Type of graph to generate")
     ] = GraphView.ALL,
     target: Annotated[
         str | None, typer.Option("--target", "-t", help="Target for critical path view")

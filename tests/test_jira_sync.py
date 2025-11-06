@@ -15,7 +15,8 @@ from mouc.jira_config import (
     JiraConfig,
     JiraConnection,
 )
-from mouc.jira_sync import FieldExtractor
+from mouc.jira_sync import FieldExtractor, JiraSynchronizer
+from mouc.models import Entity, FeatureMap
 
 
 class TestFieldExtractor:
@@ -226,3 +227,169 @@ class TestFieldExtractor:
 
         result = extractor.extract_effort(issue_data)
         assert result == "4w"  # 8 sp / 2 = 4 weeks
+
+
+class TestJiraSynchronizerVerbosity:
+    """Tests for JiraSynchronizer verbosity levels."""
+
+    @pytest.fixture
+    def config(self) -> JiraConfig:
+        """Create test config."""
+        return JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(explicit_field="startdate"),
+            ),
+        )
+
+    @pytest.fixture
+    def feature_map(self) -> FeatureMap:
+        """Create test feature map."""
+        entity = Entity(
+            id="cap1",
+            type="capability",
+            name="Test Capability",
+            description="Test description",
+            links=["jira:TEST-123"],
+            meta={"start_date": date(2025, 1, 1)},
+        )
+        from mouc.models import FeatureMapMetadata
+
+        return FeatureMap(metadata=FeatureMapMetadata(), entities=[entity])
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock Jira client."""
+        client = Mock()
+        client.fetch_issue.return_value = JiraIssueData(
+            key="TEST-123",
+            summary="Test issue",
+            status="In Progress",
+            fields={"startdate": "2025-01-15"},
+            status_transitions={},
+            assignee_email=None,
+        )
+
+        def mock_get_custom_field(issue_data: JiraIssueData, field_name: str) -> Any:
+            return issue_data.fields.get(field_name)
+
+        client.get_custom_field_value = mock_get_custom_field
+        return client
+
+    def test_verbosity_level_0_is_default(
+        self, config: JiraConfig, feature_map: FeatureMap, mock_client: Mock
+    ) -> None:
+        """Test that verbosity level 0 is the default."""
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        assert synchronizer.verbosity == 0
+
+    def test_verbosity_level_can_be_set(
+        self, config: JiraConfig, feature_map: FeatureMap, mock_client: Mock
+    ) -> None:
+        """Test that verbosity level can be set."""
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=2)
+        assert synchronizer.verbosity == 2
+
+    def test_sync_with_verbosity_level_0(
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        mock_client: Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test sync with verbosity level 0 produces no output."""
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=0)
+        results = synchronizer.sync_all_entities()
+
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert len(results) == 1
+
+    def test_sync_with_verbosity_level_1_shows_changes(
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        mock_client: Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test sync with verbosity level 1 shows changes."""
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=1)
+        results = synchronizer.sync_all_entities()
+
+        captured = capsys.readouterr()
+        # Should show the entity with changes (either updating or conflict)
+        assert "cap1" in captured.out
+        assert "updating" in captured.out or "conflict" in captured.out
+        assert len(results) == 1
+
+    def test_sync_with_verbosity_level_2_shows_all_checks(
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        mock_client: Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test sync with verbosity level 2 shows all checks."""
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=2)
+        results = synchronizer.sync_all_entities()
+
+        captured = capsys.readouterr()
+        # Should show checking message
+        assert "Checking cap1" in captured.out
+        assert "TEST-123" in captured.out
+        assert len(results) == 1
+
+    def test_verbosity_level_1_silent_when_no_changes(
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        mock_client: Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test verbosity level 1 is silent when no changes are detected."""
+        # Mock returns same date as entity already has
+        mock_client.fetch_issue.return_value = JiraIssueData(
+            key="TEST-123",
+            summary="Test issue",
+            status="In Progress",
+            fields={"startdate": "2025-01-01"},  # Same as entity meta
+            status_transitions={},
+            assignee_email=None,
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=1)
+        results = synchronizer.sync_all_entities()
+
+        captured = capsys.readouterr()
+        # Should not show anything since no changes
+        assert captured.out == ""
+        assert len(results) == 1
+        assert not results[0].updated_fields
+
+    def test_verbosity_level_2_shows_check_even_without_changes(
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        mock_client: Mock,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Test verbosity level 2 shows checks even when no changes."""
+        # Mock returns same date as entity already has
+        mock_client.fetch_issue.return_value = JiraIssueData(
+            key="TEST-123",
+            summary="Test issue",
+            status="In Progress",
+            fields={"startdate": "2025-01-01"},  # Same as entity meta
+            status_transitions={},
+            assignee_email=None,
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client, verbosity=2)
+        results = synchronizer.sync_all_entities()
+
+        captured = capsys.readouterr()
+        # Should still show checking message even though no changes
+        assert "Checking cap1" in captured.out
+        assert "TEST-123" in captured.out
+        assert len(results) == 1
+        assert not results[0].updated_fields

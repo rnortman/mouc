@@ -9,6 +9,7 @@ from typing import Annotated, Any
 import typer
 import yaml
 
+from . import cli
 from .jira_client import JiraAuthError, JiraClient, JiraError
 from .jira_config import load_jira_config
 from .jira_interactive import InteractiveResolver
@@ -204,21 +205,32 @@ def jira_sync(
             typer.echo("Error: Cannot use both --apply and --dry-run", err=True)
             raise typer.Exit(1) from None
 
+        # Get verbosity level from global state
+        verbosity = cli.get_verbosity()
+
+        # Auto-enable verbosity for dry-run if not already set
+        if dry_run and verbosity == 0:
+            verbosity = 1
+
         # Load config and feature map
-        typer.echo(f"Loading config from {config}...")
+        if verbosity == 0:
+            typer.echo(f"Loading config from {config}...")
         jira_config = load_jira_config(config)
 
-        typer.echo(f"Loading feature map from {file}...")
+        if verbosity == 0:
+            typer.echo(f"Loading feature map from {file}...")
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
         # Create client and synchronizer
-        typer.echo(f"Connecting to Jira at {jira_config.jira.base_url}...")
+        if verbosity == 0:
+            typer.echo(f"Connecting to Jira at {jira_config.jira.base_url}...")
         client = JiraClient(jira_config.jira.base_url)
-        synchronizer = JiraSynchronizer(jira_config, feature_map, client)
+        synchronizer = JiraSynchronizer(jira_config, feature_map, client, verbosity=verbosity)
 
         # Sync all entities
-        typer.echo("Syncing entities with Jira...")
+        if verbosity == 0:
+            typer.echo("Syncing entities with Jira...")
         results = synchronizer.sync_all_entities()
 
         # Count results
@@ -227,13 +239,14 @@ def jira_sync(
         entities_with_conflicts = len([r for r in results if r.conflicts])
         entities_with_errors = len([r for r in results if r.errors])
 
+        # Always show summary
         typer.echo("\nSync completed:")
         typer.echo(f"  Total entities: {total_entities}")
         typer.echo(f"  Entities with automatic updates: {entities_with_updates}")
         typer.echo(f"  Entities with conflicts: {entities_with_conflicts}")
         typer.echo(f"  Entities with errors: {entities_with_errors}\n")
 
-        # Show errors
+        # Show errors (always)
         for result in results:
             if result.errors:
                 typer.echo(f"Error syncing {result.entity_id}:", err=True)
@@ -279,7 +292,8 @@ def jira_sync(
                 raise typer.Exit(1) from None
 
         if apply and not dry_run:
-            typer.echo("\nApplying changes to feature map...")
+            if verbosity >= 1:
+                typer.echo("\nApplying changes to feature map...")
 
             for result in results:
                 if result.updated_fields:
@@ -287,27 +301,30 @@ def jira_sync(
                     if entity:
                         for field, value in result.updated_fields.items():
                             entity.meta[field] = value
-                        typer.echo(
-                            f"  Updated {result.entity_id}: {', '.join(result.updated_fields.keys())}"
-                        )
+                        if verbosity >= 1:
+                            typer.echo(
+                                f"  Updated {result.entity_id}: {', '.join(result.updated_fields.keys())}"
+                            )
 
             for entity_id, field_updates in conflict_resolutions.items():
                 entity = feature_map.get_entity_by_id(entity_id)
                 if entity:
                     for field, value in field_updates.items():
                         entity.meta[field] = value
-                    typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
+                    if verbosity >= 1:
+                        typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
 
             _write_feature_map(file, feature_map)
             typer.echo(f"\n✓ Changes written to {file}")
 
         elif dry_run:
-            typer.echo("\nDry run - no changes made. Changes that would be applied:")
-            for result in results:
-                if result.updated_fields:
-                    typer.echo(f"  {result.entity_id}:")
-                    for field, value in result.updated_fields.items():
-                        typer.echo(f"    {field}: {value}")
+            if verbosity >= 1:
+                typer.echo("\nDry run - no changes made. Changes that would be applied:")
+                for result in results:
+                    if result.updated_fields:
+                        typer.echo(f"  {result.entity_id}:")
+                        for field, value in result.updated_fields.items():
+                            typer.echo(f"    {field}: {value}")
 
     except JiraAuthError as e:
         typer.echo(f"Authentication error: {e}", err=True)
