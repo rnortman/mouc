@@ -1,0 +1,81 @@
+# Example Jira configuration for Mouc
+# Copy this file to jira_config.yaml and customize for your environment
+
+# Jira connection settings
+# API credentials are read from environment variables:
+#   JIRA_EMAIL - Your Jira account email
+#   JIRA_API_TOKEN - API token from https://id.atlassian.com/manage/api-tokens
+jira:
+  base_url: https://yourcompany.atlassian.net
+
+# Field mappings: Configure how Jira fields map to Mouc metadata
+# NOTE: Use human-readable field names as they appear in your Jira UI!
+# The system automatically resolves them to internal field IDs.
+field_mappings:
+  # Start date configuration
+  start_date:
+    # Explicit date field takes precedence (use the display name from your Jira)
+    explicit_field: "Start date"
+
+    # Fallback: derive from status transition history
+    transition_to_status: "In Progress"
+
+    # How to resolve conflicts: "jira_wins" | "mouc_wins" | "ask"
+    conflict_resolution: "ask"
+
+  # End date configuration
+  end_date:
+    explicit_field: "Due Date"
+    transition_to_status: "Done"
+    conflict_resolution: "jira_wins"
+
+  # Effort/story points configuration
+  effort:
+    # Name of the Jira field containing effort (use the display name)
+    jira_field: "Story Points"
+
+    # Unit interpretation
+    unit: "story_points"
+
+    # Conversion rule: X story points = Y time units (d=days, w=weeks, m=months)
+    # Example: "1sp=1d" means 1 story point = 1 day
+    #          "2sp=1w" means 2 story points = 1 week
+    conversion: "1sp=1d"
+
+    conflict_resolution: "mouc_wins"
+
+  # Status mapping
+  status:
+    # Map Jira status values to Mouc status values
+    status_map:
+      "Done": "done"
+      "Closed": "done"
+      "Resolved": "done"
+      # Add more mappings as needed for your Jira workflow
+
+    conflict_resolution: "jira_wins"
+
+  # Resources (assignee) mapping
+  resources:
+    # Map Jira user emails to Mouc resource names
+    assignee_map:
+      "john.doe@company.com": "jdoe"
+      "jane.smith@company.com": "jsmith"
+      "alice.johnson@company.com": "ajohnson"
+      "bob.williams@company.com": "bwilliams"
+
+    # Value to use when issue is unassigned
+    unassigned_value: "*"
+
+    conflict_resolution: "ask"
+
+# Default settings
+defaults:
+  # Default conflict resolution strategy if not specified per field
+  conflict_resolution: "ask"
+
+  # Skip fields that don't exist in Jira rather than erroring
+  skip_missing_fields: true
+
+  # Timezone for date conversions
+  timezone: "UTC"

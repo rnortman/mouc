@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Tasks with `status: done` but no dates are excluded from Gantt output but satisfy dependencies
   - Warning generated for done tasks without dates: "Task '{id}' marked done without dates - excluded from schedule"
   - Done tasks without dates allow dependent tasks to start immediately
+- **Alpha-quality Jira integration**: Adds the ability to query Jira for entities with `jira` links and sync start/end dates, status, and assignee. See [docs/jira.md](docs/jira.md) for information. This feature is very rough and is likely to change substantially in the future.
 
 ### Fixed
 - Manual scheduling now correctly overrides DNS periods: tasks with explicit `start_date` or `end_date` are always scheduled at those times, even if the assigned resource has a DNS (Do Not Schedule) period during that time

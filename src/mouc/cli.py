@@ -13,6 +13,7 @@ import typer
 from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
+from .jira_cli import jira_app
 from .markdown import MarkdownGenerator
 from .parser import FeatureMapParser
 
@@ -329,6 +330,10 @@ def audit(
     """Run audit checks on the feature map."""
     typer.echo(f"Audit check '{check}' not yet implemented", err=True)
     raise typer.Exit(1)
+
+
+# Register Jira subcommands (defined in jira_cli.py)
+app.add_typer(jira_app, name="jira")
 
 
 def _load_styling(style_module: str | None, style_file: Path | None) -> None:
