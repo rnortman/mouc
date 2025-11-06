@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.8] - 2025-11-06
+
+### Fixed
+- **Scheduler now resumes work after DNS periods end**: Fixed a critical bug where the scheduler would fail to schedule tasks after resource DNS (Do Not Schedule) periods ended, leaving large gaps in the schedule even when resources were available. The scheduler now properly considers DNS period end dates when advancing time.
+
 ## [0.1.7] - 2025-11-06
 
 ### Added

@@ -440,6 +440,13 @@ class ParallelScheduler:
                     if task.start_after and task.start_after > current_time:
                         next_events.append(task.start_after)
 
+                # DNS period end dates (when resources become available)
+                for resource_schedule in resource_schedules.values():
+                    for _, busy_end in resource_schedule.busy_periods:
+                        # Add the day after DNS period ends as a potential event
+                        if busy_end >= current_time:
+                            next_events.append(busy_end + timedelta(days=1))
+
                 if next_events:
                     current_time = min(next_events)
                 else:
