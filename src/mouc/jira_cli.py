@@ -8,6 +8,7 @@ from typing import Annotated, Any
 
 import typer
 import yaml
+from ruamel.yaml import YAML
 
 from . import cli
 from .jira_client import JiraAuthError, JiraClient, JiraError
@@ -504,8 +505,12 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
         file_path: Path to feature map file
         feature_map: FeatureMap object to write
     """
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = False  # type: ignore[assignment]
+    yaml_rt.default_flow_style = False  # type: ignore[assignment]
+
     with file_path.open() as f:
-        data = yaml.safe_load(f)
+        data: Any = yaml_rt.load(f)  # type: ignore[no-untyped-call]
 
     if "entities" in data:
         for entity in feature_map.entities:
@@ -513,7 +518,7 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
                 data["entities"][entity.id]["meta"] = entity.meta
 
     with file_path.open("w") as f:
-        yaml.safe_dump(data, f, default_flow_style=False, sort_keys=False)
+        yaml_rt.dump(data, f)  # type: ignore[no-untyped-call]
 
 
 def _generate_questions_file(conflicts: list[FieldConflict], output_path: Path) -> None:
