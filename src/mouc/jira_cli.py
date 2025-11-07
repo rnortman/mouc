@@ -10,7 +10,7 @@ import typer
 import yaml
 from ruamel.yaml import YAML
 
-from . import cli
+from . import context
 from .jira_client import JiraAuthError, JiraClient, JiraError
 from .jira_interactive import InteractiveResolver
 from .jira_report import ReportGenerator
@@ -60,7 +60,7 @@ def jira_validate(
     try:
         # Determine config path
         if config is None:
-            global_config = cli.get_config_path()
+            global_config = context.get_config_path()
             if global_config:
                 config = global_config
             elif Path("mouc_config.yaml").exists():
@@ -123,11 +123,11 @@ def jira_fetch(
 
     try:
         # Get verbosity level
-        verbosity = cli.get_verbosity()
+        verbosity = context.get_verbosity()
 
         # Determine config path
         if config is None:
-            global_config = cli.get_config_path()
+            global_config = context.get_config_path()
             if global_config:
                 config = global_config
             elif Path("mouc_config.yaml").exists():
@@ -320,7 +320,7 @@ def jira_sync(
             raise typer.Exit(1) from None
 
         # Get verbosity level from global state
-        verbosity = cli.get_verbosity()
+        verbosity = context.get_verbosity()
 
         # Auto-enable verbosity for dry-run if not already set
         if dry_run and verbosity == 0:
@@ -328,7 +328,7 @@ def jira_sync(
 
         # Determine config path
         if config is None:
-            global_config = cli.get_config_path()
+            global_config = context.get_config_path()
             if global_config:
                 config = global_config
             elif Path("mouc_config.yaml").exists():
@@ -512,10 +512,63 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
     with file_path.open() as f:
         data: Any = yaml_rt.load(f)  # type: ignore[no-untyped-call]
 
+    # Build list of all possible sections in the file (new and old format can coexist)
+    available_sections = {}
     if "entities" in data:
-        for entity in feature_map.entities:
-            if entity.id in data["entities"]:
-                data["entities"][entity.id]["meta"] = entity.meta
+        available_sections["entities"] = data["entities"]
+    if "capabilities" in data:
+        available_sections["capabilities"] = data["capabilities"]
+    if "user_stories" in data:
+        available_sections["user_stories"] = data["user_stories"]
+    if "outcomes" in data:
+        available_sections["outcomes"] = data["outcomes"]
+
+    if not available_sections:
+        raise ValueError(
+            f"No entity sections found in {file_path}. "
+            "Expected 'entities' or legacy keys 'capabilities', 'user_stories', 'outcomes'"
+        )
+
+    # Map entity types to their legacy section names
+    type_to_legacy_section = {
+        "capability": "capabilities",
+        "user_story": "user_stories",
+        "outcome": "outcomes",
+    }
+
+    entities_updated = 0
+    entities_not_found: list[str] = []
+
+    for entity in feature_map.entities:
+        found = False
+
+        # First, try the unified 'entities' section
+        if "entities" in available_sections and entity.id in available_sections["entities"]:
+            available_sections["entities"][entity.id]["meta"] = entity.meta
+            entities_updated += 1
+            found = True
+        else:
+            # Fall back to legacy section based on entity type
+            legacy_section = type_to_legacy_section.get(entity.type)
+            if (
+                legacy_section
+                and legacy_section in available_sections
+                and entity.id in available_sections[legacy_section]
+            ):
+                available_sections[legacy_section][entity.id]["meta"] = entity.meta
+                entities_updated += 1
+                found = True
+
+        if not found:
+            entities_not_found.append(entity.id)
+
+    if entities_not_found:
+        typer.echo(
+            f"Warning: {len(entities_not_found)} entities not found in YAML: "
+            f"{', '.join(entities_not_found[:5])}"
+            + (f" and {len(entities_not_found) - 5} more" if len(entities_not_found) > 5 else ""),
+            err=True,
+        )
 
     with file_path.open("w") as f:
         yaml_rt.dump(data, f)  # type: ignore[no-untyped-call]
@@ -640,6 +693,13 @@ def _load_conflict_answers_yaml(
         if not choice or choice == "skip":
             continue
 
+        if "entity_id" not in answer or "field" not in answer:
+            typer.echo(
+                f"Error: Answer missing required 'entity_id' or 'field' key: {answer}",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+
         entity_id = answer["entity_id"]
         field = answer["field"]
 
@@ -691,6 +751,13 @@ def _load_conflict_answers_csv(
             choice = row.get("choice", "").lower().strip()
             if not choice or choice == "skip":
                 continue
+
+            if "entity_id" not in row or "field" not in row:
+                typer.echo(
+                    f"Error: CSV row missing required 'entity_id' or 'field' column: {row}",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
 
             entity_id = row["entity_id"]
             field = row["field"]

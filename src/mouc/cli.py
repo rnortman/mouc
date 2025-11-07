@@ -10,6 +10,7 @@ from typing import Annotated
 
 import typer
 
+from . import context
 from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
@@ -23,19 +24,16 @@ app = typer.Typer(
     add_completion=False,
 )
 
-# Global state for verbosity level and config path
-_verbosity_level = 0
-_config_path: Path | None = None
 
-
+# Backwards compatibility wrappers for global state access
 def get_verbosity() -> int:
     """Get the current verbosity level."""
-    return _verbosity_level
+    return context.get_verbosity()
 
 
 def get_config_path() -> Path | None:
     """Get the global config path."""
-    return _config_path
+    return context.get_config_path()
 
 
 @app.callback()
@@ -60,9 +58,8 @@ def main_callback(
     ] = None,
 ) -> None:
     """Global options for mouc commands."""
-    global _verbosity_level, _config_path
-    _verbosity_level = verbose
-    _config_path = config
+    context.set_verbosity(verbose)
+    context.set_config_path(config)
 
 
 @app.command()
