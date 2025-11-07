@@ -11,7 +11,6 @@ import yaml
 
 from . import cli
 from .jira_client import JiraAuthError, JiraClient, JiraError
-from .jira_config import load_jira_config
 from .jira_interactive import InteractiveResolver
 from .jira_report import ReportGenerator
 from .jira_sync import FieldConflict, JiraSynchronizer
@@ -23,10 +22,10 @@ jira_app = typer.Typer(help="Jira integration commands")
 
 
 def _load_jira_config_from_path(config_path: Path) -> Any:
-    """Load Jira config from either unified or standalone config file.
+    """Load Jira config from unified config file.
 
     Args:
-        config_path: Path to config file
+        config_path: Path to mouc_config.yaml file
 
     Returns:
         JiraConfig object
@@ -37,15 +36,10 @@ def _load_jira_config_from_path(config_path: Path) -> Any:
     """
     from .unified_config import load_unified_config
 
-    # Try unified config first
-    try:
-        unified = load_unified_config(config_path)
-        if unified.jira is None:
-            raise ValueError(f"Config file {config_path} doesn't contain 'jira' section")
-        return unified.jira
-    except (ValueError, KeyError):
-        # Try old standalone jira_config.yaml format
-        return load_jira_config(config_path)
+    unified = load_unified_config(config_path)
+    if unified.jira is None:
+        raise ValueError(f"Config file {config_path} doesn't contain 'jira' section")
+    return unified.jira
 
 
 @jira_app.command("validate")
@@ -55,7 +49,7 @@ def jira_validate(
         typer.Option(
             "--config",
             "-c",
-            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+            help="Path to config file (default: mouc_config.yaml)",
         ),
     ] = None,
 ) -> None:
@@ -71,7 +65,8 @@ def jira_validate(
             elif Path("mouc_config.yaml").exists():
                 config = Path("mouc_config.yaml")
             else:
-                config = Path("jira_config.yaml")
+                typer.echo("Error: No config file found (expected mouc_config.yaml)", err=True)
+                raise typer.Exit(1) from None
 
         # Load config
         typer.echo(f"Loading config from {config}...")
@@ -116,7 +111,7 @@ def jira_fetch(
         typer.Option(
             "--config",
             "-c",
-            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+            help="Path to config file (default: mouc_config.yaml)",
         ),
     ] = None,
 ) -> None:
@@ -137,7 +132,8 @@ def jira_fetch(
             elif Path("mouc_config.yaml").exists():
                 config = Path("mouc_config.yaml")
             else:
-                config = Path("jira_config.yaml")
+                typer.echo("Error: No config file found (expected mouc_config.yaml)", err=True)
+                raise typer.Exit(1) from None
 
         # Load config
         jira_config = _load_jira_config_from_path(config)
@@ -288,7 +284,7 @@ def jira_sync(
         typer.Option(
             "--config",
             "-c",
-            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+            help="Path to config file (default: mouc_config.yaml)",
         ),
     ] = None,
     interactive: Annotated[
@@ -337,7 +333,8 @@ def jira_sync(
             elif Path("mouc_config.yaml").exists():
                 config = Path("mouc_config.yaml")
             else:
-                config = Path("jira_config.yaml")
+                typer.echo("Error: No config file found (expected mouc_config.yaml)", err=True)
+                raise typer.Exit(1) from None
 
         # Load config and feature map
         if verbosity == 0:

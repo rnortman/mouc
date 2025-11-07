@@ -76,9 +76,12 @@ class TestJiraFetchCommand:
 
     @pytest.fixture
     def mock_config_file(self, tmp_path: Path) -> Path:
-        """Create a mock jira config file."""
-        config_file = tmp_path / "jira_config.yaml"
+        """Create a mock unified config file."""
+        config_file = tmp_path / "mouc_config.yaml"
         config_file.write_text("""
+resources:
+  - name: test_user
+
 jira:
   base_url: https://example.atlassian.net
 

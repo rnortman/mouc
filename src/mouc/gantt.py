@@ -206,17 +206,12 @@ class GanttScheduler:
         if resource_config is None and resource_config_path is not None:
             from contextlib import suppress
 
-            from .resources import load_resource_config
             from .unified_config import load_unified_config
 
-            # Try unified config first, fall back to old resources.yaml format
+            # Load from unified config
             with suppress(FileNotFoundError):
-                try:
-                    unified = load_unified_config(resource_config_path)
-                    resource_config = unified.resources
-                except (ValueError, KeyError):
-                    # Not a unified config, try old format
-                    resource_config = load_resource_config(resource_config_path)
+                unified = load_unified_config(resource_config_path)
+                resource_config = unified.resources
 
         self.resource_config = resource_config
 

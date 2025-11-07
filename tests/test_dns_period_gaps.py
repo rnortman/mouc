@@ -12,7 +12,7 @@ import yaml
 
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
-from mouc.resources import load_resource_config
+from mouc.unified_config import load_unified_config
 
 
 def test_scheduler_resumes_after_dns_period_with_wildcard_resources() -> None:
@@ -60,7 +60,8 @@ def test_scheduler_resumes_after_dns_period_with_wildcard_resources() -> None:
         resource_config_path = Path(f.name)
 
     try:
-        resource_config = load_resource_config(resource_config_path)
+        unified_config = load_unified_config(resource_config_path)
+        resource_config = unified_config.resources
 
         # Create a series of tasks with no explicit resource assignments (will use wildcard)
         metadata = FeatureMapMetadata()
@@ -167,7 +168,8 @@ def test_scheduler_considers_all_available_resources_with_wildcard() -> None:
         resource_config_path = Path(f.name)
 
     try:
-        resource_config = load_resource_config(resource_config_path)
+        unified_config = load_unified_config(resource_config_path)
+        resource_config = unified_config.resources
 
         metadata = FeatureMapMetadata()
         current_date = date(2025, 10, 1)

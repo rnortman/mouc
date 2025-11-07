@@ -3,10 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from pathlib import Path
-from typing import Any
 
-import yaml
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -116,26 +113,3 @@ class JiraConfig(BaseModel):
         if mapping and mapping.conflict_resolution:
             return mapping.conflict_resolution
         return self.defaults.conflict_resolution
-
-
-def load_jira_config(config_path: Path | str) -> JiraConfig:
-    """Load and validate Jira configuration from YAML file.
-
-    Args:
-        config_path: Path to jira_config.yaml file
-
-    Returns:
-        Validated JiraConfig object
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        ValueError: If config is invalid
-    """
-    config_path = Path(config_path)
-    if not config_path.exists():
-        raise FileNotFoundError(f"Jira config not found: {config_path}")
-
-    with config_path.open() as f:
-        data: dict[str, Any] = yaml.safe_load(f)
-
-    return JiraConfig.model_validate(data)

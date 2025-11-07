@@ -25,9 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Breaking**: `mouc graph -v` short flag removed; use `--view` instead to avoid conflict with global verbosity flag
-
-### Deprecated
-- Separate `resources.yaml` and `jira_config.yaml` files (still supported, but unified config recommended)
+- **Breaking**: Separate `resources.yaml` and `jira_config.yaml` files no longer supported; must use unified `mouc_config.yaml`
 
 ## [0.1.8] - 2025-11-06
 

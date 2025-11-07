@@ -7,9 +7,7 @@ This module handles loading and validating resource definitions including:
 """
 
 from datetime import date
-from pathlib import Path
 
-import yaml
 from pydantic import BaseModel, Field, model_validator
 
 
@@ -111,33 +109,6 @@ class ResourceConfig(BaseModel):
 
         # Single resource name
         return [spec]
-
-
-def load_resource_config(config_path: Path | str) -> ResourceConfig:
-    """Load and validate resource configuration from YAML file.
-
-    Args:
-        config_path: Path to resources.yaml file
-
-    Returns:
-        Validated ResourceConfig
-
-    Raises:
-        FileNotFoundError: If config file doesn't exist
-        ValueError: If config is invalid
-    """
-    config_path = Path(config_path)
-
-    if not config_path.exists():
-        raise FileNotFoundError(f"Resource config not found: {config_path}")
-
-    with config_path.open() as f:
-        data = yaml.safe_load(f)
-
-    if not data:
-        raise ValueError("Empty resource configuration")
-
-    return ResourceConfig.model_validate(data)
 
 
 def create_default_config() -> ResourceConfig:

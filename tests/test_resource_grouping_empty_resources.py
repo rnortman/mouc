@@ -8,7 +8,7 @@ import pytest
 
 from mouc.gantt import GanttScheduler
 from mouc.parser import FeatureMapParser
-from mouc.resources import load_resource_config
+from mouc.unified_config import load_unified_config
 
 
 def test_task_with_no_resources_appears_in_resource_grouped_gantt():
@@ -52,7 +52,8 @@ default_resource: "*"
     try:
         parser = FeatureMapParser()
         feature_map = parser.parse_file(fm_path)
-        resource_config = load_resource_config(rc_path)
+        unified_config = load_unified_config(rc_path)
+        resource_config = unified_config.resources
 
         # Create scheduler with current date after the fixed task
         scheduler = GanttScheduler(

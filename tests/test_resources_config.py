@@ -1,7 +1,6 @@
 """Tests for resource configuration loading and validation."""
 
 from datetime import date
-from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -11,7 +10,6 @@ from mouc.resources import (
     ResourceConfig,
     ResourceDefinition,
     create_default_config,
-    load_resource_config,
 )
 
 
@@ -195,49 +193,3 @@ def test_create_default_config():
     assert config.resources[0].name == "unassigned"
     assert len(config.resources[0].dns_periods) == 0
     assert len(config.groups) == 0
-
-
-def test_load_resource_config(tmp_path: Path) -> None:
-    """Test loading resource config from YAML file."""
-    yaml_content = """
-resources:
-  - name: alice
-    dns_periods:
-      - start: 2025-01-01
-        end: 2025-01-10
-  - name: bob
-    dns_periods: []
-
-groups:
-  team_a:
-    - alice
-    - bob
-"""
-
-    config_file = tmp_path / "resources.yaml"
-    config_file.write_text(yaml_content)
-
-    config = load_resource_config(config_file)
-
-    assert len(config.resources) == 2
-    assert config.resources[0].name == "alice"
-    assert len(config.resources[0].dns_periods) == 1
-    assert config.resources[1].name == "bob"
-
-    assert "team_a" in config.groups
-    assert config.groups["team_a"] == ["alice", "bob"]
-
-
-def test_load_resource_config_file_not_found():
-    """Test error handling for missing config file."""
-    with pytest.raises(FileNotFoundError):
-        load_resource_config("nonexistent.yaml")
-
-
-def test_load_resource_config_empty_file(tmp_path: Path) -> None:
-    """Test error handling for empty config file."""
-    config_file = tmp_path / "empty.yaml"
-    config_file.write_text("")
-
-    with pytest.raises(ValueError, match="Empty resource configuration"):
-        load_resource_config(config_file)
