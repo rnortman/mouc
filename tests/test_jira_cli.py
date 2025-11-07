@@ -66,8 +66,8 @@ class TestJiraFetchCommand:
             },
         }
 
-        # Mock field name map
-        mock_client._get_field_name_map.return_value = {
+        # Mock field mappings
+        mock_client.get_field_mappings.return_value = {
             "Story Points": "customfield_10001",
             "Epic Link": "customfield_10002",
         }
@@ -154,7 +154,7 @@ field_mappings:
 
         assert result.exit_code == 0
         assert "RAW JIRA API RESPONSE for TEST-123" in result.stdout
-        assert "FIELD DEFINITIONS (cached)" in result.stdout
+        assert "FIELD DEFINITIONS" in result.stdout
         # Should contain JSON
         assert '"key": "TEST-123"' in result.stdout
         assert '"changelog"' in result.stdout

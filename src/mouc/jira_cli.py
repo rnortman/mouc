@@ -158,11 +158,11 @@ def jira_fetch(
             typer.echo(json.dumps(raw_issue, indent=2))  # type: ignore[reportUnknownMemberType]
 
             typer.echo(f"\n{'=' * 60}")
-            typer.echo("FIELD DEFINITIONS (cached)")
+            typer.echo("FIELD DEFINITIONS")
             typer.echo(f"{'=' * 60}\n")
 
             # Show field mappings
-            field_map = client._get_field_name_map()  # type: ignore[reportPrivateUsage]
+            field_map = client.get_field_mappings()
             typer.echo(json.dumps(field_map, indent=2))
 
         elif verbosity >= 1:

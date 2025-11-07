@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,8 @@ from dotenv import load_dotenv
 
 from mouc.exceptions import MoucError
 from mouc.netrc_utils import get_jira_credentials_from_netrc
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -155,8 +158,15 @@ class JiraClient:
                 continue
 
             try:
-                timestamp = datetime.fromisoformat(created.replace("Z", "+00:00"))
-            except (ValueError, AttributeError):
+                # Handle both Z format and timezone offset formats like -0500
+                timestamp_str = created.replace("Z", "+00:00")
+                # Python's fromisoformat needs colons in timezone offset
+                # Convert -0500 to -05:00
+                if len(timestamp_str) > 6 and timestamp_str[-5] in ('+', '-') and ':' not in timestamp_str[-5:]:
+                    timestamp_str = timestamp_str[:-2] + ':' + timestamp_str[-2:]
+                timestamp = datetime.fromisoformat(timestamp_str)
+            except (ValueError, AttributeError) as e:
+                logger.warning("Failed to parse changelog timestamp '%s': %s", created, e)
                 continue
 
             for item in history.get("items", []):
@@ -167,18 +177,15 @@ class JiraClient:
 
         return transitions
 
-    def _get_field_mappings(self) -> dict[str, str]:
-        """Get mapping of field display names to field IDs.
-
-        Fetches all fields from Jira and builds a mapping of display names to IDs.
-        This is cached after the first call.
+    def _fetch_field_mappings(self) -> dict[str, str]:
+        """Fetch field mappings from Jira API (private).
 
         Returns:
             Dictionary mapping field display names to field IDs
-        """
-        if self._field_name_to_id is not None:
-            return self._field_name_to_id
 
+        Raises:
+            JiraError: If API call fails
+        """
         try:
             # Type ignore: atlassian-python-api lacks complete type stubs
             fields_raw = self.client.get_all_fields()  # type: ignore[reportUnknownMemberType]
@@ -192,10 +199,23 @@ class JiraClient:
                 if name and field_id:
                     mapping[name] = field_id
 
-            self._field_name_to_id = mapping
             return mapping
         except Exception as e:
             raise JiraError(f"Failed to fetch field mappings: {e}") from e
+
+    def get_field_mappings(self) -> dict[str, str]:
+        """Get mapping of field display names to field IDs.
+
+        This is cached after the first call to avoid repeated API calls.
+
+        Returns:
+            Dictionary mapping field display names to field IDs
+        """
+        if self._field_name_to_id is not None:
+            return self._field_name_to_id
+
+        self._field_name_to_id = self._fetch_field_mappings()
+        return self._field_name_to_id
 
     def get_custom_field_value(self, issue_data: JiraIssueData, field_name: str) -> Any:
         """Get value of a custom field by display name.
@@ -221,7 +241,7 @@ class JiraClient:
             return value
 
         # For custom fields, look up the field ID by name
-        field_mappings = self._get_field_mappings()
+        field_mappings = self.get_field_mappings()
         field_id = field_mappings.get(field_name)
         if field_id:
             return fields.get(field_id)
