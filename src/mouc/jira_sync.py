@@ -45,15 +45,17 @@ class SyncResult:
 class FieldExtractor:
     """Extracts field values from Jira issue data based on configuration."""
 
-    def __init__(self, config: JiraConfig, client: JiraClient):
+    def __init__(self, config: JiraConfig, client: JiraClient, resource_config: Any = None):
         """Initialize field extractor.
 
         Args:
             config: Jira configuration
             client: Jira client for resolving field names
+            resource_config: Optional ResourceConfig for resource mapping
         """
         self.config = config
         self.client = client
+        self.resource_config = resource_config
 
     def extract_start_date(self, issue_data: JiraIssueData) -> date | None:
         """Extract start_date from issue data.
@@ -153,6 +155,11 @@ class FieldExtractor:
     def extract_resources(self, issue_data: JiraIssueData) -> list[str] | None:
         """Extract resources (assignee) from issue data.
 
+        Uses the new unified resource mapping logic with priority:
+        1. Explicit jira_username in resource definitions
+        2. Auto-stripped domain (if enabled and matches a resource)
+        3. Full email as fallback
+
         Args:
             issue_data: Fetched Jira issue data
 
@@ -163,19 +170,16 @@ class FieldExtractor:
         if not mapping:
             return None
 
-        assignee_email = issue_data.assignee_email
+        # Use the new unified mapping logic
+        from mouc.unified_config import map_jira_user_to_resource
 
-        if not assignee_email:
-            if mapping.unassigned_value:
-                return [mapping.unassigned_value]
-            return None
-
-        if mapping.assignee_map:
-            mouc_resource = mapping.assignee_map.get(assignee_email)
-            if mouc_resource:
-                return [mouc_resource]
-
-        return [assignee_email]
+        unassigned_value = mapping.unassigned_value or "*"
+        return map_jira_user_to_resource(
+            issue_data.assignee_email,
+            self.resource_config,
+            self.config,
+            unassigned_value,
+        )
 
     def _get_date_field(self, issue_data: JiraIssueData, field_name: str) -> date | None:
         """Get and parse a date field from issue data using human-readable field names.
@@ -251,7 +255,12 @@ class JiraSynchronizer:
     """Orchestrates syncing between Mouc and Jira."""
 
     def __init__(
-        self, config: JiraConfig, feature_map: FeatureMap, client: JiraClient, verbosity: int = 0
+        self,
+        config: JiraConfig,
+        feature_map: FeatureMap,
+        client: JiraClient,
+        verbosity: int = 0,
+        resource_config: Any = None,
     ):
         """Initialize synchronizer.
 
@@ -260,11 +269,12 @@ class JiraSynchronizer:
             feature_map: Mouc feature map
             client: Jira API client
             verbosity: Verbosity level (0=silent, 1=changes only, 2=all checks)
+            resource_config: Optional ResourceConfig for resource mapping
         """
         self.config = config
         self.feature_map = feature_map
         self.client = client
-        self.extractor = FieldExtractor(config, client)
+        self.extractor = FieldExtractor(config, client, resource_config)
         self.verbosity = verbosity
 
     def sync_all_entities(self) -> list[SyncResult]:

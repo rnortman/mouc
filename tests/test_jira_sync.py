@@ -17,6 +17,7 @@ from mouc.jira_config import (
 )
 from mouc.jira_sync import FieldExtractor, JiraSynchronizer
 from mouc.models import Entity, FeatureMap
+from mouc.resources import ResourceConfig, ResourceDefinition
 
 
 class TestFieldExtractor:
@@ -71,9 +72,21 @@ class TestFieldExtractor:
         return client
 
     @pytest.fixture
-    def extractor(self, config: JiraConfig, mock_client: Mock) -> FieldExtractor:
+    def resource_config(self) -> ResourceConfig:
+        """Create test resource config."""
+        return ResourceConfig(
+            resources=[
+                ResourceDefinition(name="jdoe", jira_username="john@example.com"),
+                ResourceDefinition(name="jsmith", jira_username="jane@example.com"),
+            ]
+        )
+
+    @pytest.fixture
+    def extractor(
+        self, config: JiraConfig, mock_client: Mock, resource_config: ResourceConfig
+    ) -> FieldExtractor:
         """Create test extractor."""
-        return FieldExtractor(config, mock_client)
+        return FieldExtractor(config, mock_client, resource_config)
 
     def test_extract_start_date_from_explicit_field(self, extractor: FieldExtractor) -> None:
         """Test extracting start date from explicit field."""

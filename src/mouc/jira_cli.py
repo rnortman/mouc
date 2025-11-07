@@ -22,19 +22,60 @@ from .parser import FeatureMapParser
 jira_app = typer.Typer(help="Jira integration commands")
 
 
+def _load_jira_config_from_path(config_path: Path) -> Any:
+    """Load Jira config from either unified or standalone config file.
+
+    Args:
+        config_path: Path to config file
+
+    Returns:
+        JiraConfig object
+
+    Raises:
+        FileNotFoundError: If config doesn't exist
+        ValueError: If config doesn't contain Jira settings
+    """
+    from .unified_config import load_unified_config
+
+    # Try unified config first
+    try:
+        unified = load_unified_config(config_path)
+        if unified.jira is None:
+            raise ValueError(f"Config file {config_path} doesn't contain 'jira' section")
+        return unified.jira
+    except (ValueError, KeyError):
+        # Try old standalone jira_config.yaml format
+        return load_jira_config(config_path)
+
+
 @jira_app.command("validate")
 def jira_validate(
-    config: Annotated[Path, typer.Option("--config", "-c", help="Path to jira_config.yaml")] = Path(
-        "jira_config.yaml"
-    ),
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+        ),
+    ] = None,
 ) -> None:
     """Validate Jira configuration and test connection."""
     from .exceptions import MoucError
 
     try:
+        # Determine config path
+        if config is None:
+            global_config = cli.get_config_path()
+            if global_config:
+                config = global_config
+            elif Path("mouc_config.yaml").exists():
+                config = Path("mouc_config.yaml")
+            else:
+                config = Path("jira_config.yaml")
+
         # Load config
         typer.echo(f"Loading config from {config}...")
-        jira_config = load_jira_config(config)
+        jira_config = _load_jira_config_from_path(config)
         typer.echo(f"✓ Config loaded: {jira_config.jira.base_url}")
 
         # Create client
@@ -70,16 +111,31 @@ def jira_validate(
 @jira_app.command("fetch")
 def jira_fetch(
     ticket: Annotated[str, typer.Argument(help="Jira ticket ID (e.g., PROJ-123)")],
-    config: Annotated[Path, typer.Option("--config", "-c", help="Path to jira_config.yaml")] = Path(
-        "jira_config.yaml"
-    ),
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+        ),
+    ] = None,
 ) -> None:
     """Fetch and display data for a single Jira ticket."""
     from .exceptions import MoucError
 
     try:
+        # Determine config path
+        if config is None:
+            global_config = cli.get_config_path()
+            if global_config:
+                config = global_config
+            elif Path("mouc_config.yaml").exists():
+                config = Path("mouc_config.yaml")
+            else:
+                config = Path("jira_config.yaml")
+
         # Load config
-        jira_config = load_jira_config(config)
+        jira_config = _load_jira_config_from_path(config)
 
         # Create client
         client = JiraClient(jira_config.jira.base_url)
@@ -171,9 +227,14 @@ def jira_sync(
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
-    config: Annotated[Path, typer.Option("--config", "-c", help="Path to jira_config.yaml")] = Path(
-        "jira_config.yaml"
-    ),
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to config file (default: mouc_config.yaml or jira_config.yaml)",
+        ),
+    ] = None,
     interactive: Annotated[
         bool, typer.Option("--interactive", "-i", help="Prompt for conflicts interactively")
     ] = False,
@@ -212,10 +273,34 @@ def jira_sync(
         if dry_run and verbosity == 0:
             verbosity = 1
 
+        # Determine config path
+        if config is None:
+            global_config = cli.get_config_path()
+            if global_config:
+                config = global_config
+            elif Path("mouc_config.yaml").exists():
+                config = Path("mouc_config.yaml")
+            else:
+                config = Path("jira_config.yaml")
+
         # Load config and feature map
         if verbosity == 0:
             typer.echo(f"Loading config from {config}...")
-        jira_config = load_jira_config(config)
+
+        # Load unified config to get both Jira and Resource configs
+        from .unified_config import load_unified_config
+
+        unified_config = None
+        resource_config = None
+        try:
+            unified_config = load_unified_config(config)
+            jira_config = unified_config.jira
+            resource_config = unified_config.resources
+            if jira_config is None:
+                raise ValueError(f"Config file {config} doesn't contain 'jira' section")
+        except (ValueError, KeyError):
+            # Fall back to standalone jira config
+            jira_config = _load_jira_config_from_path(config)
 
         if verbosity == 0:
             typer.echo(f"Loading feature map from {file}...")
@@ -226,7 +311,9 @@ def jira_sync(
         if verbosity == 0:
             typer.echo(f"Connecting to Jira at {jira_config.jira.base_url}...")
         client = JiraClient(jira_config.jira.base_url)
-        synchronizer = JiraSynchronizer(jira_config, feature_map, client, verbosity=verbosity)
+        synchronizer = JiraSynchronizer(
+            jira_config, feature_map, client, verbosity=verbosity, resource_config=resource_config
+        )
 
         # Sync all entities
         if verbosity == 0:

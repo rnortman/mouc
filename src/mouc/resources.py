@@ -31,6 +31,9 @@ class ResourceDefinition(BaseModel):
     """Definition of a single resource."""
 
     name: str
+    jira_username: str | None = Field(
+        default=None, description="Jira username/email for this resource"
+    )
     dns_periods: list[DNSPeriod] = Field(default_factory=list[DNSPeriod])
 
 

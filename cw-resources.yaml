@@ -1,0 +1,30 @@
+resources:
+  - name: bhyer
+    dns_periods:
+      - start: 2025-12-15
+        end: 2026-01-01
+  - name: dcollins
+    dns_periods:
+      - start: 2025-12-15
+        end: 2026-01-01
+  - name: mwalls
+    dns_periods:
+      - start: 2025-10-01
+        end: 2026-03-30
+  - name: nmeyer
+    dns_periods:
+      - start: 2025-10-01
+        end: 2026-01-05
+  - name: rnortman
+    dns_periods:
+      - start: 2025-12-15
+        end: 2026-01-01
+  - name: sbilitzky
+    dns_periods:
+      - start: 2025-12-15
+        end: 2026-01-01
+  - name: rmattes
+    dns_periods:
+      - start: 2025-10-01
+        end: 2026-03-30
+default_resource: "*"

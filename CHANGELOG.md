@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Unified configuration file**: New `mouc_config.yaml` format consolidates resources and Jira settings
 - **`.netrc` credential support for Jira**: Jira credentials can now be retrieved from `~/.netrc` as an alternative to environment variables
 - **Verbosity levels for Jira sync**: Global `-v/--verbose` flag with integer levels (0=silent, 1=show changes, 2=show all checks)
   - `mouc -v 1 jira sync` shows entities being updated
@@ -16,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Breaking**: `mouc graph -v` short flag removed; use `--view` instead to avoid conflict with global verbosity flag
+
+### Deprecated
+- Separate `resources.yaml` and `jira_config.yaml` files (still supported, but unified config recommended)
 
 ## [0.1.8] - 2025-11-06
 

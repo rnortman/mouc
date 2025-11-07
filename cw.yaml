@@ -1,0 +1,1167 @@
+# Clockwork Feature Map
+metadata:
+  version: 2025q4-002
+  team: Onboard Infrastructure
+
+capabilities:
+  # keep-sorted start
+  box_parameters:
+    name: Box Parameters
+    description: |
+      Support for parameters in Boxes, configurable via DSL.
+
+      **Prerequisite for Multi-platform/multi-mission support.** Substantially reduces boilerplate and copy/paste when defining Boxes that are reused across multiple platforms or missions with small variations, including but not limited to customizing the system for sim vs vehicle.
+    tags: [config]
+    meta:
+      timeframe: 2026q1
+      effort: 6w
+  cog_parameters:
+    name: Cog Parameters
+    description: |
+      Support for parameters in Cogs, configurable via DSL.
+      Might be compile-time or composition-time, or both (TBD).
+
+      **Prerequisite for multi-platform/multi-mission support.** Substantially reduces boilerplate and copy/paste when defining Cogs that are reused with small variations; e.g. sensor drivers. Without this, we must copy/paste the entire cog definition for each sensor instance.
+    tags: [config]
+    meta:
+      timeframe: 2026q1
+      effort: 8w
+  composable_config:
+    name: Composable Parametric Configuration System
+    description: |
+      A configuration system that allows modular and parameterized configuration of Clockwork systems and subsystems.
+      Enables reduction of boilerplate particularly in multi-platform subsystems.
+      Might incorporate feature flags (in which case we would deprecate and port the existing feature flags system).
+
+      **Prerequisite for multi-platform/multi-mission support.**
+      Substantially reduces boilerplate and copy/paste when defining configurations that are reused across multiple platforms or missions with small variations.
+    requires: [box_parameters, cog_parameters, conditional_dsl_syntax, config_data_in_dsl]
+    tags: [system-composition, config]
+    meta:
+      timeframe: 2026q1
+      effort: 3w
+  conditional_dsl_syntax:
+    name: Conditional DSL Syntax
+    description: |
+      Extend the DSL to support conditional expressions and blocks.
+      Enables platform-specific, mission-specific, and mode-specific configurations directly in the DSL.
+
+      **Prerequisite for multi-platform/multi-mission support.** Substantially reduces boilerplate and copy/paste when defining configurations that are reused across multiple platforms or missions with small variations.
+    tags: [config]
+    meta:
+      timeframe: 2026q1
+      effort: 3w
+  config_data_in_dsl:
+    name: Configuration Data in DSL
+    description: |
+      Support for embedding configuration data directly in the DSL.
+      Enables self-contained configurations without external textproto files.
+
+      **Prerequisite for multi-platform/multi-mission support.** Allows the entire configuration of the system to be specified (and manipulated) directly in the DSL, enabling multi-platform/mission configuration. This does not (yet) completely replace textproto configs, but presents an alternative that's substantially more suitable to multi-platform/mission config.
+    tags: [config]
+    meta:
+      timeframe: 2026q1
+      effort: 3w
+  cpp_dynamic_schema_api:
+    name: C++ Dynamic Schema API
+    description: |
+      A C++ API for dynamic (runtime) access to schema types with runtime introspection and typing.
+      Read-only.
+    meta:
+      effort: 6w
+  gpu_context_management:
+    name: GPU Context Management
+    description: |
+      Clockwork owns the CUDA context and manages its lifecycle.
+
+      **Prerequisite for first-class GPU Cog support.** Enables Clockwork to schedule GPU Cogs and manage GPU resources effectively.
+    tags: [code-execution, gpu, resource-management]
+    meta:
+      timeframe: 2026q2
+      effort: 5w
+  observability_signals_foundation:
+    name: Signals Foundation for Observability
+    description: |
+      General DSL-based "signals" mechanism supports multiple use cases: metrics, event triggering, fault reporting.
+
+      **Critical foundational feature for observability and fault management.** Will eventually replace the MVP Diagnostics system and provide easier alternatives for event triggering and metrics.
+    links:
+      - design:[PDD-826](https://docs.google.com/document/d/14Xhf1l9u2tzkCz89N4O1ASIfNYDaV-l64NUgKueAoEg/edit)
+    enables: [observability]
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman, sbilitzky]
+      effort: 6w
+  pinion_backing_abstraction:
+    name: Pinion Memory Backing Abstraction
+    description: |
+      The Pinion MVP hard-codes POSIX shared memory as the backing buffer type.
+      This feature abstracts that to support multiple backing types.
+
+      **Prep work for GPU memory support and improving sim/offline execution (faster, less memory).** Also improves the code quality and maintainability of Clockwork itself.
+    tags: [code-execution, communication]
+    meta:
+      timeframe: 2025q4
+      resources: [dcollins]
+      effort: 4w
+  pinion_gpu_backing:
+    name: Pinion GPU Memory Backing
+    description: |
+      Pinion pub/sub can use GPU/CPU-shared memory.
+
+      **Enables first-class GPU support.**
+    requires: [pinion_backing_abstraction, gpu_context_management]
+    tags: [code-execution, gpu]
+    meta:
+      timeframe: 2026q2
+      effort: 3w
+  pinion_shared_ptr_backing:
+    name: Pinion Shared Pointer Backing
+    description: |
+      Pinion pub/sub can use shared pointers for ref-counted in-process communication.
+      Useful for offline executor (sim, unit tests).
+
+      **Improves offline execution (sim, unit tests) efficiency and memory usage.**
+    requires: [pinion_backing_abstraction]
+    enables: [development_velocity]
+    tags: [code-execution, communication, simulation]
+    meta:
+      timeframe: 2025q4
+      resources: [dcollins]
+      effort: 1.5w
+  signals_based_cog_execution_metrics:
+    name: Signals-based Cog Execution Metrics
+    description: |
+      Replace the existing MVP Cog execution metrics system with a new Signals-based system.
+
+      **Removes tech debt within Clockwork, enables future observability features.**
+    requires: [signals_dashboards, signals_metrics_integration, signals_visualization_support]
+    enables: [observability]
+    tags: [code-execution]
+    meta:
+      timeframe: 2026q1
+      resources: [sbilitzky]
+      effort: 3w
+  signals_cpp_cog_api:
+    name: Signals C++ Cog API
+    description: |
+      A C++ API for Cogs to set and accumulate Signals.
+      Does not allow query.
+      Supports a mechanism to pass down a signal API object into sub-functions.
+    requires: [signals_dsl_syntax, signals_metadata]
+    enables: [observability_signals_foundation]
+    links:
+      - design:[PDD-956](https://docs.google.com/document/d/1T0549QAAQ0bDIIHBJsA1Sf1wUJGnOXE2GcAM-cBe_Dw/edit)
+      - jira:[OI-3695](https://evaav.atlassian.net/browse/OI-3695)
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman]
+      effort: 1.5w
+  signals_dsl_syntax:
+    name: Signals DSL Syntax
+    description: |
+      Extend the Clockwork DSL to support defining Signals, associating them with Cogs, and setting policies.
+      Enables users to define signals, their types, and their properties directly in the DSL.
+    enables: [observability_signals_foundation]
+    links:
+      - design:[PDD-945](https://docs.google.com/document/d/15fU4x0h_QaY2fGg9giik4lU2efNU_AJ6Pjh4lAbHj4k/edit)
+      - jira:[OI-3694](https://evaav.atlassian.net/browse/OI-3694)
+    meta:
+      timeframe: 2025q4
+      resources: [sbilitzky]
+      effort: 1.5w
+  signals_generic_detector_facility:
+    name: Signals Generic Detector Facility
+    description: |
+      A generic "detector" facility for Signals that can be used to specify threshold-type logic.
+    requires: [observability_signals_foundation]
+    meta:
+      timeframe: 2026q1
+      resources: [rnortman]
+      effort: 3w
+  signals_python_cog_api:
+    name: Signals Python Cog API
+    description: |
+      A Python API for Cogs to set and accumulate Signals.
+      Does not allow query.
+      Supports a mechanism to pass down a signal API object into sub-functions.
+      Implemented as a wrapper around C++ API.
+    requires: [signals_dsl_syntax, signals_metadata, signals_cpp_cog_api]
+    enables: [observability_signals_foundation]
+    meta:
+      effort: 4w
+  signals_python_offline_api:
+    name: Signals Python Offline API
+    description: |
+      A Python API for offline tools to query and analyze signal reports from logs.
+      Supports querying signal values, metadata, and aggregations.
+    requires: [signals_schema_generation]
+    enables: [observability]
+    links:
+      - jira:[OI-3781](https://evaav.atlassian.net/browse/OI-3781)
+    meta:
+      timeframe: 2025q4
+      resources: [sbilitzky]
+      effort: 2w
+  signals_schema_generation:
+    name: Signals Schema Generation
+    description: |
+      Auto-generate schema definitions for signal report groups based on Cog definitions.
+    requires: [signals_dsl_syntax, schema_soa_type]
+    enables: [observability_signals_foundation]
+    links:
+      - design:[PDD-933](https://docs.google.com/document/d/1zTnNN-wrbkgenrkzzhTpMw71DmjiwdQ12wwMn4f8oTc/edit)
+      - jira:[OI-3826](https://evaav.atlassian.net/browse/OI-3826)
+    meta:
+      timeframe: 2025q4
+      resources: [sbilitzky]
+      effort: 2w
+  # keep-sorted end
+outcomes:
+  # keep-sorted start
+  boilerplate_reduction:
+    name: Boilerplate Reduction
+    description: |
+      Reduce boilerplate and redundancy in Clockwork DSL.
+    requires:
+      [
+        config_data_in_dsl,
+        conditional_dsl_syntax,
+        box_parameters,
+        cog_parameters,
+        composable_config,
+        user_request_make_it_easier_to_define_a_new_cog,
+      ]
+    links:
+      - jira:[OI-3566](https://evaav.atlassian.net/browse/OI-3566)
+  development_velocity:
+    name: Development Velocity
+    description: |
+      Increase the speed and efficiency of developing, testing, and deploying Clockwork-based applications.
+      Reduce boilerplate and redundancy in configuration and code.
+      Enable rapid iteration and experimentation with new features and capabilities.
+    requires:
+      [
+        offline_reproduction,
+        multiplatform_support,
+        multimission_support,
+        multimode_support,
+        boilerplate_reduction,
+        observability_signals_foundation,
+        journaling,
+        signals_based_event_triggering,
+        doc_generation_sys_arch,
+        observability_tracing,
+        unit_test_dials,
+        multithreaded_deterministic_runner,
+      ]
+  driverless_production_scale:
+    name: Driverless Production Scale
+    description: |
+      Enable Clockwork to support driverless operations at production scale, with high reliability, low latency, and robust fault management.
+    requires: [multimission_support, multimode_support, operational_efficiency, system_robustness, safety_case]
+  high_reliability_scheduling:
+    name: High-reliability Scheduling
+    description: |
+      Achieve high reliability in Cog scheduling, ensuring that Cogs run as expected with minimal jitter and latency.
+      Reduces long-tail end-to-end latency, enabling production scale
+    requires: [static_scheduling]
+  milestone_dpr:
+    name: DPR Milestone
+    description: |
+      Milestone: Driverless on Public Roads (at least one vehicle operating driverless on public roads).
+      This does not cover scaled operations to many trucks operating continuously; it may still have significant barriers to operational scaling.
+  observability:
+    name: Observability
+    description: |
+      Improve the observability of Clockwork-based systems, enabling better monitoring, debugging, and analysis.
+      Provide rich metrics, tracing, and logging capabilities.
+      Enable offline reproduction of online execution for debugging and testing.
+  operational_efficiency:
+    name: Operational Efficiency
+    description: |
+      Reduce the operational overhead of maintaining Clockwork configurations for multiple platforms, missions, and modes.
+      Reduce the time and effort required to onboard new platforms and missions.
+    requires:
+      [
+        multiplatform_support,
+        multimission_support,
+        multimode_support,
+        observability_tracing,
+        multithreaded_deterministic_runner,
+      ]
+  robust_resource_management:
+    name: Robust Resource Management
+    description: |
+      Efficiently manage CPU, GPU, and memory resources in Clockwork applications.
+      Prevent resource exhaustion and ensure fair sharing of resources among Cogs.
+      Provide visibility into resource usage and enable proactive management.
+    requires: [cog_memory_monitoring, burndown_uncontrolled_allocation, gpu_context_management, observability_tracing]
+  safety_case:
+    name: Safety Case
+    description: |
+      Provide evidence and documentation to support the safety case for Clockwork-based systems.
+      Demonstrate that Clockwork meets relevant safety standards and requirements.
+      Facilitate safety audits and assessments.
+    requires:
+      [
+        signals_based_fault_reporting,
+        doc_generation_sys_arch,
+        offline_reproduction,
+        observability_tracing,
+        system_robustness,
+      ]
+  system_robustness:
+    name: System Robustness
+    description: |
+      Improve the robustness and reliability of Clockwork-based systems.
+      Reduce the incidence and impact of faults and failures.
+    requires:
+      [
+        high_reliability_scheduling,
+        robust_resource_management,
+        multimode_support,
+        signals_based_fault_reporting,
+        observability_tracing,
+      ]
+  # keep-sorted end
+user_stories:
+  # keep-sorted start
+
+  aligners:
+    name: Production-intent DSL-based Message aligners
+    description: |
+      Flexible and powerful multi-channel message alignment specifications in the DSL, with aligner code auto-generated by Clockwork compiler.
+      DSL specifications expose all alignment logic and true data flow intent, enabling smarter scheduling and observability.
+
+      **Unlocks new alignment capabilities, real observability, and improved Clockwork scheduling.** The existing MVP aligner system is inherited from our ROS prototype and has significant limitations. It's based on C++ template metaprogramming with only very few options for alignment. Its operation is confusing and impossible to introspect. Most importantly, it conceals critical data flow information from the Clockwork compiler and system specification, making scheduling improvements impossible.
+    requires: [signals_functional_transforms]
+    links:
+      - design:[PDD-861](https://docs.google.com/document/d/14Xhf1l9u2tzkCz89N4O1ASIfNYDaV-l64NUgKueAoEg/edit)
+      - jira:[OI-3731](https://evaav.atlassian.net/browse/OI-3731)
+    tags: [code-execution, scheduling, observability]
+    meta:
+      timeframe: 2026q2
+      effort: 9w
+      resources: [rnortman]
+  autogenerated_viz_plugins:
+    name: Autogenerated Visualization Plugins
+    description: |
+      Users can automatically generate visualization proxies/translators for feeding to live viz and log viz.
+
+      **Improves developer QoL, reduces boilerplate.**
+      Reduces the amount of manual work required to create visualization plugins for new schema types.
+    tags: [visualization, documentation]
+    enables: [boilerplate_reduction]
+    links:
+      - jira:[OI-3570](https://evaav.atlassian.net/browse/OI-3570)
+    meta:
+      effort: 4w
+  burndown_uncontrolled_allocation:
+    name: Burndown of Uncontrolled Memory Allocation
+    description: |
+      Identify and eliminate memory allocations which do not go through Clockwork-provided allocators. This includes both our code and allocations within third-party libraries.
+
+      **Prepare for robust driverless operation.** Uncontrolled memory allocation can lead to unpredictable memory usage, fragmentation, and out-of-memory conditions, which are unacceptable in production driverless systems. This feature is critical for achieving robust resource management in Clockwork.
+    tags: [code-execution, memory-management]
+    requires: [monitor_use_of_global_allocators, cog_memory_monitoring]
+    enables: [milestone_dpr]
+    meta:
+      timeframe: 2026q3
+      effort: 3w
+  cog_memory_monitoring:
+    name: Memory Monitoring and Limits
+    description: |
+      Memory usage monitoring and enforcement for Cogs.
+      Tracks memory usage per Cog and enforces limits.
+      Limited only to memory allocated via Clockwork-provided allocators.
+
+      **Critical for safety case and observability.**
+    requires: [observability_signals_foundation]
+    enables: [milestone_dpr, observability]
+    tags: [code-execution, observability, memory-management]
+    meta:
+      timeframe: 2026q2
+      effort: 3w
+  custom_allocator_strategies:
+    name: Custom Allocator Strategies
+    description: |
+      Support for custom memory allocation strategies in Clockwork-provided allocators.
+      Enables different allocation strategies (e.g. arena allocators) to be used for different Cogs or subsystems.
+
+      **Improves memory management flexibility and efficiency.**
+      Reduces memory fragmentation, leading to more predictable memory usage and improved performance and ultimately lower latency jitter.
+    requires: [cog_memory_monitoring]
+    tags: [code-execution, memory-management]
+    meta:
+      timeframe: 2026q3
+      effort: 2w
+  doc_generation_sys_arch:
+    name: Documentation Generation for System Architecture
+    description: |
+      A system to auto-generate documentation for Clockwork system architecture from DSL annotations.
+
+      **Important for safety case and general documentation quality.** Generates architecture diagrams, IDLs, etc. from the source code, ensuring they are always in sync and accurate.
+    requires: [composable_config, dsl_tags_labels]
+    enables: [observability]
+    tags: [documentation]
+    meta:
+      timeframe: 2026q3
+      effort: 4w
+  dsl_autoformatter:
+    name: Clockwork DSL Autoformatter
+    description: |
+      An autoformatter for the Clockwork DSL to enforce consistent style and enable automated refactoring and DSL generation.
+
+      **Improves developer QoL.**
+      Enables automated refactoring and code generation of DSL code while preserving style and formatting. Integrates with IDEs and CI systems to ensure consistent style across the codebase.
+    requires: [dsl_comment_syntax]
+    enables: [development_velocity]
+    tags: [devex]
+    meta:
+      timeframe: 2026q1
+      resources: [rnortman]
+      effort: 1w
+  dsl_comment_syntax:
+    name: Comment Syntax in DSL
+    description: |
+      Support for comments in the Clockwork DSL, with CI check to prevent them from landing.
+      Includes upgrading to new fltk upstream (for trivia support).
+
+      **Improves developer QoL.** Allows code to be temporarily commented out in dev branches.
+    tags: [devex]
+    enables: [development_velocity]
+    links:
+      - design:[PDD-862](https://docs.google.com/document/d/1aXsabo1-US4oYCpSy8ReJxjmU-Kp_mXcJqXv9sDk0XQ/edit)
+      - jira:[OI-3704](https://evaav.atlassian.net/browse/OI-3704)
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman]
+      effort: 1w
+  dsl_feature_flags:
+    name: DSL Feature Flags
+    description: |
+      A feature flags system integrated with the DSL config system to enable or disable features at composition time.
+      Deprecates and eventually replaces the existing feature flags system.
+      Based on the same mechanisms as multi-platform/multi-mission support.
+
+      **Essential for usable multi-platform/multi-mission support.**
+      Enables or disables features based on platform, mission, or mode directly in the DSL configuration, reducing boilerplate and copy/paste. Also improves transparency of system architecture.
+    requires: [composable_config]
+    tags: [config]
+    meta:
+      timeframe: 2026q3
+      effort: 4w
+  dsl_linter:
+    name: Clockwork DSL Linter
+    description: |
+      A linter for the Clockwork DSL to enforce style and best practices.
+      Includes new pragma syntax to allow linter suppressions.
+
+      **Improves developer QoL and safety case.** Helps enforce best practices and coding standards in the DSL, improving code quality and maintainability. Enables DSL parser to be less picky about things like documentation, which is helpful during development/prototyping.
+    tags: [devex]
+    requires: [dsl_comment_syntax]
+    enables: [safety_case, development_velocity]
+    links:
+      - design:[PDD-862](https://docs.google.com/document/d/1aXsabo1-US4oYCpSy8ReJxjmU-Kp_mXcJqXv9sDk0XQ/edit)
+      - jira:[OI-3704](https://evaav.atlassian.net/browse/OI-3704)
+    meta:
+      timeframe: 2026q2
+      resources: [rnortman]
+      effort: 3w
+  dsl_tags_labels:
+    name: DSL Tags and Labels
+    description: |
+      Support for user-defined tags and labels in the DSL for Cogs, Boxes, and other entities.
+      Enables better organization, filtering, and management of Clockwork configurations.
+
+      **Improves documentation and is a foundational feature that we can build on.** May improve multi-platform/multi-mission support.
+    tags: [config]
+    meta:
+      timeframe: 2026q2
+      effort: 2w
+  eliminate_schema_history:
+    name: Eliminate Schema History
+    description: |
+      Remove the need to record schema history in the DSL, relying on log metadata instead.
+
+      **Improves developer QoL.**
+    tags: [data-representation]
+    enables: [boilerplate_reduction, development_velocity]
+    links:
+      - design:[PDD-906](https://docs.google.com/document/d/1j_g9JALqkfqiQHolhZeS4eM_zEjJCPbFeS5UeJDithQ/edit)
+    meta:
+      timeframe: 2025q4
+      resources: [bhyer]
+      effort: 1w
+      end_date: 2025-10-20
+      status: done
+  eliminate_user_threads_and_thread_pools:
+    name: Eliminate user threads and thread pools
+    description: |
+      Users can write Cogs without using threads or thread pools.
+      Users can write Cogs that do fine-grained concurrency without using threads or thread pools.
+      Clockwork manages concurrency and parallelism internally, allowing users to focus on the Cog logic.
+
+      **Improves code quality and safety, enables robust resource management and scheduling.**
+      Improves efficiency by reducing context switching and resource contention.
+    tags: [code-execution, concurrency]
+    requires: [fine_grained_concurrency, websocket_support]
+    enables: [static_scheduling]
+    meta:
+      timeframe: 2026q3
+      effort: 3.5w
+  fine_grained_concurrency:
+    name: Fine-grained Concurrency
+    description: |
+      Support for fine-grained concurrency within Cogs allowing "thread pool" style work execution but without user threads.
+
+      **Improves code quality and safety, enables robust scheduling and observability, contributes to safety case.** Allows Cogs to express concurrency without introducing user-managed thread pools, which are difficult to reason about and interfere with scheduling and observability. Enables better CPU utilization and lower latency, less CPU contention and context switching.
+    requires: [reentrant_cogs]
+    tags: [code-execution, concurrency]
+    meta:
+      timeframe: 2026q3
+      effort: 8w
+  gpu_cogs:
+    name: First-class GPU Cog Support
+    description: |
+      Support for GPU-based Cogs with Clockwork-managed CUDA context.
+      Users can define and run Cogs that execute on the GPU, with Clockwork managing the CUDA context and memory.
+      Users can pass messages between CPU and GPU Cogs using Pinion with GPU memory backing.
+      Clockwork manages scheduling CUDA functions to the GPU; users write only the GPU code and not the CPU scaffolding.
+
+      **Enables robust scheduling and observability, contributes to safety case.**
+      Reduces GPU contention by scheduling exclusive GPU access, reducing jitter/long-tail latency. Enables observability of GPU Cog execution.
+    tags: [code-execution, gpu]
+    enables: [observability]
+    requires: [gpu_context_management, gpu_shared_memory_support]
+    meta:
+      timeframe: 2026q3
+      effort: 8w
+  gpu_shared_memory_support:
+    name: GPU Shared Memory Support
+    description: |
+      Users can access Clockwork messages on GPU without copying between CPU and GPU.
+      NB: This is the user-facing layer on top of the underlying pinion GPU backing.
+
+      **Allows GPU code to directly send and receive Clockwork messages without copying.**
+    tags: [code-execution, gpu]
+    requires: [pinion_gpu_backing]
+    links:
+      - jira:[OI-1339](https://evaav.atlassian.net/browse/OI-1339)
+    meta:
+      timeframe: 2026q2
+      effort: 2w
+  journaling:
+    name: Journaling System
+    description: |
+      A high-performance, low-overhead journaling system for Cog execution.
+      Expands on the Cog execution metrics to contain all information required for full offline reproduction.
+      Does not include the reproduction work itself.
+
+      **Improves observability, enables robust scheduling and offline reproduction.**
+    requires: [signals_based_cog_execution_metrics, aligners]
+    enables: [observability]
+    meta:
+      timeframe: 2026q2
+      effort: 4w
+  make_docs_optional_in_parser:
+    name: Make Documentation Optional in Parser
+    description: |
+      Make documentation elements optional in the syntax, relying on the linter to enforce their presence where required.
+
+      **Improves developer QoL.**
+      Reduces friction when writing DSL code during development and prototyping.
+    requires: [dsl_linter]
+    tags: [devex]
+    enables: [development_velocity]
+    meta:
+      timeframe: 2026q2
+      effort: 1w
+  microcontroller_comms:
+    name: Microcontroller/Clockwork Comms Interface
+    description: |
+      Support for communication between Clockwork Cogs and microcontrollers (UDP or other, SOME/IP, DOIP).
+      Ideally this would use Clockwork schemas with codegen for the microcontroller side.
+      This is a placeholder which will turn into specific protocols later.
+
+      **Enables robust communication with microcontrollers.** Smoother integration with vehicle systems and sensors, less code duplication/manually-written code, easier IDL changes. Potentially improves safety case.
+    tags: [communication]
+    enables: [milestone_dpr]
+    meta:
+      effort: 4w
+  mode_management:
+    name: Mode Management System
+    description: |
+      A first-class system for defining and managing runtime modes as state machines (e.g. startup, wait_for_localization, wait_for_mission, autonomous, safe_state, shutdown, ingest).
+      Enables mode-specific configuration of Cogs and fault management.
+
+      **Enables orderly startup, shutdown, and transitions between different operating modes.**
+      Important for operational efficiency, contributes to safety case.
+    tags: [system-composition, config, code-execution, fault-management]
+    meta:
+      timeframe: 2026q3
+      effort: 10w
+  monitor_use_of_global_allocators:
+    name: Monitor Use of Global Allocators
+    description: |
+      Detect and report use of global new/delete and malloc/free (instead of Clockwork-provided allocators).
+      Includes the ability to identify which Cogs are calling global allocators, possibly including stack traces when running offline.
+      Helps identify Cogs that do not use Clockwork-provided allocators.
+
+      **Critical for safety case and observability.**
+      Uncontrolled memory allocation can lead to unpredictable memory usage, fragmentation, and out-of-memory conditions.
+    enables: [observability]
+    tags: [code-execution, memory-management, observability]
+    meta:
+      timeframe: 2026q2
+      effort: 4w
+  multimission_support:
+    name: Multi-mission Support
+    description: |
+      Users can define and maintain multiple missions (e.g. data collect, demo, supervised, driverless) with a minimum of boilerplate and copy/paste redundancy.
+    tags: [system-composition, config]
+    requires: [composable_config, signals_based_fault_reporting]
+    meta:
+      timeframe: 2026q2
+      effort: 5w
+  multimode_support:
+    name: Multi-mode Support
+    description: |
+      Users can define and maintain multiple runtime modes (e.g. startup, wait_for_localization, wait_for_mission, autonomous, safe_state, shutdown, ingest) with a minimum of boilerplate and copy/paste redundancy.
+      Users can configure cogs and fault management on a per-mode basis.
+      Eliminates the concept of "expected faults" by making fault policies mode-specific, so that e.g. lack of localization while in `startup` or `wait_for_localization` does not trigger a fault, but it does trigger a fault in `autonomous` mode.
+      Allows cogs and connections between cogs to be modified depending on the current mode, enabling e.g. cogs that only run during startup or ingest but never during autonomy.
+    tags: [system-composition, config, code-execution, fault-management]
+    requires: [mode_management]
+    meta:
+      timeframe: 2026q3
+      effort: 5w
+  multiplatform_support:
+    name: Multi-platform Support
+    description: |
+      Users can define and maintain multiple vehicle platforms and variants with a minimum of boilerplate and copy/paste redundancy.
+    tags: [system-composition, config]
+    requires: [composable_config, signals_based_fault_reporting]
+    links:
+      - jira:[OI-3565](https://evaav.atlassian.net/browse/OI-3565)
+    meta:
+      timeframe: 2026q2
+      effort: 5w
+  multiple_messages_per_output_support:
+    name: Support for multiple messages per output per cycle
+    description: |
+      Users can define Cogs that produce multiple messages on a single output endpoint per execution cycle.
+      Enables more efficient and flexible data processing patterns.
+
+      **Essential for robust static scheduling and reducing tech debt.**
+      Most cogs don't need this but for some it's essential.
+
+    enables: [static_scheduling]
+    tags: [code-execution, comms]
+    meta:
+      timeframe: 2026q2
+      effort: 2.5w
+  multithreaded_deterministic_runner:
+    name: Multithreaded Deterministic Runner
+    description: |
+      Users can run Clockwork in a multithreaded mode that is deterministic and reproducible.
+      Enables better utilization of multi-core CPUs during Sim.
+
+      **Improves sim runtime and cloud server efficiency.**
+    tags: [code-execution]
+    requires: [pinion_shared_ptr_backing]
+    links:
+      - jira:[OI-3578](https://evaav.atlassian.net/browse/OI-3578)
+    meta:
+      timeframe: 2025q4
+      resources: [dcollins]
+      effort: 8w
+  observability_tracing:
+    name: Observability Tracing
+    description: |
+      A tracing facility to replace log_cerr and similar ad-hoc logging mechanisms.
+      Includes the ability to have structure offboard alerting (during ingest or metrics).
+
+      **Improved developer QoL, observability, logging efficiency, metrics, and safety case.**
+      Standardizes tracing/logging across Clockwork, enabling better analysis and alerting. Intended to eventually replace `log_cerr_*` entirely with better efficiency and structure.
+    enables: [observability]
+    meta:
+      timeframe: 2026q3
+      effort: 7w
+  offline_reproduction:
+    name: Offline Reproduction of execution with high fidelity
+    description: |
+      A system for offline reproduction of Clockwork execution with high fidelity.
+      Enables replay of recorded Cog execution, including all inputs, outputs, and internal state.
+      Supports debugging, analysis, and validation of Clockwork behavior.
+
+      **Allows us to reliably reproduce what actually happened in a log event offline.** This includes reproducing execution timing even when not running on target hardware. Reduces dependency on logged debug messages if we can recreate the exact execution conditions offline for debugging instead. Note that this will be "high fidelity" but nothing can be entirely perfect.
+    requires: [journaling, state_snapshot]
+    enables: [observability]
+    meta:
+      timeframe: 2026q4
+      effort: 16w
+  pcie_transport:
+    name: PCIe Transport for Pinion
+    description: |
+      Support for PCIe transport in Pinion for high-throughput, low-latency communication between Cogs on different machines.
+
+      **Reduces latency and improves throughput for high-criticality messages.**
+    enables: [milestone_dpr, system_robustness]
+    tags: [communication]
+    links:
+      - design:[PDD-728](https://docs.google.com/document/d/1qkudK_7jDhJHnFNOZrHFPGPqz6LzXbPyg6FUby8GRNA/edit)
+      - jira:[OI-2103](https://evaav.atlassian.net/browse/OI-2103)
+    meta:
+      timeframe: 2025q4
+      resources: [mwalls]
+      effort: 3w
+      end_date: 2025-10-29
+      status: done
+  protocol_doip:
+    name: DOIP Protocol
+    description: |
+      First-class support for the DOIP protocol for communication between Clockwork Cogs and sensors or microcontrollers.
+
+      **Enables robust comms with sensors, ECUs, and microcontrollers.**
+    tags: [communication]
+    requires: [tcp_support]
+    meta:
+      effort: 2.5w
+  python_in_place_schema_api:
+    name: Pure Python In-place Schema API
+    description: |
+      A pure Python API for in-place (no serialization/deserialization) manipulation of schema data.
+      Enables efficient manipulation of large schema objects without unnecessary copies.
+      Replaces the nanobind-based schema API (and likely the existing dynamic Python API as well).
+      Aka "PyTachyonV2".
+
+      **Improves developer QoL and performance of Python code that manipulates schema data.** Enables efficient handling of large schema objects in Python without the overhead of serialization/deserialization or nanobind. Allows us to get rid of the complex and fragile nanobind bindings.
+    tags: [data-representation, devex]
+    enables: [development_velocity]
+    links:
+      - design:[PDD-794](https://docs.google.com/document/d/1t99AgmZN5zDDhUZF78bWjOheJ2KETsP1lmmu5eb_e70/edit)
+    meta:
+      resources: [nmeyer]
+      effort: 4w
+  python_type_introspection:
+    name: Python Type Introspection for Schema Types
+    description: |
+      Support for runtime type introspection of schema types in Python.
+      Enables dynamic handling of schema types based on their structure and fields.
+
+      **Improves developer QoL in offline code.** Enables dynamic handling of schema types in Python without hard-coding type information. Facilitates generic code that can work with any schema type.
+    tags: [data-representation, devex]
+    enables: [development_velocity]
+    links:
+      - design:[PDD-808](https://docs.google.com/document/u/0/d/1NSUoy5T7mWFhIXFvLbNB-ji2m9kYMzqsp_Rvckq8_JQ/edit)
+    meta:
+      effort: 3w
+  python_type_protocols:
+    name: Python Type Protocols
+    description: |
+      Generate python type protocols (or concrete classes) to allow type checking at build time.
+
+      **Enables static type checking (mypy/pyright) for schema types in Python.** Important for developer QoL, maintainability, and general code quality.
+    tags: [data-representation, devex]
+    enables: [development_velocity]
+    meta:
+      effort: 1.5w
+  reduce_build_target_boilerplate:
+    name: Reduce Build Target Boilerplate
+    description: |
+      Reduce boilerplate and redundancy in BUILD targets for Clockwork Cogs and Boxes.
+      Enables easier and faster development and maintenance of Clockwork components.
+
+      **Improves developer QoL.**
+    tags: [devex]
+    enables: [boilerplate_reduction, development_velocity]
+    links:
+      - design:[PDD-907](https://docs.google.com/document/d/1KLkcl_fpYuEpTdDy2qOp8Vs4cDH9EMcvU8nA1fAFsEI/edit)
+    meta:
+      timeframe: 2025q4
+      resources: [bhyer]
+      effort: 8w
+  reentrant_cogs:
+    name: Re-entrant Cogs
+    description: |
+      Support for re-entrant Cogs that can be executed concurrently in multiple threads.
+      Enables parallel processing of independent data streams within a single Cog definition.
+
+      **Enables expressing concurrency within Clockwork, essential for scheduler improvements.**
+    tags: [code-execution, concurrency]
+    requires: [multiple_messages_per_output_support]
+    meta:
+      timeframe: 2026q2
+      effort: 6w
+  schema_advanced_upgrade:
+    name: Advanced Schema Upgrade Mechanisms
+    description: |
+      Implement advanced schema upgrade mechanisms to handle complex schema evolution scenarios.
+      Includes support for writing custom upgrade logic and a framework for executing that upgrade logic during log reading.
+      Should handle wholesale schema replacement (translate one schema to another) as well as multi-field transformations (replace one field with two fields, combine two fields into one field, etc).
+      Should also handle things like two schemas becoming one or vice versa.
+
+      **Allows arbitrary schema evolution with custom migration logic.**
+    tags: [data-representation]
+    enables: [development_velocity, boilerplate_reduction]
+    requires: [cpp_dynamic_schema_api]
+    meta:
+      effort: 4w
+  schema_key_value_map_type:
+    name: Support for key-value map types in schema language
+    description: |
+      Extend the existing schema language to support key-value map types.
+      Likely using Swiss tables.
+
+      **Allows direct storage of key-value structures in Clockwork messages, state, and config.**
+    requires: []
+    tags: [data-representation]
+    links:
+      - jira:[OI-3580](https://evaav.atlassian.net/browse/OI-3580)
+    meta:
+      effort: 4w
+  schema_matrix_support:
+    name: Support for matrix/tensor fields in schema language
+    description: |
+      Extend the existing schema language to support fixed-size and variable-size matrix fields for common data types (float, int, double).
+      May include Eigen and/or ONNX tensors as the C++ interface and numpy/pandas/TensorFlow for Python (TBD).
+
+      **Enables efficient representation of multi-dimensional data structures used in autonomy workloads.**
+      Particularly helpful for ML integration.
+    enables: [gpu_cogs]
+    tags: [data-representation]
+    links:
+      - jira:[OI-3579](https://evaav.atlassian.net/browse/OI-3579)
+    meta:
+      timeframe: 2026q1
+      effort: 4w
+  schema_object_store:
+    name: Support for object store fields in schema language
+    description: |
+      Extend the existing schema language to support object store fields for variable list-of-lists type data.
+
+      **Makes this existing "aftermarket" data structure a first-class citizen in Clockwork messages and state.**
+    requires: []
+    tags: [data-representation]
+    links:
+      - jira:[OI-2532](https://evaav.atlassian.net/browse/OI-2532)
+    meta:
+      effort: 1w
+  schema_soa_adv_python_api:
+    name: Advanced Python API for Struct-of-Arrays (SoA) types in schema language
+    description: |
+      Adds a zero-copy/low-copy Python API allowing SoA data to be viewed as numpy arrays and Pandas DataFrames.
+
+      **Improves developer QoL and performance when working with SoA data in Python.**
+      Particularly helpful for analytics applications.
+    requires: []
+    tags: [data-representation]
+    links:
+      - design:[PDD-955](https://docs.google.com/document/d/1XcL5P_N_6N_rEHZo0xAcj8L3yvjHG0r-csiI09gS_Xo/edit)
+    meta:
+      timeframe: 2026q2
+      effort: 1w
+  schema_soa_type:
+    name: Support for Struct-of-Arrays (SoA) types in schema language
+    description: |
+      Extend the existing schema language to support Struct-of-Arrays (SoA) types.
+      Enables more efficient representation and processing of large collections of homogeneous data.
+      Compared to just having multiple VarArrays, this is superior because there would only be a single size field and we can maintain the invariant that all arrays are the same size.
+
+      **Improves performance for workloads that process large collections of homogeneous data.**
+      Allows translation to ML tensors without copying.
+    requires: []
+    tags: [data-representation]
+    links:
+      - design:[PDD-955](https://docs.google.com/document/d/1XcL5P_N_6N_rEHZo0xAcj8L3yvjHG0r-csiI09gS_Xo/edit)
+      - jira:[OI-3826](https://evaav.atlassian.net/browse/OI-3826)
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman]
+      effort: 2w
+  schema_variant_types:
+    name: Support for variant types in schema language
+    description: |
+      Extend the existing schema language to support variant types (similar to std::variant in C++).
+
+      **Enables more flexible and space-efficient data structures in Clockwork messages.**
+    requires: []
+    tags: [data-representation]
+    links:
+      - jira:[OI-3572](https://evaav.atlassian.net/browse/OI-3572)
+    meta:
+      effort: 3w
+  signals_based_event_triggering:
+    name: Signals-based Event Triggering
+    description: |
+      Add the ability to trigger logging events from Signals.
+      Does not replace the existing event logging system, but provides a complementary mechanism.
+      Most existing triggers can probably be ported to this new system, though some will likely remain.
+
+      **Easier and more flexible event triggering mechanism.** This doesn't replace the other event triggering mechanism but allows normal observability signals to be used for event triggering, creating more consistency in the mechanisms we use and taking advantage of any advanced signal processing capabilities we add.
+    requires: [observability_signals_foundation, signals_generic_detector_facility]
+    enables: [observability]
+    tags: [data-recording]
+    meta:
+      timeframe: 2026q2
+      effort: 2w
+  signals_based_fault_reporting:
+    name: Signals-based Fault Reporting
+    description: |
+      Move from MVP (ROS-derived) Diagnostics system to a new Signals-based fault reporting and management system.
+
+      **Provides our production-intent fault reporting system.** This moves all fault definitions into the DSL, providing a more flexible fault system with less C++ boilerplate and more transparency.
+    requires: [observability_signals_foundation, signals_generic_detector_facility]
+    tags: [fault-management]
+    enables: [milestone_dpr]
+    meta:
+      timeframe: 2026q1
+      effort: 12w
+  signals_dashboards:
+    name: Signals Dashboards and Visualizations
+    description: |
+      Offboard dashboards and visualizations for Signals.
+      Includes time series plots, histograms, and other visualizations.
+      Supports filtering and aggregation of signals.
+
+      **Common low/no-code way to display observability data in offline dashboards.**
+      Can handle anything within the Signals observability ecosystem (faults, metrics, event triggers, etc.) without custom code in most cases.
+    tags: [stack_internal_only]
+    requires: [signals_schema_generation]
+    enables: [observability]
+    meta:
+      timeframe: 2026q1
+      effort: 3w
+  signals_functional_transforms:
+    name: Signals Functional Transformation Language
+    description: |
+      A domain-specific language (DSL) for defining functional transformations and filtering on Signals.
+      Enables users to express complex signal processing logic within the Clockwork DSL in an inherently safe way.
+      For example: Low-pass filtering/smoothing/debounce, multi-signal conditions (e.g. signal A > X and signal B < Y), time-windowed conditions (e.g. signal A > X for at least 5 minutes).
+      Representative use cases:
+      - Implement fault reporting logic such as "condition X occurs more than N times in the last T seconds".
+      - Dynamic thresholds such as a steering rate threshold as a function of vehicle speed.
+
+      **Enables advanced signal processing capabilities for fault reporting, event triggering, and observability in a safe and transparent manner.**
+      Moves code out of C++ and into the DSL for better transparency and maintainability.
+    requires: [observability_signals_foundation]
+    enables: [observability, development_velocity, safety_case, signals_based_fault_reporting]
+    meta:
+      timeframe: 2026q1
+      effort: 6w
+  signals_metadata:
+    name: Signal Metadata
+    description: |
+      Extend the Signals mechanism to support user-defined metadata associated with each signal instance.
+      Metadata can be any Clockwork data type, including schema types.
+      Metadata is logged along with the signal value and can be preserved through certain aggregations.
+
+      **Enables richer context for signals, useful for debugging, analysis, and correlation.**
+    enables: [observability_signals_foundation, observability]
+    links:
+      - design:[PDD-942](https://docs.google.com/document/d/1AsgrjOC6yZ6WN6JhBv9DiR2wCTq9hgkX70Mul-SobII/edit)
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman, sbilitzky]
+      effort: 0.5w
+  signals_metrics_integration:
+    name: Signals Integration with Metrics Systems
+    description: |
+      Integration of Signals with existing log metrics systems.
+      Enables easily exporting signal data to these systems for monitoring and alerting.
+      (For OI this is mostly integration support.)
+    requires: [signals_schema_generation]
+    enables: [observability, development_velocity]
+    meta:
+      timeframe: 2026q1
+      effort: 1w
+  signals_multiple_reports_per_cycle:
+    name: Signals Multiple Reports per Cycle
+    description: |
+      Support for logging multiple signal reports per Cog execution cycle.
+      Likely essential for allowing multiple messages to be produced per cycle.
+
+      **Pairs with multi-message-per-cycle support, which enables robust scheduling and removes tech debt.**
+      Most cogs don't need this but for some it's essential.
+    requires: [observability_signals_foundation, multiple_messages_per_output_support]
+    enables: [observability]
+    meta:
+      timeframe: 2026q2
+      effort: 1.5w
+  signals_offline_alerting:
+    name: Signals Offline Alerting
+    description: |
+      Support for offline alerting based on logged signal reports.
+      Enables defining alert conditions based on signal values and metadata similarly to online fault detectors.
+
+      **Creates a concept of an "offline fault".**
+      This allows us to define conditions that are not safety-critical requiring immediate on-vehicle response but which are operationally critical.
+      Offline faults could prevent release candidates from passing and be used to initiate issue triage, automatically file POCH tickets, etc.
+    requires: [signals_schema_generation, signals_python_offline_api, signals_generic_detector_facility]
+    enables: [observability, operational_efficiency, safety_case]
+    tags: [stack_internal_only]
+    meta:
+      timeframe: 2026q2
+      effort: 3.5w
+  signals_tool_api:
+    name: Signals Tool API
+    description: |
+      A polymorphic C++ API for library code that does not want to hard-code or template the cog Dial type.
+
+      **Improves code structure flexibility, allows deeper plumbing of observability with less boilerplate.**
+    requires: [signals_cpp_cog_api]
+    links:
+      - design:[PDD-956](https://docs.google.com/document/d/1T0549QAAQ0bDIIHBJsA1Sf1wUJGnOXE2GcAM-cBe_Dw/edit)
+      - jira:[OI-3695](https://evaav.atlassian.net/browse/OI-3695)
+    enables: [development_velocity, boilerplate_reduction]
+    meta:
+      timeframe: 2026q1
+      resources: [rnortman]
+      effort: 1w
+  signals_unit_test_helpers:
+    name: Signals Unit Test Helpers
+    description: |
+      A set of utilities and helpers to facilitate unit testing of Cogs that produce Signals.
+      Allows tests to query signal values after Cog execution.
+
+      **Improves developer QoL and test coverage for Cogs using Signals.**
+    requires: [signals_cpp_cog_api]
+    enables: [development_velocity, safety_case]
+    meta:
+      timeframe: 2025q4
+      resources: [sbilitzky]
+      effort: 1w
+  signals_visualization_support:
+    name: Signals Visualization in Log Viz and Live Viz
+    description: |
+      Support for sending signal reports to Log Viz and Live Viz.
+      Allows auto-generation of viz gateway cogs via a policy on signals.
+
+      **Allows no-code visualization of observability data in Log Viz and Live Viz.**
+    requires: [signals_schema_generation]
+    enables: [observability]
+    tags: [visualization]
+    meta:
+      timeframe: 2026q1
+      effort: 3.5w
+  state_cpp_hybrid:
+    name: Serializable C++ State
+    description: |
+      Support for non-schema-based C++ Cog state that is serializable to schema for snapshot/restore.
+      Also known as "C++ hybrid state".
+
+      **Allows Cogs that can't have pure DSL-based state to still support snapshot/restore.**
+    tags: [code-execution, data-representation]
+    enables: [observability, offline_reproduction]
+    links:
+      - jira:[OI-1970](https://evaav.atlassian.net/browse/OI-1970)
+    meta:
+      timeframe: 2026q3
+      effort: 2w
+  state_snapshot:
+    name: State Snapshot and Restore
+    description: |
+      Support for snapshotting (online) and restoring (offline) Cog state.
+      Enables offline reproduction of online execution for debugging and testing.
+
+      **Enables essential LogSim use cases for long-running state, config from log, etc.**
+    tags: [code-execution]
+    enables: [observability, offline_reproduction]
+    links:
+      - design:[PDD-946](https://docs.google.com/document/d/1glyce87FDBNXTJp3zUjfBRh9rBs6KgGK8MQMTjIBlac/edit)
+      - jira:[OI-3562](https://evaav.atlassian.net/browse/OI-3562)
+    meta:
+      timeframe: 2025q4
+      resources: [rnortman]
+      effort: 2w
+      status: done
+      end_date: 2025-10-20
+  static_scheduling:
+    name: Static (or otherwise improved) Scheduling
+    description: |
+      A static scheduling system for Clockwork Cogs, enabling predictable and repeatable execution patterns.
+      Complements the existing dynamic scheduling system.
+      Enables better optimization of resource usage and timing.
+
+      **Increases robustness of the entire system, reducing long-tail latency and jitter and rare scheduling events.**
+      Contributes to safety case.
+      Reduces frequency of latency "blips", which becomes more critical as fleet-wide hours of operation scales up.
+    requires: [aligners, gpu_cogs, journaling, fine_grained_concurrency]
+    tags: [code-execution, scheduling]
+    enables: [milestone_dpr]
+    meta:
+      timeframe: 2026q4
+      effort: 12w
+  tcp_support:
+    name: TCP Support for Pinion
+    description: |
+      Support for TCP transport in Pinion for communication between Cogs on different machines.
+
+      **Enables TCP as a first class input/output for Cogs.**
+    tags: [communication]
+    meta:
+      effort: 5.5w
+  unit_test_dials:
+    name: Utilities for unit testing Cogs via mock/DI Dials
+    description: |
+      Provide utilities and best practices for unit testing Cogs using mock objects and dependency injection (DI) Dials.
+      Enables easier and more effective testing of Cog logic in isolation.
+
+      **Improves developer QoL and code quality.**
+    tags: [devex]
+    links:
+      - jira:[OI-3573](https://evaav.atlassian.net/browse/OI-3573)
+    meta:
+      timeframe: 2026q1
+      effort: 3w
+  user_request_make_it_easier_to_define_a_new_cog:
+    name: Make it easier to define a new Cog
+    description: |
+      Users can define a new Cog with minimal boilerplate and copy/paste redundancy.
+
+      - Reduce difficulty of creating casings, executables
+      - Reduce system composition difficulty? (Might be helped by composable config, maybe automatic memory resource defaults?
+      - Maybe just a cmdline script to set up the stock boilerplate with sensible defaults and let you edit it after that?
+      - Maybe just better documentation?
+
+      **Improves developer QoL, reduces boilerplate.**
+    tags: [system-composition]
+    requires: [cog_parameters, box_parameters]
+    links:
+      - jira:[OI-3567](https://evaav.atlassian.net/browse/OI-3567)
+    meta:
+      effort: 3w
+  variadic_cog_endpoints:
+    name: Variadic Cog Endpoints
+    description: |
+      Support for Cogs with variadic input and/or output endpoints.
+      Enables Cogs that can handle a variable number of inputs or outputs, such as sensor fusion or multi-camera processing.
+
+      **Required for some cogs for multi-platform support.**
+      Reduces boilerplate and copy/paste for these Cogs.
+      Reduces tech debt.
+    tags: [code-execution, config]
+    enables: [multiplatform_support, multimission_support, boilerplate_reduction]
+    meta:
+      timeframe: 2026q1
+      effort: 5w
+  webrtc_support:
+    name: WebRTC Support
+    description: |
+      Support for WebRTC transport for communication between Cogs and external systems.
+    meta:
+      effort: 5.5w
+  websocket_support:
+    name: WebSocket Support
+    description: |
+      Support for WebSocket and WebRTC transport for communication between Cogs and external systems.
+
+      **Makes real-time offboard comms a first class citizen in Clockwork.**
+    tags: [communication]
+    requires: [tcp_support]
+    meta:
+      timeframe: 2026q3
+      effort: 3.5w
+  # keep-sorted end

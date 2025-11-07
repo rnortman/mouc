@@ -22,6 +22,10 @@ class JiraConnection(BaseModel):
     """Jira connection settings."""
 
     base_url: str = Field(..., description="Jira instance base URL")
+    strip_email_domain: bool = Field(
+        default=False,
+        description="Automatically strip domain from Jira emails (e.g., john@foo.org -> john)",
+    )
 
     @field_validator("base_url")
     @classmethod

@@ -23,13 +23,19 @@ app = typer.Typer(
     add_completion=False,
 )
 
-# Global state for verbosity level
+# Global state for verbosity level and config path
 _verbosity_level = 0
+_config_path: Path | None = None
 
 
 def get_verbosity() -> int:
     """Get the current verbosity level."""
     return _verbosity_level
+
+
+def get_config_path() -> Path | None:
+    """Get the global config path."""
+    return _config_path
 
 
 @app.callback()
@@ -44,10 +50,19 @@ def main_callback(
             max=2,
         ),
     ] = 0,
+    config: Annotated[
+        Path | None,
+        typer.Option(
+            "--config",
+            "-c",
+            help="Path to unified config file (default: mouc_config.yaml)",
+        ),
+    ] = None,
 ) -> None:
     """Global options for mouc commands."""
-    global _verbosity_level
+    global _verbosity_level, _config_path
     _verbosity_level = verbose
+    _config_path = config
 
 
 @app.command()
@@ -232,7 +247,7 @@ def gantt(
         typer.Option(
             "--resources",
             "-r",
-            help="Path to resources.yaml file for automatic resource assignment",
+            help="[DEPRECATED] Use --config instead. Path to resources.yaml file for automatic resource assignment",
         ),
     ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
@@ -284,12 +299,22 @@ def gantt(
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
+        # Determine which config to use for resources
+        # Priority: --resources flag > global --config > default mouc_config.yaml
+        resource_config_path = resources
+        if not resource_config_path:
+            global_config_path = get_config_path()
+            if global_config_path:
+                resource_config_path = global_config_path
+            elif Path("mouc_config.yaml").exists():
+                resource_config_path = Path("mouc_config.yaml")
+
         # Schedule tasks
         scheduler = GanttScheduler(
             feature_map,
             start_date=parsed_start_date,
             current_date=parsed_current_date,
-            resource_config_path=resources,
+            resource_config_path=resource_config_path,
         )
         result = scheduler.schedule()
 

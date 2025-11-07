@@ -1,0 +1,83 @@
+# Example unified Mouc configuration file
+# This file combines resources and Jira integration settings
+
+# Resource definitions
+resources:
+  - name: alice
+    # Optional: Map Jira username to this resource
+    # Takes priority over automatic domain stripping
+    jira_username: alice@example.com
+    dns_periods:
+      - start: 2025-12-15
+        end: 2026-01-01
+
+  - name: bob
+    jira_username: bob.smith@example.com
+    dns_periods:
+      - start: 2025-07-01
+        end: 2025-07-15
+
+  - name: charlie
+    # No jira_username specified - will use automatic mapping
+    dns_periods: []
+
+# Resource groups (aliases)
+groups:
+  backend_team:
+    - alice
+    - bob
+  frontend_team:
+    - charlie
+
+# Default resource for unassigned tasks
+default_resource: "*"
+
+# Jira integration settings
+jira:
+  base_url: "https://example.atlassian.net"
+
+  # Automatically strip email domain from Jira usernames
+  # e.g., "charlie@example.com" -> "charlie" (if resource "charlie" exists)
+  # Default: false (opt-in)
+  strip_email_domain: false
+
+# Field mappings between Jira and Mouc
+field_mappings:
+  # Start date mapping
+  start_date:
+    # Option 1: Use explicit Jira field name (takes precedence)
+    explicit_field: "Start date"
+    # Option 2: Derive from status transition (fallback)
+    transition_to_status: "In Progress"
+    # How to resolve conflicts
+    conflict_resolution: "jira_wins"  # or "mouc_wins" or "ask"
+
+  # End date mapping
+  end_date:
+    explicit_field: "Due Date"
+    transition_to_status: "Done"
+
+  # Effort/story points mapping
+  effort:
+    jira_field: "customfield_10001"
+    unit: "sp"
+    conversion: "1sp=1d"  # 1 story point = 1 day
+
+  # Status mapping
+  status:
+    status_map:
+      "Done": "done"
+      "In Progress": "in_progress"
+      "To Do": "todo"
+
+  # Resource mapping
+  resources:
+    # Value to use for unassigned tickets
+    unassigned_value: "*"
+    # NOTE: Use jira_username in resource definitions instead of assignee_map
+
+# Global defaults
+defaults:
+  conflict_resolution: "ask"
+  skip_missing_fields: true
+  timezone: "UTC"
