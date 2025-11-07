@@ -45,9 +45,9 @@ def main_callback(
         typer.Option(
             "--verbose",
             "-v",
-            help="Verbosity level: 0=silent (default), 1=show changes, 2=show all checks",
+            help="Verbosity level: 0=silent (default), 1=show changes, 2=show all checks, 3=debug",
             min=0,
-            max=2,
+            max=3,
         ),
     ] = 0,
     config: Annotated[

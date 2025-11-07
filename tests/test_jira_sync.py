@@ -330,9 +330,10 @@ class TestJiraSynchronizerVerbosity:
         results = synchronizer.sync_all_entities()
 
         captured = capsys.readouterr()
-        # Should show the entity with changes (either updating or conflict)
+        # Should show the entity with changes (either field changes or conflicts)
         assert "cap1" in captured.out
-        assert "updating" in captured.out or "conflict" in captured.out
+        # New format shows "field: old → new" or "mouc=... | jira=..."
+        assert "→" in captured.out or "|" in captured.out
         assert len(results) == 1
 
     def test_sync_with_verbosity_level_2_shows_all_checks(

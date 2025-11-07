@@ -45,17 +45,25 @@ class SyncResult:
 class FieldExtractor:
     """Extracts field values from Jira issue data based on configuration."""
 
-    def __init__(self, config: JiraConfig, client: JiraClient, resource_config: Any = None):
+    def __init__(
+        self,
+        config: JiraConfig,
+        client: JiraClient,
+        resource_config: Any = None,
+        verbosity: int = 0,
+    ):
         """Initialize field extractor.
 
         Args:
             config: Jira configuration
             client: Jira client for resolving field names
             resource_config: Optional ResourceConfig for resource mapping
+            verbosity: Verbosity level for debug output
         """
         self.config = config
         self.client = client
         self.resource_config = resource_config
+        self.verbosity = verbosity
 
     def extract_start_date(self, issue_data: JiraIssueData) -> date | None:
         """Extract start_date from issue data.
@@ -68,18 +76,31 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.start_date
         if not mapping:
+            if self.verbosity >= 3:
+                typer.echo("      [DEBUG] start_date: no mapping configured")
             return None
 
         if mapping.explicit_field:
             value = self._get_date_field(issue_data, mapping.explicit_field)
             if value:
+                if self.verbosity >= 3:
+                    typer.echo(
+                        f"      [DEBUG] start_date: from field '{mapping.explicit_field}' = {value}"
+                    )
                 return value
 
         if mapping.transition_to_status:
             transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
             if transition_date:
-                return transition_date.date()
+                result = transition_date.date()
+                if self.verbosity >= 3:
+                    typer.echo(
+                        f"      [DEBUG] start_date: from transition to '{mapping.transition_to_status}' = {result}"
+                    )
+                return result
 
+        if self.verbosity >= 3:
+            typer.echo("      [DEBUG] start_date: no value found")
         return None
 
     def extract_end_date(self, issue_data: JiraIssueData) -> date | None:
@@ -93,18 +114,31 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.end_date
         if not mapping:
+            if self.verbosity >= 3:
+                typer.echo("      [DEBUG] end_date: no mapping configured")
             return None
 
         if mapping.explicit_field:
             value = self._get_date_field(issue_data, mapping.explicit_field)
             if value:
+                if self.verbosity >= 3:
+                    typer.echo(
+                        f"      [DEBUG] end_date: from field '{mapping.explicit_field}' = {value}"
+                    )
                 return value
 
         if mapping.transition_to_status:
             transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
             if transition_date:
-                return transition_date.date()
+                result = transition_date.date()
+                if self.verbosity >= 3:
+                    typer.echo(
+                        f"      [DEBUG] end_date: from transition to '{mapping.transition_to_status}' = {result}"
+                    )
+                return result
 
+        if self.verbosity >= 3:
+            typer.echo("      [DEBUG] end_date: no value found")
         return None
 
     def extract_effort(self, issue_data: JiraIssueData) -> str | None:
@@ -118,15 +152,27 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.effort
         if not mapping or not mapping.jira_field:
+            if self.verbosity >= 3:
+                typer.echo("      [DEBUG] effort: no mapping configured")
             return None
 
         # Use the client to resolve the field name (e.g., "Story Points")
         value = self.client.get_custom_field_value(issue_data, mapping.jira_field)
         if value is None:
+            if self.verbosity >= 3:
+                typer.echo(f"      [DEBUG] effort: field '{mapping.jira_field}' not found or null")
             return None
 
+        if self.verbosity >= 3:
+            typer.echo(f"      [DEBUG] effort: from field '{mapping.jira_field}' = {value}")
+
         if mapping.conversion:
-            return self._convert_effort(value, mapping.conversion, mapping.unit)
+            result = self._convert_effort(value, mapping.conversion, mapping.unit)
+            if self.verbosity >= 3:
+                typer.echo(
+                    f"      [DEBUG] effort: converted using '{mapping.conversion}' → {result}"
+                )
+            return result
 
         if isinstance(value, str):
             return value
@@ -147,10 +193,20 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.status
         if not mapping or not mapping.status_map:
+            if self.verbosity >= 3:
+                typer.echo("      [DEBUG] status: no mapping configured")
             return None
 
         jira_status = issue_data.status
-        return mapping.status_map.get(jira_status)
+        result = mapping.status_map.get(jira_status)
+        if self.verbosity >= 3:
+            if result:
+                typer.echo(f"      [DEBUG] status: Jira status '{jira_status}' → '{result}'")
+            else:
+                typer.echo(
+                    f"      [DEBUG] status: Jira status '{jira_status}' not in map, returning None"
+                )
+        return result
 
     def extract_resources(self, issue_data: JiraIssueData) -> list[str] | None:
         """Extract resources (assignee) from issue data.
@@ -168,18 +224,32 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.resources
         if not mapping:
+            if self.verbosity >= 3:
+                typer.echo("      [DEBUG] resources: no mapping configured")
             return None
 
         # Use the new unified mapping logic
         from mouc.unified_config import map_jira_user_to_resource
 
         unassigned_value = mapping.unassigned_value or "*"
-        return map_jira_user_to_resource(
+
+        if self.verbosity >= 3:
+            if issue_data.assignee_email:
+                typer.echo(f"      [DEBUG] resources: assignee = '{issue_data.assignee_email}'")
+            else:
+                typer.echo(f"      [DEBUG] resources: unassigned → '{unassigned_value}'")
+
+        result = map_jira_user_to_resource(
             issue_data.assignee_email,
             self.resource_config,
             self.config,
             unassigned_value,
         )
+
+        if self.verbosity >= 3 and result:
+            typer.echo(f"      [DEBUG] resources: mapped to {result}")
+
+        return result
 
     def _get_date_field(self, issue_data: JiraIssueData, field_name: str) -> date | None:
         """Get and parse a date field from issue data using human-readable field names.
@@ -274,7 +344,7 @@ class JiraSynchronizer:
         self.config = config
         self.feature_map = feature_map
         self.client = client
-        self.extractor = FieldExtractor(config, client, resource_config)
+        self.extractor = FieldExtractor(config, client, resource_config, verbosity)
         self.verbosity = verbosity
 
     def sync_all_entities(self) -> list[SyncResult]:
@@ -381,14 +451,22 @@ class JiraSynchronizer:
             conflicts,
         )
 
-        # Show changes at verbosity level 1
+        # Show changes at verbosity level 1+
         if self.verbosity >= 1 and (updated_fields or conflicts):
             if updated_fields:
-                fields_str = ", ".join(updated_fields.keys())
-                typer.echo(f"  {entity_id}: updating {fields_str}")
+                typer.echo(f"  {entity_id}:")
+                for field, new_value in updated_fields.items():
+                    old_value = entity.meta.get(field)
+                    if old_value is None:
+                        typer.echo(f"    {field}: (none) → {new_value}")
+                    else:
+                        typer.echo(f"    {field}: {old_value} → {new_value}")
             if conflicts:
+                typer.echo(f"  {entity_id} (conflicts):")
                 for conflict in conflicts:
-                    typer.echo(f"  {entity_id}: conflict in {conflict.field}")
+                    typer.echo(
+                        f"    {conflict.field}: mouc={conflict.mouc_value} | jira={conflict.jira_value}"
+                    )
 
         return SyncResult(
             entity_id=entity_id,
