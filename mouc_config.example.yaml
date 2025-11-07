@@ -59,9 +59,17 @@ field_mappings:
 
   # Effort/story points mapping
   effort:
-    jira_field: "customfield_10001"
+    # Option 1: Use Story Points custom field
+    jira_field: "Story Points"
     unit: "sp"
     conversion: "1sp=1d"  # 1 story point = 1 day
+
+    # Option 2: Use Jira's built-in time tracking (Original Estimate)
+    # This returns values like "3w", "5d", etc. - no conversion needed
+    # jira_field: "Original Estimate"
+
+    # Option 3: Use Remaining Estimate
+    # jira_field: "Remaining Estimate"
 
   # Status mapping
   status:

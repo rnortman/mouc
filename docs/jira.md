@@ -387,6 +387,15 @@ Extract effort estimate from Jira.
 - `Y` = number of time units
 - `t` = time unit (`d`=days, `w`=weeks, `m`=months)
 
+**Time Tracking Fields:**
+
+Jira's built-in time tracking fields (`"Original Estimate"`, `"Remaining Estimate"`, `"Time Spent"`) return human-readable strings like `"3w"`, `"5d"`, `"2h"`. These values are automatically compatible with mouc's effort format, so **no conversion is needed**. Simply use:
+
+```yaml
+effort:
+  jira_field: "Original Estimate"
+```
+
 **Examples:**
 ```yaml
 # 1 story point = 1 day
@@ -398,6 +407,15 @@ effort:
 effort:
   jira_field: "Story Points"
   conversion: "2sp=1w"
+
+# Use Jira's built-in time tracking (Original Estimate)
+# This returns values like "3w", "5d", etc. - no conversion needed
+effort:
+  jira_field: "Original Estimate"
+
+# Use Remaining Estimate instead
+effort:
+  jira_field: "Remaining Estimate"
 
 # No conversion (use raw value)
 effort:

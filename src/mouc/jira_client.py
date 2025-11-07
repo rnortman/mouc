@@ -162,8 +162,12 @@ class JiraClient:
                 timestamp_str = created.replace("Z", "+00:00")
                 # Python's fromisoformat needs colons in timezone offset
                 # Convert -0500 to -05:00
-                if len(timestamp_str) > 6 and timestamp_str[-5] in ('+', '-') and ':' not in timestamp_str[-5:]:
-                    timestamp_str = timestamp_str[:-2] + ':' + timestamp_str[-2:]
+                if (
+                    len(timestamp_str) > 6
+                    and timestamp_str[-5] in ("+", "-")
+                    and ":" not in timestamp_str[-5:]
+                ):
+                    timestamp_str = timestamp_str[:-2] + ":" + timestamp_str[-2:]
                 timestamp = datetime.fromisoformat(timestamp_str)
             except (ValueError, AttributeError) as e:
                 logger.warning("Failed to parse changelog timestamp '%s': %s", created, e)
@@ -228,6 +232,19 @@ class JiraClient:
             Field value or None if not found
         """
         fields = issue_data.fields
+
+        # Special handling for time tracking fields
+        # These are nested in the timetracking object
+        if field_name in ("Original Estimate", "Remaining Estimate", "Time Spent"):
+            timetracking = fields.get("timetracking")
+            if timetracking and isinstance(timetracking, dict):
+                timetracking_dict = cast(dict[str, Any], timetracking)
+                if field_name == "Original Estimate":
+                    return timetracking_dict.get("originalEstimate")
+                if field_name == "Remaining Estimate":
+                    return timetracking_dict.get("remainingEstimate")
+                if field_name == "Time Spent":
+                    return timetracking_dict.get("timeSpent")
 
         # Try direct lookup first (for standard fields that use their name as the key)
         value = fields.get(field_name)
