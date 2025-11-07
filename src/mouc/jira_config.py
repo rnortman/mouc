@@ -23,6 +23,10 @@ class JiraConnection(BaseModel):
         default=False,
         description="Automatically strip domain from Jira emails (e.g., john@foo.org -> john)",
     )
+    ignored_jira_users: list[str] = Field(
+        default=[],
+        description="List of Jira usernames/emails to ignore during sync (treated as unassigned)",
+    )
 
     @field_validator("base_url")
     @classmethod
@@ -55,9 +59,6 @@ class FieldMapping(BaseModel):
     # For assignee/resources
     assignee_map: dict[str, str] | None = Field(
         default=None, description="Map Jira user emails to Mouc resource names"
-    )
-    unassigned_value: str | None = Field(
-        default=None, description="Value to use for unassigned tickets"
     )
 
     # Conflict resolution

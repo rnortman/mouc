@@ -76,7 +76,6 @@ def map_jira_user_to_resource(
     jira_email: str | None,
     resource_config: ResourceConfig | None,
     jira_config: JiraConfig | None,
-    unassigned_value: str = "*",
 ) -> list[str] | None:
     """Map a Jira user email to Mouc resource name(s).
 
@@ -89,14 +88,17 @@ def map_jira_user_to_resource(
         jira_email: Jira user email (e.g., "john@example.com")
         resource_config: Resource configuration with definitions (optional)
         jira_config: Jira configuration (optional)
-        unassigned_value: Value to use for unassigned tickets
 
     Returns:
-        List of resource names, or None if unassigned and no unassigned_value
+        List of resource names, or None if unassigned/ignored (meaning "don't update field")
     """
     # Handle unassigned tickets
     if not jira_email:
-        return [unassigned_value] if unassigned_value else None
+        return None
+
+    # Check if user is in ignored list
+    if jira_config and jira_email in jira_config.jira.ignored_jira_users:
+        return None
 
     # If no resource config, use email as-is (old behavior)
     if not resource_config:

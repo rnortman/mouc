@@ -220,7 +220,7 @@ class FieldExtractor:
             issue_data: Fetched Jira issue data
 
         Returns:
-            List of resource names or None
+            List of resource names or None (None means "don't update this field")
         """
         mapping = self.config.field_mappings.resources
         if not mapping:
@@ -231,23 +231,23 @@ class FieldExtractor:
         # Use the new unified mapping logic
         from mouc.unified_config import map_jira_user_to_resource
 
-        unassigned_value = mapping.unassigned_value or "*"
-
         if self.verbosity >= 3:
             if issue_data.assignee_email:
                 typer.echo(f"      [DEBUG] resources: assignee = '{issue_data.assignee_email}'")
             else:
-                typer.echo(f"      [DEBUG] resources: unassigned → '{unassigned_value}'")
+                typer.echo("      [DEBUG] resources: unassigned (will not update field)")
 
         result = map_jira_user_to_resource(
             issue_data.assignee_email,
             self.resource_config,
             self.config,
-            unassigned_value,
         )
 
-        if self.verbosity >= 3 and result:
-            typer.echo(f"      [DEBUG] resources: mapped to {result}")
+        if self.verbosity >= 3:
+            if result:
+                typer.echo(f"      [DEBUG] resources: mapped to {result}")
+            else:
+                typer.echo("      [DEBUG] resources: ignored/unassigned (will not update field)")
 
         return result
 

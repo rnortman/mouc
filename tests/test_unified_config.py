@@ -38,8 +38,7 @@ field_mappings:
     explicit_field: "Start date"
     conflict_resolution: "jira_wins"
 
-  resources:
-    unassigned_value: "*"
+  resources: {}
 
 defaults:
   conflict_resolution: "ask"
@@ -73,7 +72,6 @@ defaults:
         assert unified.jira.field_mappings.start_date is not None
         assert unified.jira.field_mappings.start_date.explicit_field == "Start date"
         assert unified.jira.field_mappings.resources is not None
-        assert unified.jira.field_mappings.resources.unassigned_value == "*"
 
     finally:
         config_path.unlink()
@@ -136,10 +134,10 @@ def test_map_jira_user_explicit_mapping():
         jira=JiraConnection(base_url="https://example.atlassian.net", strip_email_domain=False)
     )
 
-    result = map_jira_user_to_resource("john.doe@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("john.doe@example.com", resource_config, jira_config)
     assert result == ["jdoe"]
 
-    result = map_jira_user_to_resource("jane.smith@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("jane.smith@example.com", resource_config, jira_config)
     assert result == ["jsmith"]
 
 
@@ -157,10 +155,10 @@ def test_map_jira_user_domain_stripping():
     )
 
     # Should strip domain and match resource name
-    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config)
     assert result == ["john"]
 
-    result = map_jira_user_to_resource("jane@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("jane@example.com", resource_config, jira_config)
     assert result == ["jane"]
 
 
@@ -173,7 +171,7 @@ def test_map_jira_user_domain_stripping_no_match():
     )
 
     # Should fall back to full email since "bob" doesn't match any resource
-    result = map_jira_user_to_resource("bob@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("bob@example.com", resource_config, jira_config)
     assert result == ["bob@example.com"]
 
 
@@ -191,7 +189,7 @@ def test_map_jira_user_explicit_overrides_stripping():
     )
 
     # Explicit mapping should win even though "john" resource exists
-    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config)
     assert result == ["jdoe"]
 
 
@@ -202,23 +200,62 @@ def test_map_jira_user_unassigned():
         jira=JiraConnection(base_url="https://example.atlassian.net", strip_email_domain=False)
     )
 
-    # Unassigned with unassigned_value
-    result = map_jira_user_to_resource(None, resource_config, jira_config, "*")
-    assert result == ["*"]
-
-    # Unassigned with empty string
-    result = map_jira_user_to_resource("", resource_config, jira_config, "*")
-    assert result == ["*"]
-
-    # Unassigned with no unassigned_value
-    result = map_jira_user_to_resource(None, resource_config, jira_config, "")
+    # Unassigned tickets return None (meaning "don't update field")
+    result = map_jira_user_to_resource(None, resource_config, jira_config)
     assert result is None
+
+    # Empty string also treated as unassigned
+    result = map_jira_user_to_resource("", resource_config, jira_config)
+    assert result is None
+
+
+def test_map_jira_user_ignored():
+    """Test mapping for ignored Jira users."""
+    resource_config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", jira_username="alice@example.com"),
+            ResourceDefinition(name="bot", jira_username="bot@example.com"),
+        ]
+    )
+    jira_config = JiraConfig(
+        jira=JiraConnection(
+            base_url="https://example.atlassian.net",
+            strip_email_domain=False,
+            ignored_jira_users=["bot@example.com", "system@example.com"],
+        )
+    )
+
+    # Normal user should map correctly
+    result = map_jira_user_to_resource("alice@example.com", resource_config, jira_config)
+    assert result == ["alice"]
+
+    # Ignored user should return None (meaning "don't update field")
+    result = map_jira_user_to_resource("bot@example.com", resource_config, jira_config)
+    assert result is None
+
+    # Another ignored user (not in resource config) should also return None
+    result = map_jira_user_to_resource("system@example.com", resource_config, jira_config)
+    assert result is None
+
+
+def test_map_jira_user_ignored_no_config():
+    """Test that ignored users list defaults to empty when not configured."""
+    resource_config = ResourceConfig(
+        resources=[ResourceDefinition(name="alice", jira_username="alice@example.com")]
+    )
+    jira_config = JiraConfig(
+        jira=JiraConnection(base_url="https://example.atlassian.net", strip_email_domain=False)
+    )
+
+    # Should map normally when ignored_jira_users is not configured (defaults to [])
+    result = map_jira_user_to_resource("alice@example.com", resource_config, jira_config)
+    assert result == ["alice"]
 
 
 def test_map_jira_user_no_resource_config():
     """Test mapping when no resource config is provided."""
     # Should fall back to email as-is
-    result = map_jira_user_to_resource("john@example.com", None, None, "*")
+    result = map_jira_user_to_resource("john@example.com", None, None)
     assert result == ["john@example.com"]
 
 
@@ -232,11 +269,11 @@ def test_map_jira_user_no_jira_config():
     )
 
     # Should still use explicit mapping
-    result = map_jira_user_to_resource("john@example.com", resource_config, None, "*")
+    result = map_jira_user_to_resource("john@example.com", resource_config, None)
     assert result == ["jdoe"]
 
     # Should use full email as fallback (no stripping without jira config)
-    result = map_jira_user_to_resource("jane@example.com", resource_config, None, "*")
+    result = map_jira_user_to_resource("jane@example.com", resource_config, None)
     assert result == ["jane@example.com"]
 
 
@@ -249,5 +286,5 @@ def test_map_jira_user_domain_stripping_disabled():
     )
 
     # Should not strip domain, fall back to full email
-    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config, "*")
+    result = map_jira_user_to_resource("john@example.com", resource_config, jira_config)
     assert result == ["john@example.com"]

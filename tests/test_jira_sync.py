@@ -53,7 +53,6 @@ class TestFieldExtractor:
                         "john@example.com": "jdoe",
                         "jane@example.com": "jsmith",
                     },
-                    unassigned_value="*",
                 ),
             ),
         )
@@ -198,7 +197,8 @@ class TestFieldExtractor:
         )
 
         result = extractor.extract_resources(issue_data)
-        assert result == ["*"]
+        # Unassigned should return None (meaning "don't update field")
+        assert result is None
 
     def test_extract_resources_unmapped_assignee(self, extractor: FieldExtractor) -> None:
         """Test extracting resources for unmapped assignee uses email."""

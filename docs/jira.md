@@ -298,10 +298,6 @@ field_mappings:
     conflict_resolution: "jira_wins"
 
   resources:
-    assignee_map:
-      "john.doe@company.com": "jdoe"
-      "jane.smith@company.com": "jsmith"
-    unassigned_value: "*"
     conflict_resolution: "ask"
 
 # Global defaults
@@ -334,6 +330,29 @@ Credentials are read from multiple sources (not stored in config):
 **Or .netrc file:**
 - Add entry for your Jira hostname with login and password (API token)
 - See [Quick Start](#1-set-up-credentials) for details
+
+#### `jira.ignored_jira_users` (optional)
+
+List of Jira usernames/emails to ignore during sync. When a Jira issue is assigned to an ignored user, the resources field in YAML will not be updated.
+
+**Default:** `[]` (empty list)
+
+**Use cases:**
+- Automated/bot accounts (e.g., `"jira-automation@company.com"`)
+- System users that manage tickets but don't do work
+- Placeholder accounts used during triage
+
+**Example:**
+```yaml
+jira:
+  base_url: https://yourcompany.atlassian.net
+  ignored_jira_users:
+    - "bot@company.com"
+    - "jira-automation@company.com"
+    - "system@company.com"
+```
+
+**Behavior:** When an issue is assigned to an ignored user, it's treated the same as an unassigned issue - the resources field in YAML is left unchanged, preserving any manually assigned resources.
 
 ### Field Mappings
 
@@ -449,19 +468,33 @@ status:
 Map Jira assignees to Mouc resources.
 
 **Options:**
-- `assignee_map` - Dictionary mapping Jira email → Mouc resource name
-- `unassigned_value` - Value to use for unassigned tickets (e.g., `"*"`)
 - `conflict_resolution` - How to resolve conflicts
+
+**Behavior:**
+- Resource mapping is configured through the `resources` section using `jira_username` fields
+- Unassigned Jira issues (no assignee) will not update the resources field in YAML
+- Ignored users (configured in `jira.ignored_jira_users`) will not update the resources field
+- When resources field is not updated, any existing value in YAML is preserved
 
 **Example:**
 ```yaml
+# In the resources section
 resources:
-  assignee_map:
-    "john.doe@company.com": "jdoe"
-    "jane.smith@company.com": "jsmith"
-    "alice.jones@company.com": "ajones"
-  unassigned_value: "*"
-  conflict_resolution: "ask"
+  - name: jdoe
+    jira_username: john.doe@company.com
+  - name: jsmith
+    jira_username: jane.smith@company.com
+
+# In jira section
+jira:
+  ignored_jira_users:
+    - "bot@company.com"
+    - "system@company.com"
+
+# In field_mappings
+field_mappings:
+  resources:
+    conflict_resolution: "ask"
 ```
 
 ### Conflict Resolution
@@ -719,12 +752,22 @@ status:
 
 Jira assignee email appears in Mouc instead of resource name.
 
-**Solution:** Add the mapping to `assignee_map`:
+**Solution:** Add the mapping to your resources section using `jira_username`:
 
 ```yaml
 resources:
-  assignee_map:
-    "new.person@company.com": "nperson"
+  - name: nperson
+    jira_username: "new.person@company.com"
+```
+
+Alternatively, if `strip_email_domain: true` is set in your Jira config, ensure the resource name matches the part before the `@`:
+
+```yaml
+resources:
+  - name: new.person  # Will auto-map new.person@company.com
+
+jira:
+  strip_email_domain: true
 ```
 
 ## Best Practices
@@ -766,33 +809,39 @@ git add mouc_config.yaml
 git commit -m "Add Jira sync configuration"
 ```
 
-### 5. Keep Assignee Map Updated
+### 5. Keep Resource Mappings Updated
 
-When new team members join, add them to `assignee_map`:
+When new team members join, add them to the resources section:
 
 ```yaml
 resources:
-  assignee_map:
-    "new.hire@company.com": "nhire"
+  - name: nhire
+    jira_username: "new.hire@company.com"
 ```
 
-### 6. Use Groups for Assignee Mapping
-
-Combine with Mouc's resource groups for flexibility:
+Or enable `strip_email_domain` if resource names match email prefixes:
 
 ```yaml
-# resources.yaml
-groups:
-  backend_team:
-    - alice
-    - bob
-    - charlie
-
-# mouc_config.yaml
 resources:
-  assignee_map:
-    "alice@company.com": "backend_team"  # Maps to group
+  - name: nhire  # Auto-maps to nhire@company.com
+
+jira:
+  strip_email_domain: true
 ```
+
+### 6. Use Ignored Users for Automation Accounts
+
+Configure ignored users to prevent automation accounts from affecting resource assignment:
+
+```yaml
+jira:
+  ignored_jira_users:
+    - "jira-automation@company.com"
+    - "bot@company.com"
+    - "system@company.com"
+```
+
+This allows you to manually assign resources in Mouc even when automated systems manage the Jira tickets.
 
 ### 7. Regular Syncs
 

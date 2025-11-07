@@ -145,6 +145,7 @@ The `jira` section configures integration with Jira. This section is **optional*
 jira:
   base_url: "https://example.atlassian.net"
   strip_email_domain: false  # Opt-in domain stripping
+  ignored_jira_users: []     # List of users to ignore during sync
 ```
 
 **`base_url`** (required for Jira commands): Your Jira instance URL
@@ -156,25 +157,47 @@ When enabled:
 - Explicit `jira_username` mappings always take priority
 - Falls back to full email if no match
 
+**`ignored_jira_users`** (optional, default: `[]`): List of Jira usernames/emails to ignore during sync.
+
+When a Jira issue is assigned to an ignored user, the resources field in the YAML will not be updated (preserving any existing value). This is useful for:
+- Automated/bot accounts that shouldn't be treated as real assignees
+- System users that manage tickets but don't do the actual work
+- Placeholder accounts used during ticket triage
+
+Example:
+```yaml
+jira:
+  ignored_jira_users:
+    - "bot@example.com"
+    - "jira-automation@example.com"
+    - "system@example.com"
+```
+
 ### Resource Mapping Priority
 
 When syncing Jira assignees to Mouc resources:
 
-1. **Explicit `jira_username`**: If resource has `jira_username` defined, use that mapping
-2. **Domain stripping** (if enabled): Strip `@domain` and match resource name
-3. **Fallback**: Use full Jira email as resource name
+1. **Ignored users**: If assignee is in `ignored_jira_users` list → skip update (don't modify resources field)
+2. **Unassigned**: If no assignee in Jira → skip update (don't modify resources field)
+3. **Explicit `jira_username`**: If resource has `jira_username` defined → use that mapping
+4. **Domain stripping** (if enabled): Strip `@domain` and match resource name
+5. **Fallback**: Use full Jira email as resource name
 
 Example:
 ```yaml
 resources:
   - name: jdoe
-    jira_username: john.doe@example.com  # Priority 1: Explicit mapping
+    jira_username: john.doe@example.com  # Priority 3: Explicit mapping
 
-  - name: jane  # Priority 2: Auto-maps jane@example.com if strip_email_domain: true
+  - name: jane  # Priority 4: Auto-maps jane@example.com if strip_email_domain: true
 
 jira:
   strip_email_domain: true
+  ignored_jira_users:
+    - "bot@example.com"  # Priority 1: Ignored users
 ```
+
+**Note:** When resources field is not updated (priorities 1-2), any existing value in the YAML is preserved. This allows you to manually assign resources in Mouc even when Jira has no assignee or an ignored assignee.
 
 ### Field Mappings
 
@@ -202,8 +225,7 @@ field_mappings:
       "In Progress": "in_progress"
       "To Do": "todo"
 
-  resources:
-    unassigned_value: "*"                  # Value for unassigned tickets
+  resources: {}  # Resource mapping configured via jira_username in resources section
 ```
 
 See [Jira Documentation](jira.md) for detailed field mapping options.
@@ -261,6 +283,7 @@ default_resource: "*"
 jira:
   base_url: "https://example.atlassian.net"
   strip_email_domain: false  # Set to true to auto-map john@example.com → john
+  ignored_jira_users: []     # Add bot/system accounts to ignore
 
 field_mappings:
   start_date:
@@ -283,8 +306,7 @@ field_mappings:
       "In Progress": "in_progress"
       "To Do": "todo"
 
-  resources:
-    unassigned_value: "*"
+  resources: {}
 
 defaults:
   conflict_resolution: "ask"
