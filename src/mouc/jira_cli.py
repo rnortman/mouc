@@ -275,6 +275,42 @@ def jira_list(
         raise typer.Exit(1) from None
 
 
+def _update_meta_in_place(yaml_entity: Any, new_meta: dict[str, Any]) -> None:
+    """Update meta dict in-place to preserve YAML formatting.
+
+    Args:
+        yaml_entity: The entity dict from ruamel.yaml (contains formatting info)
+        new_meta: The new meta dict to apply
+    """
+    # If new_meta is empty, don't add or modify meta field
+    if not new_meta:
+        return
+
+    # If the yaml entity doesn't have a meta field, create it
+    if "meta" not in yaml_entity:
+        yaml_entity["meta"] = new_meta
+        return
+
+    # Update existing meta in-place to preserve formatting
+    existing_meta = yaml_entity["meta"]
+
+    # If existing meta is None or empty, replace it
+    if existing_meta is None or not existing_meta:
+        yaml_entity["meta"] = new_meta
+        return
+
+    # Clear keys that are in existing but not in new
+    keys_to_remove = [k for k in existing_meta if k not in new_meta]
+    for key in keys_to_remove:
+        del existing_meta[key]
+
+    # Update/add keys from new_meta - only if value actually changed
+    for key, value in new_meta.items():
+        # Only update if the value is different to preserve formatting
+        if key not in existing_meta or existing_meta[key] != value:
+            existing_meta[key] = value
+
+
 @jira_app.command("sync")
 def jira_sync(
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
@@ -507,7 +543,7 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
     """
     yaml_rt = YAML()
     yaml_rt.preserve_quotes = False  # type: ignore[assignment]
-    yaml_rt.default_flow_style = False  # type: ignore[assignment]
+    # Don't set default_flow_style - let ruamel.yaml preserve original formatting
 
     with file_path.open() as f:
         data: Any = yaml_rt.load(f)  # type: ignore[no-untyped-call]
@@ -544,7 +580,7 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
 
         # First, try the unified 'entities' section
         if "entities" in available_sections and entity.id in available_sections["entities"]:
-            available_sections["entities"][entity.id]["meta"] = entity.meta
+            _update_meta_in_place(available_sections["entities"][entity.id], entity.meta)
             entities_updated += 1
             found = True
         else:
@@ -555,7 +591,7 @@ def _write_feature_map(file_path: Path, feature_map: Any) -> None:
                 and legacy_section in available_sections
                 and entity.id in available_sections[legacy_section]
             ):
-                available_sections[legacy_section][entity.id]["meta"] = entity.meta
+                _update_meta_in_place(available_sections[legacy_section][entity.id], entity.meta)
                 entities_updated += 1
                 found = True
 
