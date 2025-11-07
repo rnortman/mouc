@@ -407,3 +407,190 @@ class TestJiraSynchronizerVerbosity:
         assert "TEST-123" in captured.out
         assert len(results) == 1
         assert not results[0].updated_fields
+
+
+class TestJiraSyncMetadata:
+    """Tests for JiraSyncMetadata functionality."""
+
+    @pytest.fixture
+    def config(self) -> JiraConfig:
+        """Create test config."""
+        return JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+                end_date=FieldMapping(transition_to_status="Done"),
+            ),
+        )
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock Jira client."""
+        client = Mock()
+        client.get_custom_field_value = Mock(return_value=None)
+        return client
+
+    def test_ignore_fields(self, config: JiraConfig, mock_client: Mock) -> None:
+        """Test that fields in ignore_fields are not synced."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={
+                "start_date": date(2025, 1, 15),
+                "jira_sync": {"ignore_fields": ["start_date"]},
+            },
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert "start_date" not in results[0].updated_fields
+        assert entity.meta["start_date"] == date(2025, 1, 15)
+
+    def test_ignore_values(self, config: JiraConfig, mock_client: Mock) -> None:
+        """Test that specific values in ignore_values are not synced."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={
+                "jira_sync": {
+                    "ignore_values": {"start_date": ["2024-12-01"]},
+                },
+            },
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": datetime(2024, 12, 1, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert "start_date" not in results[0].updated_fields
+
+    def test_resolution_choices_jira(self, config: JiraConfig, mock_client: Mock) -> None:
+        """Test that resolution_choices with 'jira' applies Jira value automatically."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={
+                "start_date": date(2025, 1, 15),
+                "jira_sync": {"resolution_choices": {"start_date": "jira"}},
+            },
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert "start_date" in results[0].updated_fields
+        assert results[0].updated_fields["start_date"] == date(2025, 1, 20)
+        assert len(results[0].conflicts) == 0
+
+    def test_resolution_choices_mouc(self, config: JiraConfig, mock_client: Mock) -> None:
+        """Test that resolution_choices with 'mouc' keeps Mouc value automatically."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={
+                "start_date": date(2025, 1, 15),
+                "jira_sync": {"resolution_choices": {"start_date": "mouc"}},
+            },
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert "start_date" not in results[0].updated_fields
+        assert entity.meta["start_date"] == date(2025, 1, 15)
+        assert len(results[0].conflicts) == 0
+
+    def test_validation_invalid_date_range(self, config: JiraConfig, mock_client: Mock) -> None:
+        """Test that invalid date ranges create conflicts."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={"end_date": date(2025, 1, 10)},
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert len(results[0].conflicts) == 1
+        assert results[0].conflicts[0].field == "start_date"
+        assert "INVALID" in str(results[0].conflicts[0].jira_value)

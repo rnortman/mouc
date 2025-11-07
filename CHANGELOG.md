@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Jira sync metadata**: New `jira_sync` metadata field controls sync behavior per entity
+  - `ignore_fields`: Block specific fields from Jira sync entirely
+  - `ignore_values`: Skip specific bad values from Jira history
+  - `resolution_choices`: Remember user's conflict resolution decisions for future syncs
+  - Validation layer detects invalid data (e.g., start_date > end_date) and creates conflicts
+  - CLI commands: `jira ignore-field`, `jira ignore-value`, `jira show-overrides`
 - **Unified configuration file**: New `mouc_config.yaml` format consolidates resources and Jira settings
 - **`.netrc` credential support for Jira**: Jira credentials can now be retrieved from `~/.netrc` as an alternative to environment variables
 - **Verbosity for Jira commands**: Global `-v/--verbose` flag with levels 0-3

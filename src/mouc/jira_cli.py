@@ -449,8 +449,22 @@ def jira_sync(
             for entity_id, field_updates in conflict_resolutions.items():
                 entity = feature_map.get_entity_by_id(entity_id)
                 if entity:
+                    jira_sync = entity.get_jira_sync_metadata()
                     for field, value in field_updates.items():
                         entity.meta[field] = value
+                        # Save the resolution choice for future syncs
+                        # Determine the choice based on the value selected
+                        for result in results:
+                            if result.entity_id == entity_id:
+                                for conflict in result.conflicts:
+                                    if conflict.field == field:
+                                        if value == conflict.jira_value:
+                                            jira_sync.resolution_choices[field] = "jira"
+                                        elif value == conflict.mouc_value:
+                                            jira_sync.resolution_choices[field] = "mouc"
+                                        break
+                                break
+                    entity.set_jira_sync_metadata(jira_sync)
                     if verbosity >= 1:
                         typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
 
@@ -698,3 +712,169 @@ def _load_conflict_answers_csv(
             resolutions[entity_id][field] = chosen_value
 
     return resolutions
+
+
+@jira_app.command("ignore-field")
+def jira_ignore_field(
+    entity_id: Annotated[str, typer.Argument(help="Entity ID")],
+    field_name: Annotated[str, typer.Argument(help="Field name to ignore")],
+    file: Annotated[
+        Path,
+        typer.Option("--file", "-f", help="Feature map file"),
+    ] = Path("feature_map.yaml"),
+) -> None:
+    """Mark a field to be completely ignored during Jira sync for an entity.
+
+    This will add the field to the entity's jira_sync.ignore_fields list,
+    preventing any future Jira updates to that field.
+    """
+    from .exceptions import MoucError
+
+    try:
+        parser = FeatureMapParser()
+        feature_map = parser.parse_file(file)
+
+        entity = feature_map.get_entity_by_id(entity_id)
+        if not entity:
+            typer.echo(f"Error: Entity '{entity_id}' not found", err=True)
+            raise typer.Exit(1) from None
+
+        jira_sync = entity.get_jira_sync_metadata()
+
+        if field_name in jira_sync.ignore_fields:
+            typer.echo(f"Field '{field_name}' is already in ignore_fields for {entity_id}")
+            return
+
+        jira_sync.ignore_fields.append(field_name)
+        entity.set_jira_sync_metadata(jira_sync)
+
+        _write_feature_map(file, feature_map)
+        typer.echo(f"✓ Added '{field_name}' to ignore_fields for {entity_id} in {file}")
+
+    except MoucError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+
+@jira_app.command("ignore-value")
+def jira_ignore_value(
+    entity_id: Annotated[str, typer.Argument(help="Entity ID")],
+    field_name: Annotated[str, typer.Argument(help="Field name")],
+    value: Annotated[str, typer.Argument(help="Value to ignore (as string)")],
+    file: Annotated[
+        Path,
+        typer.Option("--file", "-f", help="Feature map file"),
+    ] = Path("feature_map.yaml"),
+) -> None:
+    """Mark a specific field value to be ignored during Jira sync.
+
+    This will add the value to the entity's jira_sync.ignore_values list
+    for the specified field. When Jira sync encounters this value, it will
+    be skipped.
+
+    Example:
+        mouc jira ignore-value my_feature start_date 2024-12-01
+    """
+    from .exceptions import MoucError
+
+    try:
+        parser = FeatureMapParser()
+        feature_map = parser.parse_file(file)
+
+        entity = feature_map.get_entity_by_id(entity_id)
+        if not entity:
+            typer.echo(f"Error: Entity '{entity_id}' not found", err=True)
+            raise typer.Exit(1) from None
+
+        jira_sync = entity.get_jira_sync_metadata()
+
+        if field_name not in jira_sync.ignore_values:
+            jira_sync.ignore_values[field_name] = []
+
+        if value in jira_sync.ignore_values[field_name]:
+            typer.echo(f"Value '{value}' is already in ignore_values for {entity_id}.{field_name}")
+            return
+
+        jira_sync.ignore_values[field_name].append(value)
+        entity.set_jira_sync_metadata(jira_sync)
+
+        _write_feature_map(file, feature_map)
+        typer.echo(
+            f"✓ Added value '{value}' to ignore_values for {entity_id}.{field_name} in {file}"
+        )
+
+    except MoucError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+
+
+@jira_app.command("show-overrides")
+def jira_show_overrides(
+    entity_id: Annotated[str | None, typer.Argument(help="Entity ID (optional)")] = None,
+    file: Annotated[
+        Path,
+        typer.Option("--file", "-f", help="Feature map file"),
+    ] = Path("feature_map.yaml"),
+) -> None:
+    """Show Jira sync overrides for entities.
+
+    If entity_id is provided, shows overrides for that entity only.
+    Otherwise, shows overrides for all entities.
+    """
+    from .exceptions import MoucError
+
+    try:
+        parser = FeatureMapParser()
+        feature_map = parser.parse_file(file)
+
+        entities_to_show: list[Entity] = []
+        if entity_id:
+            entity = feature_map.get_entity_by_id(entity_id)
+            if not entity:
+                typer.echo(f"Error: Entity '{entity_id}' not found", err=True)
+                raise typer.Exit(1) from None
+            entities_to_show = [entity]
+        else:
+            entities_to_show = feature_map.entities
+
+        found_any = False
+        for entity in entities_to_show:
+            jira_sync = entity.get_jira_sync_metadata()
+
+            # Check if there are any overrides
+            has_overrides = (
+                jira_sync.ignore_fields or jira_sync.ignore_values or jira_sync.resolution_choices
+            )
+
+            if not has_overrides:
+                continue
+
+            found_any = True
+            typer.echo(f"\n{entity.id}:")
+
+            if jira_sync.ignore_fields:
+                typer.echo("  ignore_fields:")
+                for field in jira_sync.ignore_fields:
+                    typer.echo(f"    - {field}")
+
+            if jira_sync.ignore_values:
+                typer.echo("  ignore_values:")
+                for field, values in jira_sync.ignore_values.items():
+                    typer.echo(f"    {field}:")
+                    for value in values:
+                        typer.echo(f"      - {value}")
+
+            if jira_sync.resolution_choices:
+                typer.echo("  resolution_choices:")
+                for field, choice in jira_sync.resolution_choices.items():
+                    typer.echo(f"    {field}: {choice}")
+
+        if not found_any:
+            if entity_id:
+                typer.echo(f"No Jira sync overrides found for {entity_id}")
+            else:
+                typer.echo("No Jira sync overrides found in any entity")
+
+    except MoucError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None

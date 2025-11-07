@@ -74,6 +74,49 @@ def _default_dict() -> dict[str, Any]:
     return {}
 
 
+def _default_str_list() -> list[str]:
+    return []
+
+
+def _default_ignore_values() -> dict[str, list[Any]]:
+    return {}
+
+
+def _default_str_dict() -> dict[str, str]:
+    return {}
+
+
+@dataclass
+class JiraSyncMetadata:
+    """Metadata for controlling Jira sync behavior on a per-entity basis."""
+
+    ignore_fields: list[str] = field(default_factory=_default_str_list)
+    ignore_values: dict[str, list[Any]] = field(default_factory=_default_ignore_values)
+    resolution_choices: dict[str, str] = field(default_factory=_default_str_dict)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> JiraSyncMetadata:
+        """Parse JiraSyncMetadata from a dictionary."""
+        if not data:
+            return cls()
+        return cls(
+            ignore_fields=data.get("ignore_fields", []),
+            ignore_values=data.get("ignore_values", {}),
+            resolution_choices=data.get("resolution_choices", {}),
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for YAML serialization."""
+        result: dict[str, Any] = {}
+        if self.ignore_fields:
+            result["ignore_fields"] = self.ignore_fields
+        if self.ignore_values:
+            result["ignore_values"] = self.ignore_values
+        if self.resolution_choices:
+            result["resolution_choices"] = self.resolution_choices
+        return result
+
+
 @dataclass
 class Entity:
     """Unified entity model for all types (capabilities, user stories, outcomes)."""
@@ -92,6 +135,18 @@ class Entity:
     def parsed_links(self) -> list[Link]:
         """Parse link strings into Link objects."""
         return [Link.parse(link) for link in self.links]
+
+    def get_jira_sync_metadata(self) -> JiraSyncMetadata:
+        """Get Jira sync metadata from meta dict."""
+        return JiraSyncMetadata.from_dict(self.meta.get("jira_sync"))
+
+    def set_jira_sync_metadata(self, jira_sync: JiraSyncMetadata) -> None:
+        """Set Jira sync metadata in meta dict."""
+        jira_sync_dict = jira_sync.to_dict()
+        if jira_sync_dict:
+            self.meta["jira_sync"] = jira_sync_dict
+        elif "jira_sync" in self.meta:
+            del self.meta["jira_sync"]
 
 
 @dataclass

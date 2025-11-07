@@ -321,6 +321,70 @@ class FieldExtractor:
         return f"{formatted}{time_unit}"
 
 
+def validate_field_value(field: str, value: Any, entity: Entity) -> tuple[bool, str | None]:
+    """Validate a field value from Jira.
+
+    Args:
+        field: Field name
+        value: Value to validate
+        entity: Entity being synced (for context like other field values)
+
+    Returns:
+        Tuple of (is_valid, error_message). error_message is None if valid.
+    """
+    if value is None:
+        return True, None
+
+    # Validate dates
+    if field in ("start_date", "end_date"):
+        if not isinstance(value, (date, datetime)):
+            return False, f"{field} must be a date, got {type(value).__name__}"
+
+        # Check date consistency
+        if field == "start_date":
+            end_date = entity.meta.get("end_date")
+            if end_date and isinstance(end_date, (date, datetime)):
+                end_date_val = end_date.date() if isinstance(end_date, datetime) else end_date
+                start_date_val = value.date() if isinstance(value, datetime) else value
+                if start_date_val > end_date_val:
+                    return (
+                        False,
+                        f"start_date ({start_date_val}) is after end_date ({end_date_val})",
+                    )
+        elif field == "end_date":
+            start_date = entity.meta.get("start_date")
+            if start_date and isinstance(start_date, (date, datetime)):
+                start_date_val = (
+                    start_date.date() if isinstance(start_date, datetime) else start_date
+                )
+                end_date_val = value.date() if isinstance(value, datetime) else value
+                if end_date_val < start_date_val:
+                    return (
+                        False,
+                        f"end_date ({end_date_val}) is before start_date ({start_date_val})",
+                    )
+
+    # Validate effort
+    if field == "effort" and isinstance(value, str):
+        # Parse effort string to ensure it's positive
+        effort_match = re.match(r"^(\d+(?:\.\d+)?)(d|w|m)$", value)
+        if not effort_match:
+            return False, f"effort has invalid format: {value}"
+        effort_num = float(effort_match.group(1))
+        if effort_num <= 0:
+            return False, f"effort must be positive, got {effort_num}"
+
+    # Validate status
+    if field == "status" and not isinstance(value, str):
+        return False, f"status must be a string, got {type(value).__name__}"
+
+    # Validate resources
+    if field == "resources" and not isinstance(value, list):
+        return False, f"resources must be a list, got {type(value).__name__}"
+
+    return True, None
+
+
 class JiraSynchronizer:
     """Orchestrates syncing between Mouc and Jira."""
 
@@ -500,15 +564,69 @@ class JiraSynchronizer:
         if jira_value is None:
             return
 
+        # Get jira_sync metadata
+        jira_sync = entity.get_jira_sync_metadata()
+
+        # Check if field is ignored entirely
+        if field in jira_sync.ignore_fields:
+            if self.verbosity >= 2:
+                typer.echo(f"    [IGNORED] {field} (field is in ignore_fields)")
+            return
+
+        # Check if this specific value should be ignored
+        if field in jira_sync.ignore_values:
+            ignored_values = jira_sync.ignore_values[field]
+            for ignored_value in ignored_values:
+                if self._values_equal(jira_value, ignored_value):
+                    if self.verbosity >= 2:
+                        typer.echo(
+                            f"    [IGNORED] {field}={jira_value} (value is in ignore_values)"
+                        )
+                    return
+
+        # Validate the Jira value
+        is_valid, error_msg = validate_field_value(field, jira_value, entity)
+        if not is_valid:
+            if self.verbosity >= 1:
+                typer.echo(f"    [INVALID] {field}={jira_value}: {error_msg}")
+            # Create conflict for invalid data
+            mouc_value = entity.meta.get(field)
+            conflicts.append(
+                FieldConflict(
+                    entity_id=entity_id,
+                    field=field,
+                    mouc_value=mouc_value,
+                    jira_value=f"INVALID: {jira_value} ({error_msg})",
+                    ticket_id=ticket_id,
+                    resolution=ConflictResolution.ASK,
+                )
+            )
+            return
+
         mouc_value = entity.meta.get(field)
 
+        # If mouc has no value, apply Jira value
         if mouc_value is None:
             updated_fields[field] = jira_value
             return
 
+        # If values are equal, no sync needed
         if self._values_equal(mouc_value, jira_value):
             return
 
+        # Check if user previously made a resolution choice for this field
+        if field in jira_sync.resolution_choices:
+            remembered_choice = jira_sync.resolution_choices[field]
+            if self.verbosity >= 2:
+                typer.echo(f"    [REMEMBERED] {field}: using previous choice '{remembered_choice}'")
+            if remembered_choice == "jira":
+                updated_fields[field] = jira_value
+            elif remembered_choice == "mouc":
+                pass  # Keep mouc value
+            # If choice was "skip", we do nothing (same as mouc)
+            return
+
+        # Otherwise, use configured conflict resolution
         resolution = self.config.get_conflict_resolution(field)
 
         if resolution == ConflictResolution.JIRA_WINS:

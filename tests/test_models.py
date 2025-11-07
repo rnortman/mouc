@@ -1,6 +1,6 @@
 """Tests for data models."""
 
-from mouc.models import Entity, FeatureMap, FeatureMapMetadata, Link
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata, JiraSyncMetadata, Link
 from mouc.parser import resolve_graph_edges
 
 
@@ -322,3 +322,111 @@ class TestFeatureMap:
         assert feature_map.get_entity_by_id("story1") == story1
         assert feature_map.get_entity_by_id("outcome1") == outcome1
         assert feature_map.get_entity_by_id("nonexistent") is None
+
+
+class TestJiraSyncMetadata:
+    """Test the JiraSyncMetadata model."""
+
+    def test_from_dict_empty(self) -> None:
+        """Test creating JiraSyncMetadata from None."""
+        metadata = JiraSyncMetadata.from_dict(None)
+        assert metadata.ignore_fields == []
+        assert metadata.ignore_values == {}
+        assert metadata.resolution_choices == {}
+
+    def test_from_dict_with_data(self) -> None:
+        """Test creating JiraSyncMetadata from dict."""
+        data = {
+            "ignore_fields": ["start_date", "effort"],
+            "ignore_values": {"start_date": ["2024-12-01", "2023-06-15"]},
+            "resolution_choices": {"end_date": "jira", "status": "mouc"},
+        }
+        metadata = JiraSyncMetadata.from_dict(data)
+        assert metadata.ignore_fields == ["start_date", "effort"]
+        assert metadata.ignore_values == {"start_date": ["2024-12-01", "2023-06-15"]}
+        assert metadata.resolution_choices == {"end_date": "jira", "status": "mouc"}
+
+    def test_to_dict_empty(self) -> None:
+        """Test converting empty JiraSyncMetadata to dict."""
+        metadata = JiraSyncMetadata()
+        result = metadata.to_dict()
+        assert result == {}
+
+    def test_to_dict_with_data(self) -> None:
+        """Test converting JiraSyncMetadata with data to dict."""
+        metadata = JiraSyncMetadata(
+            ignore_fields=["start_date"],
+            ignore_values={"start_date": ["2024-12-01"]},
+            resolution_choices={"effort": "mouc"},
+        )
+        result = metadata.to_dict()
+        assert result == {
+            "ignore_fields": ["start_date"],
+            "ignore_values": {"start_date": ["2024-12-01"]},
+            "resolution_choices": {"effort": "mouc"},
+        }
+
+    def test_entity_get_jira_sync_metadata(self) -> None:
+        """Test getting JiraSyncMetadata from Entity."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            meta={
+                "jira_sync": {
+                    "ignore_fields": ["start_date"],
+                    "resolution_choices": {"effort": "jira"},
+                }
+            },
+        )
+        jira_sync = entity.get_jira_sync_metadata()
+        assert jira_sync.ignore_fields == ["start_date"]
+        assert jira_sync.resolution_choices == {"effort": "jira"}
+
+    def test_entity_get_jira_sync_metadata_empty(self) -> None:
+        """Test getting JiraSyncMetadata from Entity with no jira_sync."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            meta={},
+        )
+        jira_sync = entity.get_jira_sync_metadata()
+        assert jira_sync.ignore_fields == []
+        assert jira_sync.ignore_values == {}
+        assert jira_sync.resolution_choices == {}
+
+    def test_entity_set_jira_sync_metadata(self) -> None:
+        """Test setting JiraSyncMetadata on Entity."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            meta={},
+        )
+        jira_sync = JiraSyncMetadata(
+            ignore_fields=["start_date"],
+            ignore_values={"end_date": ["2025-12-31"]},
+            resolution_choices={"status": "mouc"},
+        )
+        entity.set_jira_sync_metadata(jira_sync)
+        assert "jira_sync" in entity.meta
+        assert entity.meta["jira_sync"]["ignore_fields"] == ["start_date"]
+        assert entity.meta["jira_sync"]["ignore_values"] == {"end_date": ["2025-12-31"]}
+        assert entity.meta["jira_sync"]["resolution_choices"] == {"status": "mouc"}
+
+    def test_entity_set_jira_sync_metadata_empty_removes(self) -> None:
+        """Test that setting empty JiraSyncMetadata removes the jira_sync key."""
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            meta={"jira_sync": {"ignore_fields": ["start_date"]}},
+        )
+        jira_sync = JiraSyncMetadata()
+        entity.set_jira_sync_metadata(jira_sync)
+        assert "jira_sync" not in entity.meta
