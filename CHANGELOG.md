@@ -10,12 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - **Unified configuration file**: New `mouc_config.yaml` format consolidates resources and Jira settings
 - **`.netrc` credential support for Jira**: Jira credentials can now be retrieved from `~/.netrc` as an alternative to environment variables
-- **Verbosity levels for Jira sync**: Global `-v/--verbose` flag with levels 0-3
-  - Level 0 (default): Silent, only show summary
-  - Level 1: Show field changes with "old → new" format
-  - Level 2: Show all entities being checked, even without changes
-  - Level 3: Debug mode with detailed Jira field extraction logging
-  - `--dry-run` automatically enables verbosity level 1 if not already set
+- **Verbosity for Jira commands**: Global `-v/--verbose` flag with levels 0-3
+  - **`jira sync`**:
+    - Level 0 (default): Silent, only show summary
+    - Level 1: Show field changes with "old → new" format
+    - Level 2: Show all entities being checked, even without changes
+    - Level 3: Debug mode with detailed Jira field extraction logging
+    - `--dry-run` automatically enables verbosity level 1 if not already set
+  - **`jira fetch`**:
+    - Level 0 (default): Basic issue info and status transitions
+    - Level 1: Enhanced display with status transition history
+    - Level 2: Show all Jira fields from the issue
+    - Level 3: Dump complete raw Jira API response (issue + changelog + field definitions)
 
 ### Changed
 - **Breaking**: `mouc graph -v` short flag removed; use `--view` instead to avoid conflict with global verbosity flag

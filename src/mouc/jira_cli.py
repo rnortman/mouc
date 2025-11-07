@@ -121,9 +121,14 @@ def jira_fetch(
     ] = None,
 ) -> None:
     """Fetch and display data for a single Jira ticket."""
+    import json
+
     from .exceptions import MoucError
 
     try:
+        # Get verbosity level
+        verbosity = cli.get_verbosity()
+
         # Determine config path
         if config is None:
             global_config = cli.get_config_path()
@@ -141,24 +146,75 @@ def jira_fetch(
         client = JiraClient(jira_config.jira.base_url)
 
         # Fetch issue
-        typer.echo(f"Fetching {ticket}...")
+        if verbosity == 0:
+            typer.echo(f"Fetching {ticket}...")
         issue_data = client.fetch_issue(ticket)
 
-        # Display results
-        typer.echo(f"\n{'=' * 60}")
-        typer.echo(f"Key: {issue_data.key}")
-        typer.echo(f"Summary: {issue_data.summary}")
-        typer.echo(f"Status: {issue_data.status}")
-        typer.echo(f"Assignee: {issue_data.assignee_email or 'Unassigned'}")
+        # Display results based on verbosity
+        if verbosity >= 3:
+            # Level 3: Dump raw Jira API response
+            typer.echo(f"\n{'=' * 60}")
+            typer.echo(f"RAW JIRA API RESPONSE for {ticket}")
+            typer.echo(f"{'=' * 60}\n")
 
-        if issue_data.status_transitions:
-            typer.echo("\nStatus Transitions:")
-            for status, timestamp in sorted(
-                issue_data.status_transitions.items(), key=lambda x: x[1]
-            ):
-                typer.echo(f"  {status}: {timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            # Fetch raw issue data again with changelog
+            raw_issue = client.client.issue(ticket, expand="changelog")  # type: ignore[reportUnknownMemberType]
+            typer.echo(json.dumps(raw_issue.raw, indent=2))  # type: ignore[reportUnknownMemberType]
 
-        typer.echo(f"{'=' * 60}\n")
+            typer.echo(f"\n{'=' * 60}")
+            typer.echo("FIELD DEFINITIONS (cached)")
+            typer.echo(f"{'=' * 60}\n")
+
+            # Show field mappings
+            field_map = client._get_field_name_map()  # type: ignore[reportPrivateUsage]
+            typer.echo(json.dumps(field_map, indent=2))
+
+        elif verbosity >= 1:
+            # Level 1+: Show status transitions and parsed data
+            typer.echo(f"\n{'=' * 60}")
+            typer.echo(f"JIRA ISSUE: {issue_data.key}")
+            typer.echo(f"{'=' * 60}")
+            typer.echo(f"Summary: {issue_data.summary}")
+            typer.echo(f"Status: {issue_data.status}")
+            typer.echo(f"Assignee: {issue_data.assignee_email or 'Unassigned'}")
+
+            if issue_data.status_transitions:
+                typer.echo("\nStatus Transition History:")
+                for status, timestamp in sorted(
+                    issue_data.status_transitions.items(), key=lambda x: x[1]
+                ):
+                    typer.echo(f"  {status}: {timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            else:
+                typer.echo("\nNo status transitions found in changelog")
+
+            # Show all fields at level 2+
+            if verbosity >= 2:
+                typer.echo("\nAll Fields:")
+                for field_name, value in sorted(issue_data.fields.items()):
+                    if value is not None:
+                        # Truncate long values
+                        value_str = str(value)
+                        if len(value_str) > 100:
+                            value_str = value_str[:100] + "..."
+                        typer.echo(f"  {field_name}: {value_str}")
+
+            typer.echo(f"{'=' * 60}\n")
+        else:
+            # Level 0: Basic output (original format)
+            typer.echo(f"\n{'=' * 60}")
+            typer.echo(f"Key: {issue_data.key}")
+            typer.echo(f"Summary: {issue_data.summary}")
+            typer.echo(f"Status: {issue_data.status}")
+            typer.echo(f"Assignee: {issue_data.assignee_email or 'Unassigned'}")
+
+            if issue_data.status_transitions:
+                typer.echo("\nStatus Transitions:")
+                for status, timestamp in sorted(
+                    issue_data.status_transitions.items(), key=lambda x: x[1]
+                ):
+                    typer.echo(f"  {status}: {timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+
+            typer.echo(f"{'=' * 60}\n")
 
     except JiraAuthError as e:
         typer.echo(f"Authentication error: {e}", err=True)
