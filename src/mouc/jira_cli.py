@@ -159,7 +159,7 @@ def jira_fetch(
 
             # Fetch raw issue data again with changelog
             raw_issue = client.client.issue(ticket, expand="changelog")  # type: ignore[reportUnknownMemberType]
-            typer.echo(json.dumps(raw_issue.raw, indent=2))  # type: ignore[reportUnknownMemberType]
+            typer.echo(json.dumps(raw_issue, indent=2))  # type: ignore[reportUnknownMemberType]
 
             typer.echo(f"\n{'=' * 60}")
             typer.echo("FIELD DEFINITIONS (cached)")
