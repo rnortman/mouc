@@ -14,10 +14,12 @@ Without a resource configuration, tasks with no assigned resources are tracked a
 
 ## Resource Configuration File
 
-Create a `resources.yaml` file with the following structure:
+Create a `mouc_config.yaml` file with resource definitions. See [Configuration Documentation](config.md) for the complete file format.
+
+The resources section has the following structure:
 
 ```yaml
-# Define available resources
+# Resources section (required)
 resources:
   - name: alice
     dns_periods:
@@ -72,10 +74,16 @@ If not specified, unassigned tasks use the special "unassigned" resource and exe
 
 ## Using the Resource Configuration
 
-Pass the resource configuration file to the `gantt` command:
+The `gantt` command auto-detects `mouc_config.yaml` in the current directory:
 
 ```bash
-mouc gantt feature_map.yaml --resources resources.yaml --output schedule.md
+mouc gantt feature_map.yaml --output schedule.md
+```
+
+Or specify a custom config location:
+
+```bash
+mouc --config /path/to/config.yaml gantt feature_map.yaml
 ```
 
 ## Resource Assignment in Feature Maps
@@ -127,7 +135,7 @@ entities:
 
 ### Group Assignment
 
-Use group aliases defined in resources.yaml:
+Use group aliases defined in mouc_config.yaml:
 
 ```yaml
 entities:
@@ -256,7 +264,7 @@ Groups are especially useful for:
 ### Example 1: Round-Robin with Wildcard
 
 ```yaml
-# resources.yaml
+# mouc_config.yaml
 resources:
   - name: alice
     dns_periods: []
@@ -291,7 +299,7 @@ Result: task1 gets alice (first in config), task2 gets bob (alice is busy).
 ### Example 2: Skill-Based Assignment
 
 ```yaml
-# resources.yaml
+# mouc_config.yaml
 resources:
   - name: alice
     dns_periods: []
@@ -442,7 +450,7 @@ meta:
 **Problem:** Tasks stay unassigned even with `resources: ["*"]`
 
 **Solutions:**
-- Verify resource config file is being loaded (`--resources resources.yaml`)
+- Verify resource config file is being loaded (`--resources mouc_config.yaml`)
 - Check that resource names in groups match resource definitions
 - Ensure resources aren't all in DNS periods
 

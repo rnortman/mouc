@@ -56,15 +56,15 @@ Get your API token from: https://id.atlassian.com/manage/api-tokens
 2. Environment variables (`JIRA_EMAIL` and `JIRA_API_TOKEN`)
 3. `.netrc` file (fallback)
 
-### 2. Create Jira configuration
+### 2. Create configuration
 
 Copy the example config and customize for your Jira instance:
 
 ```bash
-cp jira_config.yaml.example jira_config.yaml
+cp mouc_config.example.yaml mouc_config.yaml
 ```
 
-Edit `jira_config.yaml` to match your Jira setup (see [Configuration](#configuration) below).
+Edit `mouc_config.yaml` to add your Jira settings (see [Configuration](config.md) for full reference).
 
 ### 3. Add Jira links to entities
 
@@ -85,17 +85,18 @@ entities:
 ### 4. Validate connection
 
 ```bash
-mouc jira validate --config jira_config.yaml
+mouc jira validate
+# Auto-detects mouc_config.yaml in current directory
 ```
 
 ### 5. Sync with Jira
 
 ```bash
 # Dry run to preview changes
-mouc jira sync feature_map.yaml --config jira_config.yaml --dry-run
+mouc jira sync feature_map.yaml --dry-run
 
 # Apply changes
-mouc jira sync feature_map.yaml --config jira_config.yaml --apply
+mouc jira sync feature_map.yaml --apply
 ```
 
 ## Commands
@@ -109,7 +110,7 @@ mouc jira validate [--config PATH]
 ```
 
 **Options:**
-- `--config PATH` - Path to jira_config.yaml (default: `jira_config.yaml`)
+- `--config PATH` - Path to mouc_config.yaml (default: `mouc_config.yaml`)
 
 **Example output:**
 ```
@@ -127,11 +128,11 @@ mouc jira fetch TICKET-ID [--config PATH]
 ```
 
 **Options:**
-- `--config PATH` - Path to jira_config.yaml (default: `jira_config.yaml`)
+- `--config PATH` - Path to mouc_config.yaml (default: `mouc_config.yaml`)
 
 **Example:**
 ```bash
-$ mouc jira fetch AUTH-123 --config jira_config.yaml
+$ mouc jira fetch AUTH-123 --config mouc_config.yaml
 
 ============================================================
 Key: AUTH-123
@@ -176,7 +177,7 @@ mouc jira sync [FEATURE_MAP] [OPTIONS]
 ```
 
 **Options:**
-- `--config PATH` - Path to jira_config.yaml (default: `jira_config.yaml`)
+- `--config PATH` - Path to mouc_config.yaml (default: `mouc_config.yaml`)
 - `--dry-run` - Show what would change without modifying files
 - `--apply` - Apply changes to feature_map.yaml (required to write changes)
 - `--report FILE` - Generate CSV report of conflicts
@@ -187,7 +188,7 @@ mouc jira sync [FEATURE_MAP] [OPTIONS]
 
 #### Dry Run (Preview Changes)
 ```bash
-mouc jira sync feature_map.yaml --config jira_config.yaml --dry-run
+mouc jira sync feature_map.yaml --config mouc_config.yaml --dry-run
 ```
 
 Shows what would change without modifying any files.
@@ -198,7 +199,7 @@ When conflicts are detected and no resolution method is specified, Mouc automati
 
 ```bash
 # Step 1: Run sync - automatically generates jira_conflicts.yaml and jira_conflicts.csv
-mouc jira sync feature_map.yaml --config jira_config.yaml
+mouc jira sync feature_map.yaml --config mouc_config.yaml
 
 # Output:
 # Found 3 conflicts that require resolution.
@@ -214,16 +215,16 @@ mouc jira sync feature_map.yaml --config jira_config.yaml
 # choice can be: jira, mouc, or skip
 
 # Step 3: Apply with answers (accepts either format)
-mouc jira sync feature_map.yaml --config jira_config.yaml --answers jira_conflicts.yaml --apply
+mouc jira sync feature_map.yaml --config mouc_config.yaml --answers jira_conflicts.yaml --apply
 # OR
-mouc jira sync feature_map.yaml --config jira_config.yaml --answers jira_conflicts.csv --apply
+mouc jira sync feature_map.yaml --config mouc_config.yaml --answers jira_conflicts.csv --apply
 ```
 
 This is the **default behavior** because it works well for both humans and automation (coding agents, scripts, etc.). Both formats can be edited manually or programmatically. The CSV format is particularly useful for TPMs and stakeholders who prefer spreadsheet tools.
 
 #### CSV Report (For Delegation)
 ```bash
-mouc jira sync feature_map.yaml --config jira_config.yaml --report conflicts.csv
+mouc jira sync feature_map.yaml --config mouc_config.yaml --report conflicts.csv
 ```
 
 Generates a CSV file with all conflicts for offline review. Useful for:
@@ -254,14 +255,16 @@ conflict_id,entity_id,field,mouc_value,jira_value,ticket_id,choice
 
 #### Direct Apply (No Conflicts)
 ```bash
-mouc jira sync feature_map.yaml --config jira_config.yaml --apply
+mouc jira sync feature_map.yaml --config mouc_config.yaml --apply
 ```
 
 Applies all changes directly. Fails if conflicts are found.
 
 ## Configuration
 
-The `jira_config.yaml` file controls how Mouc syncs with Jira.
+The `mouc_config.yaml` file contains both resource definitions and Jira settings. See [Configuration Documentation](config.md) for the complete reference.
+
+This section covers Jira-specific configuration details.
 
 ### Basic Structure
 
@@ -606,7 +609,7 @@ mouc jira sync feature_map.yaml --report discrepancies.csv
 You trust Jira completely and want automated sync.
 
 ```yaml
-# jira_config.yaml - Set all fields to jira_wins
+# mouc_config.yaml - Set all fields to jira_wins
 field_mappings:
   start_date:
     conflict_resolution: "jira_wins"
@@ -664,7 +667,7 @@ chmod 600 ~/.netrc
 
 **Error:** `Failed to connect to Jira: ...`
 
-**Solution:** Check that `base_url` in `jira_config.yaml` is correct and you have network access to Jira.
+**Solution:** Check that `base_url` in `mouc_config.yaml` is correct and you have network access to Jira.
 
 ```bash
 # Test with curl
@@ -677,14 +680,14 @@ curl -u your.email@company.com:your_token https://yourcompany.atlassian.net/rest
 
 **Solution:** Either:
 1. Add the field to your Jira issues
-2. Update `jira_config.yaml` to use the correct field name
+2. Update `mouc_config.yaml` to use the correct field name
 3. Set `defaults.skip_missing_fields: true` to ignore missing fields
 
 ### Status Not Mapped
 
 Jira status doesn't update Mouc status.
 
-**Solution:** Add the status to `status_map` in `jira_config.yaml`:
+**Solution:** Add the status to `status_map` in `mouc_config.yaml`:
 
 ```yaml
 status:
@@ -738,10 +741,10 @@ Choose `conflict_resolution` based on your source of truth:
 
 ### 4. Version Control Your Configs
 
-Commit `jira_config.yaml` to git so your team shares the same mappings.
+Commit `mouc_config.yaml` to git so your team shares the same mappings.
 
 ```bash
-git add jira_config.yaml
+git add mouc_config.yaml
 git commit -m "Add Jira sync configuration"
 ```
 
@@ -767,7 +770,7 @@ groups:
     - bob
     - charlie
 
-# jira_config.yaml
+# mouc_config.yaml
 resources:
   assignee_map:
     "alice@company.com": "backend_team"  # Maps to group

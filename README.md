@@ -100,7 +100,7 @@ mouc gantt                                    # Output to stdout
 mouc gantt --output schedule.md               # Output to markdown file
 mouc gantt --start-date 2025-01-01            # Set project start date
 mouc gantt --title "Q1 Schedule"             # Custom chart title
-mouc gantt --resources resources.yaml         # Enable automatic resource assignment
+mouc --config mouc_config.yaml gantt          # Use config for resources and settings
 ```
 
 Add scheduling metadata to entities in your YAML:
@@ -120,7 +120,7 @@ Use wildcards and preferences for flexible resource assignment:
 meta:
   resources: ["*"]                 # Assign to any available resource
   resources: ["alice|bob|charlie"] # Prefer alice, fall back to bob, then charlie
-  resources: ["team_a"]            # Use group alias from resources.yaml
+  resources: ["team_a"]            # Use group alias from mouc_config.yaml
 ```
 
 See [docs/gantt.md](docs/gantt.md) for Gantt chart features and [docs/resources.md](docs/resources.md) for resource management and automatic assignment.
