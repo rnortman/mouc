@@ -247,6 +247,13 @@ def gantt(
             help="[DEPRECATED] Use --config instead. Path to resources.yaml file for automatic resource assignment",
         ),
     ] = None,
+    markdown_base_url: Annotated[
+        str | None,
+        typer.Option(
+            "--markdown-base-url",
+            help="Base URL for markdown links (e.g., './feature_map.md' or 'https://github.com/user/repo/blob/main/feature_map.md')",
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -306,6 +313,21 @@ def gantt(
             elif Path("mouc_config.yaml").exists():
                 resource_config_path = Path("mouc_config.yaml")
 
+        # Load gantt config from unified config if available
+        gantt_config_markdown_url = None
+        if resource_config_path:
+            from contextlib import suppress
+
+            from .unified_config import load_unified_config
+
+            with suppress(FileNotFoundError, ValueError):
+                unified_config = load_unified_config(resource_config_path)
+                if unified_config.gantt and unified_config.gantt.markdown_base_url:
+                    gantt_config_markdown_url = unified_config.gantt.markdown_base_url
+
+        # CLI option overrides config file
+        final_markdown_url = markdown_base_url or gantt_config_markdown_url
+
         # Schedule tasks
         scheduler = GanttScheduler(
             feature_map,
@@ -324,6 +346,7 @@ def gantt(
             axis_format=axis_format,
             vertical_dividers=vertical_dividers,
             compact=compact,
+            markdown_base_url=final_markdown_url,
         )
 
         # Output the result

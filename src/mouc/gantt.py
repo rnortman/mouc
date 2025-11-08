@@ -537,6 +537,7 @@ class GanttScheduler:
         axis_format: str | None = None,
         vertical_dividers: str | None = None,
         compact: bool = False,
+        markdown_base_url: str | None = None,
     ) -> str:
         """Generate Mermaid gantt chart from schedule result.
 
@@ -548,6 +549,8 @@ class GanttScheduler:
             axis_format: Mermaid axisFormat string (e.g., "%Y-%m-%d", "%b %Y")
             vertical_dividers: Add vertical dividers at intervals: "quarter", "halfyear", or "year"
             compact: Use compact display mode to show multiple tasks in same row when possible
+            markdown_base_url: Base URL for markdown links (e.g., "./feature_map.md"). If provided,
+                              tasks will be clickable and link to their corresponding markdown headers.
 
         Returns:
             Mermaid gantt chart syntax as a string
@@ -615,7 +618,7 @@ class GanttScheduler:
 
                 tasks = tasks_by_type[entity_type]
                 for task in tasks:
-                    self._add_task_to_mermaid(lines, task, entities_by_id)
+                    self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
 
         elif group_by == "resource":
             tasks_by_resource: dict[str, list[ScheduledTask]] = {}
@@ -641,7 +644,7 @@ class GanttScheduler:
 
                 tasks = tasks_by_resource[resource]
                 for task in tasks:
-                    self._add_task_to_mermaid(lines, task, entities_by_id)
+                    self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
 
         return "\n".join(lines)
 
@@ -710,7 +713,11 @@ class GanttScheduler:
         return dividers
 
     def _add_task_to_mermaid(
-        self, lines: list[str], task: ScheduledTask, entities_by_id: dict[str, Entity]
+        self,
+        lines: list[str],
+        task: ScheduledTask,
+        entities_by_id: dict[str, Entity],
+        markdown_base_url: str | None = None,
     ) -> None:
         """Add a task to the Mermaid lines list.
 
@@ -718,6 +725,8 @@ class GanttScheduler:
             lines: The list of Mermaid lines to append to
             task: The scheduled task to add
             entities_by_id: Map of entity IDs to entities
+            markdown_base_url: Base URL for markdown links. If provided, a click directive
+                              will be added to make the task clickable.
         """
         entity = entities_by_id[task.entity_id]
         gantt_meta = self._get_gantt_meta(entity)
@@ -767,3 +776,11 @@ class GanttScheduler:
         duration_str = f"{int(task.duration_days)}d"
 
         lines.append(f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}")
+
+        # Add click directive if markdown_base_url is provided
+        if markdown_base_url:
+            from .markdown import make_anchor
+
+            anchor = make_anchor(task.entity_id, self.feature_map)
+            url = f"{markdown_base_url}#{anchor}"
+            lines.append(f'    click {task.entity_id} href "{url}"')

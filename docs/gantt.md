@@ -492,6 +492,9 @@ mouc gantt [OPTIONS] [FILE]
 - `--group-by, -g GROUPING` - How to organize chart sections: `type` or `resource`
   - `type` - Group by entity type (capability, user story, outcome). Default.
   - `resource` - Group by resource (person/team). Tasks with multiple resources appear in each section.
+- `--markdown-base-url URL` - Base URL for clickable task links (e.g., `./feature_map.md` or `https://github.com/user/repo/blob/main/feature_map.md`)
+  - Tasks become clickable and link to corresponding markdown headers
+  - Can also be configured via `gantt.markdown_base_url` in `mouc_config.yaml`
 - `--output, -o PATH` - Output file path
   - Files ending in `.md` are wrapped in ` ```mermaid ` code fences
   - Other files get raw Mermaid syntax
@@ -519,6 +522,9 @@ mouc gantt --group-by resource --output resource-view.md
 
 # Group by type (explicit, same as default)
 mouc gantt --group-by type --output type-view.md
+
+# Make tasks clickable with links to markdown doc
+mouc gantt --markdown-base-url ./feature_map.md --output schedule.md
 
 # Different input file
 mouc gantt project.yaml --output project-schedule.md

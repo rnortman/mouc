@@ -42,7 +42,7 @@ mouc --config myconfig.yaml jira sync
 
 ## File Structure
 
-The unified config file has two main sections:
+The unified config file has three optional sections:
 
 ```yaml
 # REQUIRED: Resource definitions
@@ -55,6 +55,10 @@ groups:
   team_a: [alice, bob]
 
 default_resource: "*"
+
+# OPTIONAL: Gantt chart settings
+gantt:
+  markdown_base_url: "./feature_map.md"
 
 # OPTIONAL: Jira integration settings
 jira:

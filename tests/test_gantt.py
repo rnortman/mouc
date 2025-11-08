@@ -712,6 +712,55 @@ class TestGanttScheduler:
         # Should not be marked critical
         assert ":crit," not in mermaid
 
+    def test_markdown_links_with_base_url(
+        self, simple_feature_map: FeatureMap, base_date: date
+    ) -> None:
+        """Test that markdown links are generated when markdown_base_url is provided."""
+        scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        # Generate mermaid with markdown_base_url
+        markdown_url = "./feature_map.md"
+        mermaid_output = scheduler.generate_mermaid(result, markdown_base_url=markdown_url)
+
+        # Check that click directives are present for all tasks
+        # Anchors are based on entity names, not IDs
+        assert f'click cap1 href "{markdown_url}#database-setup"' in mermaid_output
+        assert f'click cap2 href "{markdown_url}#api-layer"' in mermaid_output
+        assert f'click story1 href "{markdown_url}#user-authentication"' in mermaid_output
+
+    def test_markdown_links_without_base_url(
+        self, simple_feature_map: FeatureMap, base_date: date
+    ) -> None:
+        """Test that no click directives are generated when markdown_base_url is not provided."""
+        scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        # Generate mermaid without markdown_base_url
+        mermaid_output = scheduler.generate_mermaid(result)
+
+        # Check that no click directives are present
+        assert "click cap1 href" not in mermaid_output
+        assert "click cap2 href" not in mermaid_output
+        assert "click story1 href" not in mermaid_output
+
+    def test_markdown_links_with_absolute_url(
+        self, simple_feature_map: FeatureMap, base_date: date
+    ) -> None:
+        """Test that markdown links work with absolute URLs."""
+        scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        # Generate mermaid with absolute URL
+        markdown_url = "https://github.com/user/repo/blob/main/feature_map.md"
+        mermaid_output = scheduler.generate_mermaid(result, markdown_base_url=markdown_url)
+
+        # Check that click directives are present with absolute URLs
+        # Anchors are based on entity names, not IDs
+        assert f'click cap1 href "{markdown_url}#database-setup"' in mermaid_output
+        assert f'click cap2 href "{markdown_url}#api-layer"' in mermaid_output
+        assert f'click story1 href "{markdown_url}#user-authentication"' in mermaid_output
+
 
 class TestMermaidGeneration:
     """Test Mermaid gantt chart generation."""

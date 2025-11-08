@@ -9,6 +9,40 @@ if TYPE_CHECKING:
     from .models import Entity, FeatureMap
 
 
+def make_anchor(entity_id: str, feature_map: FeatureMap) -> str:
+    """Create a valid markdown anchor from an entity ID.
+
+    Looks up the entity by ID and uses its name to generate the anchor,
+    matching the format used in markdown headers.
+
+    Args:
+        entity_id: The entity ID to look up
+        feature_map: The feature map containing the entity
+
+    Returns:
+        A markdown-compatible anchor string
+    """
+    # Get the entity name based on ID
+    entity = feature_map.get_entity_by_id(entity_id)
+    if entity:
+        name = entity.name
+    else:
+        # Fallback to ID-based anchor if entity not found
+        return entity_id.replace("_", "-")
+
+    # Convert name to markdown anchor format
+    # Lowercase, replace spaces with hyphens, remove special chars
+    anchor = name.lower()
+    anchor = anchor.replace(" ", "-")
+    # Remove characters that aren't alphanumeric or hyphens
+    anchor = "".join(c for c in anchor if c.isalnum() or c == "-")
+    # Remove multiple consecutive hyphens
+    while "--" in anchor:
+        anchor = anchor.replace("--", "-")
+    # Remove leading/trailing hyphens
+    return anchor.strip("-")
+
+
 class MarkdownGenerator:
     """Generate markdown documentation from a feature map."""
 
@@ -337,25 +371,7 @@ class MarkdownGenerator:
 
     def _make_anchor(self, entity_id: str) -> str:
         """Create a valid HTML anchor from an entity name."""
-        # Get the entity name based on ID
-        entity = self.feature_map.get_entity_by_id(entity_id)
-        if entity:
-            name = entity.name
-        else:
-            # Fallback to ID-based anchor if entity not found
-            return entity_id.replace("_", "-")
-
-        # Convert name to markdown anchor format
-        # Lowercase, replace spaces with hyphens, remove special chars
-        anchor = name.lower()
-        anchor = anchor.replace(" ", "-")
-        # Remove characters that aren't alphanumeric or hyphens
-        anchor = "".join(c for c in anchor if c.isalnum() or c == "-")
-        # Remove multiple consecutive hyphens
-        while "--" in anchor:
-            anchor = anchor.replace("--", "-")
-        # Remove leading/trailing hyphens
-        return anchor.strip("-")
+        return make_anchor(entity_id, self.feature_map)
 
     def _format_type_label(self, entity: Entity) -> str:
         """Format type label with styling applied."""

@@ -42,3 +42,9 @@ Use `uv sync` after updating pyproject.toml to install packages.
 Always run `uv run ruff format && uv run ruff check --fix && uv run pyright && uv run pytest` before considering an iteration done.
 
 Target is Python 3.10+.
+
+## Changes and Releasing
+
+Update CHANGELOG.md and docs after each change, if appropriate. Docs are in `docs/` and also `README.md`. Keep changelog entries VERY CONCISE. When making commits (only when specifically requested to do so by the user), always git add each file individual that you know you created or modified; do not use `-A` as that may pick up unrelated files in the working dir. Make your commit messages also VERY CONCISE.
+
+A lot of existing changelog entries are not very concise. Do not match the overly verbose style; the changelog should not be complete user documentation, that's what the docs are for. Keep the change log VERY CONCISE.

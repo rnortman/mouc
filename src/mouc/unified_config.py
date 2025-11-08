@@ -16,11 +16,18 @@ from .jira_config import JiraConfig
 from .resources import ResourceConfig
 
 
+class GanttConfig(BaseModel):
+    """Configuration for Gantt chart generation."""
+
+    markdown_base_url: str | None = None
+
+
 class UnifiedConfig(BaseModel):
     """Unified configuration containing resources and optional Jira settings."""
 
     resources: ResourceConfig
     jira: JiraConfig | None = None
+    gantt: GanttConfig | None = None
 
 
 def load_unified_config(config_path: Path | str) -> UnifiedConfig:
@@ -69,7 +76,12 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
         }
         jira_config = JiraConfig.model_validate(jira_data)
 
-    return UnifiedConfig(resources=resource_config, jira=jira_config)
+    # Build GanttConfig if gantt section exists
+    gantt_config = None
+    if "gantt" in data:
+        gantt_config = GanttConfig.model_validate(data["gantt"])
+
+    return UnifiedConfig(resources=resource_config, jira=jira_config, gantt=gantt_config)
 
 
 def map_jira_user_to_resource(
