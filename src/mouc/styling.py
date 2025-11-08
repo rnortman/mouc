@@ -177,6 +177,37 @@ class EdgeStyle(TypedDict, total=False):
     arrowhead: str
 
 
+class TaskStyle(TypedDict, total=False):
+    """Mermaid gantt task styling attributes.
+
+    Mermaid gantt charts support both task tags and custom CSS styling via themeCSS.
+
+    Task tags (predefined visual styles):
+        - 'done': Completed tasks (green)
+        - 'crit': Critical tasks (red)
+        - 'active': In-progress tasks (blue)
+        - 'milestone': Milestone markers
+
+    CSS properties (custom colors via themeCSS in YAML frontmatter):
+        - fill_color: Task bar fill color (e.g., '#ff0000', 'CadetBlue')
+        - stroke_color: Task bar border color
+        - text_color: Task text color
+
+    Attributes:
+        tags: List of Mermaid task tags
+        section: Optional section name to group tasks under
+        fill_color: CSS color for task bar fill
+        stroke_color: CSS color for task bar border
+        text_color: CSS color for task text
+    """
+
+    tags: list[str]
+    section: str
+    fill_color: str
+    stroke_color: str
+    text_color: str
+
+
 # ============================================================================
 # Type Aliases for Function Signatures
 # ============================================================================
@@ -184,6 +215,7 @@ class EdgeStyle(TypedDict, total=False):
 NodeStylerFunc = Callable[[Entity, StylingContext], NodeStyle]
 EdgeStylerFunc = Callable[[str, str, str, StylingContext], EdgeStyle]
 LabelStylerFunc = Callable[[Entity, StylingContext], str | None]
+TaskStylerFunc = Callable[[Entity, StylingContext], TaskStyle]
 
 
 # ============================================================================
@@ -193,6 +225,7 @@ LabelStylerFunc = Callable[[Entity, StylingContext], str | None]
 _node_stylers: list[tuple[int, NodeStylerFunc]] = []
 _edge_stylers: list[tuple[int, EdgeStylerFunc]] = []
 _label_stylers: list[tuple[int, LabelStylerFunc]] = []
+_task_stylers: list[tuple[int, TaskStylerFunc]] = []
 
 
 # ============================================================================
@@ -322,6 +355,65 @@ def style_label(
         # Called with arguments: @style_label(priority=20)
         return decorator
     # Called without arguments: @style_label
+    return decorator(func)
+
+
+@overload
+def style_task(func: TaskStylerFunc) -> TaskStylerFunc: ...
+
+
+@overload
+def style_task(*, priority: int = 10) -> Callable[[TaskStylerFunc], TaskStylerFunc]: ...
+
+
+def style_task(
+    func: TaskStylerFunc | None = None, *, priority: int = 10
+) -> TaskStylerFunc | Callable[[TaskStylerFunc], TaskStylerFunc]:
+    """Register a gantt task styling function.
+
+    The function receives an entity and context, and returns a dict of
+    Mermaid gantt task attributes to apply.
+
+    Multiple functions are applied in priority order (lower numbers first).
+    Later functions override earlier ones for conflicting attributes.
+
+    Signature: (entity: Entity, context: StylingContext) -> TaskStyle
+
+    Mermaid supports the following task tags:
+        - 'done': Marks completed tasks (green)
+        - 'crit': Marks critical path tasks (red)
+        - 'active': Marks tasks in progress (blue)
+        - 'milestone': Single-point-in-time events
+
+    CSS properties (applied via themeCSS in YAML frontmatter):
+        - 'fill_color': Task bar fill color (CSS color value)
+        - 'stroke_color': Task bar border color (CSS color value)
+        - 'text_color': Task text color (CSS color value)
+
+    Examples:
+        @style_task
+        def style_by_status(entity, context):
+            if entity.meta.get('status') == 'complete':
+                return {'tags': ['done']}
+            return {'tags': ['active']}
+
+        @style_task(priority=20)
+        def color_by_team(entity, context):
+            team = entity.meta.get('team')
+            colors = {'platform': '#4287f5', 'backend': '#42f554'}
+            if team in colors:
+                return {'fill_color': colors[team]}
+            return {}
+    """
+
+    def decorator(f: TaskStylerFunc) -> TaskStylerFunc:
+        _task_stylers.append((priority, f))
+        return f
+
+    if func is None:
+        # Called with arguments: @style_task(priority=20)
+        return decorator
+    # Called without arguments: @style_task
     return decorator(func)
 
 
@@ -473,6 +565,7 @@ def clear_registrations() -> None:
     _node_stylers.clear()
     _edge_stylers.clear()
     _label_stylers.clear()
+    _task_stylers.clear()
 
 
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
@@ -523,6 +616,28 @@ def apply_label_styles(entity: Entity, context: StylingContext) -> str | None:
             label = result
 
     return label
+
+
+def apply_task_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
+    """Apply all registered task styling functions in priority order."""
+    # Sort by priority (lower numbers first)
+    stylers = sorted(_task_stylers, key=lambda x: x[0])
+
+    # Merge results - later overrides earlier
+    final_style: dict[str, Any] = {}
+    for _priority, styler in stylers:
+        result = styler(entity, context)
+        if result:
+            # Special handling for tags - merge lists instead of replacing
+            if "tags" in result and "tags" in final_style:
+                # Combine and deduplicate tags
+                existing_tags = final_style["tags"]
+                new_tags = result["tags"]
+                final_style["tags"] = list(dict.fromkeys(existing_tags + new_tags))
+            else:
+                final_style.update(result)
+
+    return final_style
 
 
 # ============================================================================
@@ -642,12 +757,14 @@ __all__ = [
     "style_node",
     "style_edge",
     "style_label",
+    "style_task",
     # Protocols
     "Entity",
     "Link",
     "StylingContext",
     "NodeStyle",
     "EdgeStyle",
+    "TaskStyle",
     # Utility functions
     "sequential_hue",
     "contrast_text_color",
@@ -657,5 +774,6 @@ __all__ = [
     "apply_node_styles",
     "apply_edge_styles",
     "apply_label_styles",
+    "apply_task_styles",
     "clear_registrations",
 ]

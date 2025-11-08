@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Gantt chart task styling**: Custom CSS colors for tasks via `@style_task` decorator (fill_color, stroke_color, text_color)
 - **Gantt chart clickable links**: Tasks in gantt charts can now link to markdown documentation
 - **Jira sync metadata**: New `jira_sync` metadata field controls sync behavior per entity
   - `ignore_fields`: Block specific fields from Jira sync entirely

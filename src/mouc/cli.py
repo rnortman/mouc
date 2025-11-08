@@ -254,10 +254,25 @@ def gantt(
             help="Base URL for markdown links (e.g., './feature_map.md' or 'https://github.com/user/repo/blob/main/feature_map.md')",
         ),
     ] = None,
+    style_module: Annotated[
+        str | None,
+        typer.Option("--style-module", help="Python module path for styling functions"),
+    ] = None,
+    style_file: Annotated[
+        Path | None,
+        typer.Option("--style-file", help="Python file path for styling functions"),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
     try:
+        if style_module and style_file:
+            typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
+            raise typer.Exit(1) from None
+
+        # Load styling module if specified
+        if style_module or style_file:
+            _load_styling(style_module, style_file)
         # Validate group_by parameter
         if group_by not in ("type", "resource"):
             typer.echo(

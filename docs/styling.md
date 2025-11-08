@@ -35,6 +35,7 @@ def color_by_type(entity, context):
 ```bash
 mouc graph --style-file ./my_styles.py
 mouc doc --style-file ./my_styles.py
+mouc gantt --style-file ./my_styles.py
 ```
 
 ## Basic Usage
@@ -50,9 +51,11 @@ mouc graph --style-module myproject.docs.styling
 # From a file path (no PYTHONPATH dependency)
 mouc graph --style-file ./my_styles.py
 
-# Same options work for markdown generation
+# Same options work for markdown and gantt chart generation
 mouc doc --style-module myproject.docs.styling
 mouc doc --style-file ./my_styles.py
+mouc gantt --style-module myproject.docs.styling
+mouc gantt --style-file ./my_styles.py
 ```
 
 ### Style Module Structure
@@ -64,13 +67,18 @@ from mouc.styling import *
 
 @style_node
 def my_node_styler(entity, context):
-    """Style nodes based on entity data."""
+    """Style nodes in graph visualizations."""
     return {'fill_color': '#ff0000'}
 
 @style_edge
 def my_edge_styler(from_id, to_id, edge_type, context):
-    """Style edges based on relationship type."""
+    """Style edges in graph visualizations."""
     return {'color': '#666666', 'style': 'dashed'}
+
+@style_task
+def my_task_styler(entity, context):
+    """Style tasks in gantt charts."""
+    return {'tags': ['done']}
 
 @style_label
 def my_label_styler(entity, context):
@@ -191,6 +199,97 @@ Multiple label functions are applied in priority order. The last non-`None` resu
 - Return a string to use as the label (e.g., `"[Custom]"`)
 - Return `""` (empty string) to hide the label entirely
 - Return `None` to use the default label (or let the next styler decide)
+
+### Task Styling (Gantt Charts)
+
+Task styling functions control how tasks appear in Gantt charts using both predefined tags and custom CSS colors:
+
+```python
+@style_task
+def status_based_styling(entity, context):
+    """Style tasks based on their status."""
+    status = entity.meta.get('status')
+    if status == 'done':
+        return {'tags': ['done']}
+    elif status == 'critical':
+        return {'tags': ['crit']}
+    return {'tags': ['active']}
+
+@style_task(priority=20)
+def color_by_team(entity, context):
+    """Apply custom colors by team."""
+    team = entity.meta.get('team')
+    colors = {
+        'platform': '#4287f5',
+        'backend': '#42f554',
+        'frontend': '#f54242'
+    }
+    if team in colors:
+        return {'fill_color': colors[team]}
+    return {}
+```
+
+#### Available Task Tags
+
+Mermaid gantt tags provide predefined visual styles:
+- `'done'`: Completed tasks (displayed in green)
+- `'crit'`: Critical path tasks (displayed in red)
+- `'active'`: In-progress tasks (displayed in blue)
+- `'milestone'`: Single-point-in-time events
+
+#### Available CSS Properties
+
+Custom colors are applied via Mermaid's `themeCSS` configuration:
+- `'fill_color'`: Task bar fill color (CSS color value)
+- `'stroke_color'`: Task bar border color (CSS color value)
+- `'text_color'`: Task text color (CSS color value)
+
+CSS colors are generated automatically in the YAML frontmatter as:
+```yaml
+config:
+    themeCSS: "
+        #taskId { fill: #4287f5; stroke: #00ff00; color: #000000 }
+    "
+```
+
+#### Available Task Attributes
+
+- `tags`: List of Mermaid task tags
+- `section`: Optional section name for grouping (currently not used by generator)
+- `fill_color`: CSS color for task bar fill
+- `stroke_color`: CSS color for task bar border
+- `text_color`: CSS color for task text
+
+#### Tag Merging
+
+Unlike node/edge styling where attributes are replaced, `tags` from multiple task stylers are **merged together**. This allows different stylers to add tags independently:
+
+```python
+@style_task(priority=10)
+def mark_high_priority(entity, context):
+    """Mark high priority tasks as critical."""
+    if entity.meta.get('priority') == 'high':
+        return {'tags': ['crit']}
+    return {}
+
+@style_task(priority=20)
+def mark_blocking_outcomes(entity, context):
+    """Mark tasks that block outcomes."""
+    enabled = context.transitively_enables(entity.id)
+    outcomes = [e for e in enabled
+                if context.get_entity(e) and context.get_entity(e).type == 'outcome']
+    if outcomes and entity.meta.get('status') != 'done':
+        # This tag will be merged with tags from previous stylers
+        return {'tags': ['active']}
+    return {}
+```
+
+#### Default Behavior
+
+If no task stylers are registered, gantt charts use the default behavior:
+- Tasks with `status: done` are marked with the `done` tag
+- Tasks that are late (past deadline) are marked with the `crit` tag
+- Unassigned tasks are marked with the `active` tag
 
 ## API Reference
 
@@ -390,7 +489,62 @@ def show_milestone_labels(entity, context):
     return None  # Use default label
 ```
 
-### Example 6: Complex Multi-Function Styling
+### Example 6: Gantt Chart Task Styling
+
+```python
+from mouc.styling import *
+
+@style_task(priority=10)
+def style_by_status_and_priority(entity, context):
+    """Style gantt tasks based on status and priority using tags."""
+    tags = []
+
+    # Check completion status first
+    status = entity.meta.get('status')
+    if status == 'done':
+        tags.append('done')
+        return {'tags': tags}
+
+    # Check priority for incomplete tasks
+    priority = entity.meta.get('priority')
+    if priority == 'high':
+        tags.append('crit')
+    elif priority == 'medium':
+        tags.append('active')
+
+    return {'tags': tags}
+
+@style_task(priority=20)
+def color_by_team(entity, context):
+    """Apply custom colors by team ownership."""
+    team = entity.meta.get('team')
+    colors = {
+        'platform': '#4287f5',
+        'backend': '#42f554',
+        'frontend': '#f54242'
+    }
+    if team in colors:
+        return {'fill_color': colors[team]}
+    return {}
+
+@style_task(priority=30)
+def highlight_blocking_tasks(entity, context):
+    """Mark tasks that block outcomes with distinct styling."""
+    # Find all outcomes this entity transitively enables
+    enabled = context.transitively_enables(entity.id)
+    enabled_outcomes = [
+        e for e in enabled
+        if context.get_entity(e) and context.get_entity(e).type == 'outcome'
+    ]
+
+    # If this blocks outcomes and isn't done, add thick border
+    if enabled_outcomes and entity.meta.get('status') != 'done':
+        return {'stroke_color': '#ff0000', 'tags': ['crit']}
+
+    return {}
+```
+
+### Example 7: Complex Multi-Function Styling
 
 ```python
 from mouc.styling import *

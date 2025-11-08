@@ -322,3 +322,331 @@ def test_clear_registrations() -> None:
     # Apply styling - should return empty dict since registrations were cleared
     result = styling.apply_node_styles(entities[0], ctx)
     assert result == {}
+
+
+# =============================================================================
+# Task Styling Tests (Gantt Charts)
+# =============================================================================
+
+
+def test_style_task_decorator() -> None:
+    """Test that style_task decorator registers functions."""
+    styling.clear_registrations()
+
+    @styling.style_task
+    def my_task_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.TaskStyle:
+        return {"tags": ["done"]}
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result = styling.apply_task_styles(entities[0], ctx)
+    assert result["tags"] == ["done"]
+
+
+def test_style_task_priority() -> None:
+    """Test that priority ordering works correctly for task styling."""
+    styling.clear_registrations()
+
+    @styling.style_task(priority=20)
+    def high_priority(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"section": "Team B"}
+
+    @styling.style_task(priority=10)
+    def low_priority(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"section": "Team A"}
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - higher priority should override
+    result = styling.apply_task_styles(entities[0], ctx)
+    assert result["section"] == "Team B"
+
+
+def test_style_task_tags_merge() -> None:
+    """Test that tags from multiple stylers are merged instead of replaced."""
+    styling.clear_registrations()
+
+    @styling.style_task(priority=10)
+    def first_tagger(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["crit"]}
+
+    @styling.style_task(priority=20)
+    def second_tagger(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["active"]}
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - tags should be merged
+    result = styling.apply_task_styles(entities[0], ctx)
+    assert set(result["tags"]) == {"crit", "active"}
+
+
+def test_style_task_tags_deduplicate() -> None:
+    """Test that duplicate tags are removed when merging."""
+    styling.clear_registrations()
+
+    @styling.style_task(priority=10)
+    def first_tagger(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["crit", "active"]}
+
+    @styling.style_task(priority=20)
+    def second_tagger(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["active", "done"]}
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - duplicate tags should be removed
+    result = styling.apply_task_styles(entities[0], ctx)
+    # Check that tags are unique (order preserved from first appearance)
+    assert len(result["tags"]) == 3
+    assert set(result["tags"]) == {"crit", "active", "done"}
+
+
+def test_style_task_by_status() -> None:
+    """Test styling tasks based on status metadata."""
+    styling.clear_registrations()
+
+    @styling.style_task
+    def status_styler(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        status = entity.meta.get("status")
+        if status == "done":
+            return {"tags": ["done"]}
+        if status == "critical":
+            return {"tags": ["crit"]}
+        return {"tags": ["active"]}
+
+    # Create test entities with different statuses
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Done Capability",
+            description="Test",
+            meta={"status": "done"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Critical Capability",
+            description="Test",
+            meta={"status": "critical"},
+        ),
+        Entity(
+            type="capability",
+            id="cap3",
+            name="Active Capability",
+            description="Test",
+            meta={"status": "in_progress"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling to each entity
+    result1 = styling.apply_task_styles(entities[0], ctx)
+    assert result1["tags"] == ["done"]
+
+    result2 = styling.apply_task_styles(entities[1], ctx)
+    assert result2["tags"] == ["crit"]
+
+    result3 = styling.apply_task_styles(entities[2], ctx)
+    assert result3["tags"] == ["active"]
+
+
+def test_style_task_by_priority() -> None:
+    """Test styling tasks based on priority metadata."""
+    styling.clear_registrations()
+
+    @styling.style_task
+    def priority_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.TaskStyle:
+        priority = entity.meta.get("priority")
+        if priority == "high":
+            return {"tags": ["crit"]}
+        return {}
+
+    # Create test entities with different priorities
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="High Priority",
+            description="Test",
+            meta={"priority": "high"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Normal Priority",
+            description="Test",
+            meta={"priority": "normal"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result1 = styling.apply_task_styles(entities[0], ctx)
+    assert result1["tags"] == ["crit"]
+
+    result2 = styling.apply_task_styles(entities[1], ctx)
+    assert result2 == {}
+
+
+def test_style_task_using_context() -> None:
+    """Test styling tasks using context graph queries."""
+    styling.clear_registrations()
+
+    @styling.style_task
+    def blocking_outcomes_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.TaskStyle:
+        # Mark tasks that enable outcomes as critical
+        enabled = context.transitively_enables(entity.id)
+        enabled_outcomes = [
+            e for e in enabled if (ent := context.get_entity(e)) and ent.type == "outcome"
+        ]
+        if enabled_outcomes:
+            return {"tags": ["crit"]}
+        return {}
+
+    # Create test entities with dependencies
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Blocking Capability",
+            description="Test",
+            enables={"us1"},
+        ),
+        Entity(
+            type="user_story",
+            id="us1",
+            name="User Story",
+            description="Test",
+            requires={"cap1"},
+            enables={"outcome1"},
+        ),
+        Entity(
+            type="outcome",
+            id="outcome1",
+            name="Outcome",
+            description="Test",
+            requires={"us1"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Non-blocking Capability",
+            description="Test",
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - cap1 blocks outcome1, cap2 doesn't block anything
+    result1 = styling.apply_task_styles(entities[0], ctx)
+    assert result1["tags"] == ["crit"]
+
+    result4 = styling.apply_task_styles(entities[3], ctx)
+    assert result4 == {}
+
+
+def test_style_task_with_css_colors() -> None:
+    """Test styling tasks with custom CSS colors."""
+    styling.clear_registrations()
+
+    @styling.style_task
+    def color_by_team(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        team = entity.meta.get("team")
+        colors = {"platform": "#4287f5", "backend": "#42f554", "frontend": "#f54242"}
+        if team in colors:
+            return {"fill_color": colors[team]}
+        return {}
+
+    # Create test entities with team metadata
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Platform Capability",
+            description="Test",
+            meta={"team": "platform"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Backend Capability",
+            description="Test",
+            meta={"team": "backend"},
+        ),
+        Entity(
+            type="capability",
+            id="cap3",
+            name="Unknown Team",
+            description="Test",
+            meta={"team": "unknown"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result1 = styling.apply_task_styles(entities[0], ctx)
+    assert result1["fill_color"] == "#4287f5"
+
+    result2 = styling.apply_task_styles(entities[1], ctx)
+    assert result2["fill_color"] == "#42f554"
+
+    result3 = styling.apply_task_styles(entities[2], ctx)
+    assert result3 == {}
+
+
+def test_style_task_tags_and_css_combined() -> None:
+    """Test that tags and CSS colors can be combined."""
+    styling.clear_registrations()
+
+    @styling.style_task(priority=10)
+    def add_tags(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["active"]}
+
+    @styling.style_task(priority=20)
+    def add_colors(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"fill_color": "#ff0000", "stroke_color": "#00ff00"}
+
+    # Create test entity
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - should have both tags and colors
+    result = styling.apply_task_styles(entities[0], ctx)
+    assert result["tags"] == ["active"]
+    assert result["fill_color"] == "#ff0000"
+    assert result["stroke_color"] == "#00ff00"

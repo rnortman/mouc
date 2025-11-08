@@ -606,6 +606,56 @@ mobile_launch:
     end_before: "2025-06-30"  # Propagates urgency to auth_story
 ```
 
+### 8. Customize Task Appearance with Styling
+
+Use the styling system to customize how tasks appear in the Gantt chart:
+
+```bash
+mouc gantt --style-file ./my_styles.py --output schedule.md
+```
+
+Create a Python file with task styling functions:
+
+```python
+from mouc.styling import style_task
+
+@style_task
+def color_by_priority(entity, context):
+    """Style tasks based on priority using tags."""
+    priority = entity.meta.get('priority')
+    if priority == 'high':
+        return {'tags': ['crit']}  # Red/critical
+    elif priority == 'medium':
+        return {'tags': ['active']}  # Blue
+    return {}
+
+@style_task(priority=20)
+def color_by_team(entity, context):
+    """Apply custom colors by team using CSS."""
+    team = entity.meta.get('team')
+    colors = {
+        'platform': '#4287f5',
+        'backend': '#42f554',
+        'frontend': '#f54242'
+    }
+    if team in colors:
+        return {'fill_color': colors[team]}
+    return {}
+```
+
+Available Mermaid gantt tags (predefined colors):
+- `done`: Completed tasks (green)
+- `crit`: Critical tasks (red)
+- `active`: In-progress tasks (blue)
+- `milestone`: Milestone markers
+
+Available CSS properties (custom colors):
+- `fill_color`: Task bar fill color
+- `stroke_color`: Task bar border color
+- `text_color`: Task text color
+
+See the [Styling documentation](styling.md#task-styling-gantt-charts) for more details.
+
 ## Rendering Mermaid Charts
 
 Mermaid charts can be rendered in many tools:

@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 from .scheduler import UNASSIGNED_RESOURCE, ParallelScheduler, Task
+from .styling import StylingContext, apply_task_styles, create_styling_context
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -220,6 +221,9 @@ class GanttScheduler:
             self.start_date = self._calculate_chart_start_date()
         else:
             self.start_date = start_date
+
+        # Create styling context for task styling
+        self.styling_context: StylingContext = create_styling_context(feature_map)
 
     def _calculate_chart_start_date(self) -> date:
         """Calculate chart start date from fixed task dates and current date.
@@ -558,17 +562,27 @@ class GanttScheduler:
         # Set todayMarker to current_date so the red line appears at the right position
         current_date_str = self.current_date.strftime("%Y-%m-%d")
 
+        entities_by_id = {e.id: e for e in self.feature_map.entities}
+
+        # Collect CSS styles for all tasks
+        theme_css = self._generate_theme_css(result.tasks, entities_by_id)
+
         lines: list[str] = []
 
-        # Add YAML frontmatter for compact mode
-        if compact:
-            lines.extend(
-                [
-                    "---",
-                    "displayMode: compact",
-                    "---",
-                ]
-            )
+        # Add YAML frontmatter for compact mode and/or themeCSS
+        if compact or theme_css:
+            lines.append("---")
+            if compact:
+                lines.append("displayMode: compact")
+            if theme_css:
+                lines.append("config:")
+                # Use multiline string format for themeCSS
+                lines.append('    themeCSS: "')
+                for css_line in theme_css.split("\n"):
+                    if css_line.strip():
+                        lines.append(f"        {css_line}  \\n")
+                lines.append('    "')
+            lines.append("---")
 
         lines.extend(
             [
@@ -593,8 +607,6 @@ class GanttScheduler:
             lines.extend(divider_lines)
             if divider_lines:
                 lines.append("")
-
-        entities_by_id = {e.id: e for e in self.feature_map.entities}
 
         if group_by == "type":
             tasks_by_type: dict[str, list[ScheduledTask]] = {}
@@ -647,6 +659,46 @@ class GanttScheduler:
                     self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
 
         return "\n".join(lines)
+
+    def _generate_theme_css(
+        self, tasks: list[ScheduledTask], entities_by_id: dict[str, Entity]
+    ) -> str:
+        """Generate themeCSS block for custom task styling.
+
+        Args:
+            tasks: List of scheduled tasks
+            entities_by_id: Map of entity IDs to entities
+
+        Returns:
+            CSS string for themeCSS configuration, or empty string if no custom styles
+        """
+        css_rules: list[str] = []
+
+        for task in tasks:
+            entity = entities_by_id.get(task.entity_id)
+            if not entity:
+                continue
+
+            # Apply task styling
+            task_style = apply_task_styles(entity, self.styling_context)
+
+            # Build CSS rule for this task if it has custom colors
+            css_properties: list[str] = []
+
+            if "fill_color" in task_style:
+                css_properties.append(f"fill: {task_style['fill_color']}")
+
+            if "stroke_color" in task_style:
+                css_properties.append(f"stroke: {task_style['stroke_color']}")
+
+            if "text_color" in task_style:
+                css_properties.append(f"color: {task_style['text_color']}")
+
+            if css_properties:
+                css_rule = f"#{task.entity_id} {{ {'; '.join(css_properties)} }}"
+                css_rules.append(css_rule)
+
+        return "\n".join(css_rules)
 
     def _generate_vertical_dividers(
         self, tasks: list[ScheduledTask], divider_type: str
@@ -761,15 +813,22 @@ class GanttScheduler:
             else:
                 label += f" ({', '.join(task.resources)})"
 
-        tags: list[str] = []
+        # Apply task styling from registered stylers
+        task_style = apply_task_styles(entity, self.styling_context)
 
-        # Check if task is marked as done
-        if gantt_meta.status == "done":
-            tags.append("done")
-        elif is_late:
-            tags.append("crit")
-        elif is_unassigned:
-            tags.append("active")
+        # Use styled tags if provided, otherwise fall back to default logic
+        tags: list[str]
+        if "tags" in task_style:
+            tags = task_style["tags"]
+        else:
+            # Default tag behavior (backward compatibility)
+            tags = []
+            if gantt_meta.status == "done":
+                tags.append("done")
+            elif is_late:
+                tags.append("crit")
+            elif is_unassigned:
+                tags.append("active")
 
         tags_str = ", ".join(tags) + ", " if tags else ""
         start_str = task.start_date.strftime("%Y-%m-%d")
