@@ -202,11 +202,18 @@ class TestGanttScheduler:
         )
 
     def test_deadline_propagation(self, base_date: date) -> None:
-        """Test that deadline propagation works correctly through dependency chain."""
+        """Test that deadline propagation works correctly through long dependency chain.
+
+        This test verifies that deadlines propagate through multiple levels:
+        D has deadline -> C gets deadline -> B gets deadline
+
+        Without proper propagation, B would not have a deadline and could lose priority
+        to a competing task with an alphabetically-earlier ID.
+        """
         metadata = FeatureMapMetadata()
 
-        # Chain: cap1 -> cap2 -> story1
-        # story1 has tight deadline, which should cause all tasks to schedule ASAP
+        # Long chain: cap1 -> cap2 -> cap3 -> story1
+        # story1 has tight deadline, which should propagate back through cap3 and cap2
         cap1 = Entity(
             type="capability",
             id="cap1",
@@ -217,21 +224,39 @@ class TestGanttScheduler:
         cap2 = Entity(
             type="capability",
             id="cap2",
-            name="Middle",
-            description="Mid",
+            name="Middle Layer 1",
+            description="Mid 1",
             requires={"cap1"},
             meta={"effort": "1w", "resources": ["bob"]},
+        )
+        cap3 = Entity(
+            type="capability",
+            id="cap3",
+            name="Middle Layer 2",
+            description="Mid 2",
+            requires={"cap2"},
+            meta={"effort": "1w", "resources": ["charlie"]},
         )
         story1 = Entity(
             type="user_story",
             id="story1",
             name="Final",
             description="End",
-            requires={"cap2"},
-            meta={"effort": "1w", "resources": ["charlie"], "end_before": "2025-01-25"},
+            requires={"cap3"},
+            meta={"effort": "1w", "resources": ["dave"], "end_before": "2025-02-01"},
+        )
+        # Competing task - ID comes before "cap2" alphabetically, shares resource with cap2
+        # This ensures the test fails if cap2 doesn't get the propagated deadline
+        competing_task = Entity(
+            type="capability",
+            id="cap1_other",  # Alphabetically before "cap2"
+            name="Competing Work",
+            description="Task that competes with cap2 for bob",
+            requires={"cap1"},
+            meta={"effort": "1w", "resources": ["bob"]},
         )
 
-        entities = [cap1, cap2, story1]
+        entities = [cap1, cap2, cap3, story1, competing_task]
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
@@ -241,13 +266,30 @@ class TestGanttScheduler:
         # Verify the chain schedules correctly to meet deadline
         cap1_result = next(t for t in result.tasks if t.entity_id == "cap1")
         cap2_result = next(t for t in result.tasks if t.entity_id == "cap2")
+        cap3_result = next(t for t in result.tasks if t.entity_id == "cap3")
         story1_result = next(t for t in result.tasks if t.entity_id == "story1")
+        competing_result = next(t for t in result.tasks if t.entity_id == "cap1_other")
 
-        # All should complete before deadline
-        assert story1_result.end_date <= date(2025, 1, 25)
         # Dependencies should be respected
         assert cap2_result.start_date > cap1_result.end_date
-        assert story1_result.start_date > cap2_result.end_date
+        assert cap3_result.start_date > cap2_result.end_date
+        assert story1_result.start_date > cap3_result.end_date
+
+        # cap2 should be prioritized over competing_task when both become eligible (after cap1)
+        # This tests multi-level propagation: story1 -> cap3 -> cap2
+        # Without propagation, cap1_other (alphabetically first) would win
+        assert cap2_result.start_date == date(2025, 1, 9), (
+            f"cap2 should start immediately after cap1 finishes (wins priority via deadline propagation). "
+            f"Expected Jan 9, got {cap2_result.start_date}"
+        )
+        assert competing_result.start_date >= date(2025, 1, 16), (
+            f"cap1_other should wait until after cap2 finishes. "
+            f"Without deadline propagation, cap1_other (alphabetically first) would win. "
+            f"Expected >= Jan 16, got {competing_result.start_date}"
+        )
+
+        # All should complete before deadline
+        assert story1_result.end_date <= date(2025, 2, 1)
 
     def test_deadline_based_prioritization(self, base_date: date) -> None:
         """Test that urgent tasks are scheduled first."""
@@ -567,8 +609,18 @@ class TestGanttScheduler:
             requires={"task2"},
             meta={"effort": "1w", "resources": ["charlie"], "end_before": "2025-02-01"},
         )
+        # Competing task - shares resource with task2, becomes eligible at same time as task2
+        # by also depending on task1
+        task_other = Entity(
+            type="capability",
+            id="task_other",
+            name="Other Work",
+            description="Independent task that also depends on task1",
+            requires={"task1"},
+            meta={"effort": "1w", "resources": ["bob"]},
+        )
 
-        entities = [task1, task2, task3]
+        entities = [task1, task2, task3, task_other]
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
@@ -579,6 +631,7 @@ class TestGanttScheduler:
         task1_result = next(t for t in result.tasks if t.entity_id == "task1")
         task2_result = next(t for t in result.tasks if t.entity_id == "task2")
         task3_result = next(t for t in result.tasks if t.entity_id == "task3")
+        other_result = next(t for t in result.tasks if t.entity_id == "task_other")
 
         # task3 should meet its deadline
         assert task3_result.end_date <= date(2025, 2, 1)
@@ -589,6 +642,19 @@ class TestGanttScheduler:
 
         # Tasks should start as soon as possible (no unnecessary delays)
         assert task1_result.start_date == base_date
+
+        # task2 should be prioritized over task_other when both become eligible (after task1)
+        # Since both need bob and task2 has a propagated deadline from task3,
+        # task2 should get bob first
+        assert task2_result.start_date == date(2025, 1, 9), (
+            f"task2 should start immediately after task1 finishes (wins priority over task_other). "
+            f"Expected Jan 9, got {task2_result.start_date}"
+        )
+        assert other_result.start_date >= date(2025, 1, 16), (
+            f"task_other should wait until after task2 finishes due to deadline propagation. "
+            f"Both become eligible after task1, but task2 has propagated deadline. "
+            f"Expected >= Jan 16, got {other_result.start_date}"
+        )
 
     def test_multiple_deadlines_different_chains(self, base_date: date) -> None:
         """Test handling multiple independent deadlines."""

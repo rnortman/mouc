@@ -240,7 +240,7 @@ class ParallelScheduler:
                 latest[task_id] = task.end_before
 
         # Propagate backwards through dependency graph
-        for task_id in reversed(topo_order):
+        for task_id in topo_order:
             if task_id not in latest:
                 continue
 

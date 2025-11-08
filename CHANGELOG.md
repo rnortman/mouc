@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **Scheduler deadline propagation**: Fixed bug preventing deadlines from propagating through long dependency chains
+
 ### Added
 - **Gantt chart task styling**: Custom CSS colors for tasks via `@style_task` decorator (fill_color, stroke_color, text_color)
 - **Gantt chart clickable links**: Tasks in gantt charts can now link to markdown documentation
