@@ -11,11 +11,12 @@ Usage:
     mouc doc feature_map.yaml --style-file examples/style_example.py
 """
 
-# pyright: reportUnknownParameterType=false, reportUnknownArgumentType=false
-# pyright: reportUnknownMemberType=false, reportUnknownVariableType=false
-# pyright: reportMissingParameterType=false, reportArgumentType=false
-
 from mouc.styling import (
+    EdgeStyle,
+    Entity,
+    NodeStyle,
+    StylingContext,
+    TaskStyle,
     contrast_text_color,
     sequential_hue,
     style_edge,
@@ -30,7 +31,7 @@ from mouc.styling import (
 
 
 @style_node(priority=100)
-def color_by_timeframe(entity, context):
+def color_by_timeframe(entity: Entity, context: StylingContext) -> NodeStyle:
     """Color nodes based on their timeframe metadata."""
     timeframe = entity.meta.get("timeframe")
     if not timeframe:
@@ -50,11 +51,11 @@ def color_by_timeframe(entity, context):
 
 
 @style_node(priority=200)
-def highlight_critical_path(entity, context):
+def highlight_critical_path(entity: Entity, context: StylingContext) -> NodeStyle:
     """Add thick border to entities on critical path."""
     # Example: mark entities that are both late and enable outcomes
     enabled = context.transitively_enables(entity.id)
-    outcomes = [e for e in enabled if context.get_entity(e).type == "outcome"]
+    outcomes = [e for e in enabled if (ent := context.get_entity(e)) and ent.type == "outcome"]
 
     if outcomes and entity.meta.get("priority") == "high":
         return {
@@ -65,7 +66,9 @@ def highlight_critical_path(entity, context):
 
 
 @style_edge(priority=100)
-def style_dependency_edges(from_id, to_id, edge_type, context):
+def style_dependency_edges(
+    from_id: str, to_id: str, edge_type: str, context: StylingContext
+) -> EdgeStyle:
     """Style edges based on dependency type and entity types."""
     from_entity = context.get_entity(from_id)
     to_entity = context.get_entity(to_id)
@@ -94,7 +97,7 @@ def style_dependency_edges(from_id, to_id, edge_type, context):
 
 
 @style_task(priority=100)
-def style_by_status_and_priority(entity, context):
+def style_by_status_and_priority(entity: Entity, context: StylingContext) -> TaskStyle:
     """Assign Mermaid task tags based on status and priority.
 
     Mermaid gantt supports these tags:
@@ -103,7 +106,7 @@ def style_by_status_and_priority(entity, context):
     - active: In-progress tasks (blue)
     - milestone: Single-point events
     """
-    tags = []
+    tags: list[str] = []
 
     # Check completion status
     status = entity.meta.get("status")
@@ -127,12 +130,12 @@ def style_by_status_and_priority(entity, context):
 
 
 @style_task(priority=200)
-def highlight_blocked_tasks(entity, context):
+def highlight_blocked_tasks(entity: Entity, context: StylingContext) -> TaskStyle:
     """Mark tasks that are blocking outcomes as critical."""
     # Find all outcomes this entity transitively enables
     enabled = context.transitively_enables(entity.id)
     enabled_outcomes = [
-        e for e in enabled if context.get_entity(e) and context.get_entity(e).type == "outcome"
+        e for e in enabled if (ent := context.get_entity(e)) and ent.type == "outcome"
     ]
 
     # If this entity blocks outcomes, mark as critical
@@ -143,7 +146,7 @@ def highlight_blocked_tasks(entity, context):
 
 
 @style_task(priority=300)
-def color_by_team(entity, context):
+def color_by_team(entity: Entity, context: StylingContext) -> TaskStyle:
     """Color tasks by team ownership using custom CSS colors."""
     team = entity.meta.get("team")
     colors = {"platform": "#4287f5", "backend": "#42f554", "frontend": "#f54242"}
@@ -160,7 +163,7 @@ def color_by_team(entity, context):
 
 
 @style_label(priority=100)
-def show_timeframe_in_label(entity, context):
+def show_timeframe_in_label(entity: Entity, context: StylingContext) -> str | None:
     """Show timeframe in entity label."""
     timeframe = entity.meta.get("timeframe")
     if timeframe:
@@ -169,7 +172,7 @@ def show_timeframe_in_label(entity, context):
 
 
 @style_label(priority=200)
-def show_blocking_outcomes(entity, context):
+def show_blocking_outcomes(entity: Entity, context: StylingContext) -> str | None:
     """For capabilities, show which outcomes they block."""
     if entity.type != "capability":
         return None
@@ -177,9 +180,7 @@ def show_blocking_outcomes(entity, context):
     # Find all outcomes this capability transitively enables
     enabled = context.transitively_enables(entity.id)
     enabled_outcomes = [
-        context.get_entity(e)
-        for e in enabled
-        if context.get_entity(e) and context.get_entity(e).type == "outcome"
+        ent for e in enabled if (ent := context.get_entity(e)) and ent.type == "outcome"
     ]
 
     if enabled_outcomes:

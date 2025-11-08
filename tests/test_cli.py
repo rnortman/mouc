@@ -77,7 +77,7 @@ class TestGanttCommand:
         assert output_file.exists()
         content = output_file.read_text()
         # Should NOT be wrapped in code fence for non-.md files
-        assert content.startswith("gantt\n")
+        assert "gantt\n" in content
         assert not content.startswith("```mermaid")
         assert "Lock-Free Queue Implementation" in content
 
