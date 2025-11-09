@@ -7,19 +7,23 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
 from .markdown import make_anchor
 from .resources import UNASSIGNED_RESOURCE
 from .scheduler import ParallelScheduler, Task, parse_timeframe
+from .scheduler import ScheduledTask as SchedulerTask
 from .styling import StylingContext, apply_task_styles, create_styling_context
 from .unified_config import load_unified_config
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
     from .resources import ResourceConfig
+
+# Constants for date calculations
+OCTOBER = 10  # Month number for October, used for quarterly rollover
 
 
 class GanttMetadata(BaseModel):
@@ -126,6 +130,98 @@ class GanttScheduler:
         """Extract and validate gantt metadata from entity."""
         return GanttMetadata(**entity.meta)
 
+    def _create_fixed_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
+        """Create a Task object for a fixed-date entity."""
+        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        start, end = self._schedule_fixed_task(entity)
+
+        return Task(
+            id=entity.id,
+            duration_days=(end - start).days,
+            resources=resources,
+            dependencies=list(entity.requires),
+            start_on=start,
+            end_on=end,
+            resource_spec=resource_spec,
+        )
+
+    def _extract_constraints(self, gantt_meta: GanttMetadata) -> tuple[date | None, date | None]:
+        """Extract start_after and end_before constraints from metadata.
+
+        Returns:
+            Tuple of (start_after, end_before)
+        """
+        start_after = None
+        end_before = None
+
+        if gantt_meta.start_after:
+            start_after = self._parse_date(gantt_meta.start_after)
+        elif gantt_meta.timeframe:
+            timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
+            if timeframe_start:
+                start_after = timeframe_start
+
+        if gantt_meta.end_before:
+            end_before = self._parse_date(gantt_meta.end_before)
+        elif gantt_meta.timeframe:
+            _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
+            if timeframe_end:
+                end_before = timeframe_end
+
+        return start_after, end_before
+
+    def _create_regular_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
+        """Create a Task object for a regular (non-fixed) entity."""
+        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        duration = self._calculate_duration(entity)
+        start_after, end_before = self._extract_constraints(gantt_meta)
+
+        return Task(
+            id=entity.id,
+            duration_days=duration,
+            resources=resources,
+            dependencies=list(entity.requires),
+            start_after=start_after,
+            end_before=end_before,
+            resource_spec=resource_spec,
+        )
+
+    def _convert_scheduler_results(
+        self, scheduled_tasks: list[SchedulerTask], result: ScheduleResult
+    ) -> None:
+        """Convert scheduler results to ScheduledTask format."""
+        for scheduled_task in scheduled_tasks:
+            result.tasks.append(
+                ScheduledTask(
+                    entity_id=scheduled_task.task_id,
+                    start_date=scheduled_task.start_date,
+                    end_date=scheduled_task.end_date,
+                    duration_days=scheduled_task.duration_days,
+                    resources=scheduled_task.resources,
+                )
+            )
+
+    def _check_deadline_violations(
+        self, result: ScheduleResult, entities_by_id: dict[str, Entity]
+    ) -> None:
+        """Check for deadline violations and add warnings."""
+        for task in result.tasks:
+            entity = entities_by_id[task.entity_id]
+            gantt_meta = self._get_gantt_meta(entity)
+
+            deadline = None
+            if gantt_meta.end_before:
+                deadline = self._parse_date(gantt_meta.end_before)
+            elif gantt_meta.timeframe:
+                _, deadline = parse_timeframe(gantt_meta.timeframe)
+
+            if deadline and task.end_date > deadline:
+                days_late = (task.end_date - deadline).days
+                result.warnings.append(
+                    f"Entity '{task.entity_id}' finishes {days_late} days after required date "
+                    f"({task.end_date} vs {deadline})"
+                )
+
     def schedule(self) -> ScheduleResult:
         """Schedule all entities respecting dependencies, resources, and deadlines."""
         result = ScheduleResult()
@@ -139,7 +235,6 @@ class GanttScheduler:
 
         for entity in self.feature_map.entities:
             gantt_meta = self._get_gantt_meta(entity)
-            resources, resource_spec = self._parse_resources(gantt_meta.resources)
 
             # Check if task is marked done without dates
             if (
@@ -156,48 +251,12 @@ class GanttScheduler:
 
             # Handle fixed tasks (with explicit start_date or end_date)
             if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
-                start, end = self._schedule_fixed_task(entity)
-
-                task = Task(
-                    id=entity.id,
-                    duration_days=(end - start).days,
-                    resources=resources,
-                    dependencies=list(entity.requires),
-                    start_on=start,
-                    end_on=end,
-                    resource_spec=resource_spec,
-                )
-                tasks_to_schedule.append(task)
+                task = self._create_fixed_task(entity, gantt_meta)
             else:
                 # Regular task: calculate duration and constraints
-                duration = self._calculate_duration(entity)
-                start_after = None
-                end_before = None
+                task = self._create_regular_task(entity, gantt_meta)
 
-                if gantt_meta.start_after:
-                    start_after = self._parse_date(gantt_meta.start_after)
-                elif gantt_meta.timeframe:
-                    timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
-                    if timeframe_start:
-                        start_after = timeframe_start
-
-                if gantt_meta.end_before:
-                    end_before = self._parse_date(gantt_meta.end_before)
-                elif gantt_meta.timeframe:
-                    _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
-                    if timeframe_end:
-                        end_before = timeframe_end
-
-                task = Task(
-                    id=entity.id,
-                    duration_days=duration,
-                    resources=resources,
-                    dependencies=list(entity.requires),
-                    start_after=start_after,
-                    end_before=end_before,
-                    resource_spec=resource_spec,
-                )
-                tasks_to_schedule.append(task)
+            tasks_to_schedule.append(task)
 
         # Run the scheduler
         try:
@@ -210,34 +269,10 @@ class GanttScheduler:
             scheduled_tasks = scheduler.schedule()
 
             # Convert scheduler results to our format
-            for scheduled_task in scheduled_tasks:
-                result.tasks.append(
-                    ScheduledTask(
-                        entity_id=scheduled_task.task_id,
-                        start_date=scheduled_task.start_date,
-                        end_date=scheduled_task.end_date,
-                        duration_days=scheduled_task.duration_days,
-                        resources=scheduled_task.resources,
-                    )
-                )
+            self._convert_scheduler_results(scheduled_tasks, result)
 
             # Check for deadline violations
-            for task in result.tasks:
-                entity = entities_by_id[task.entity_id]
-                gantt_meta = self._get_gantt_meta(entity)
-
-                deadline = None
-                if gantt_meta.end_before:
-                    deadline = self._parse_date(gantt_meta.end_before)
-                elif gantt_meta.timeframe:
-                    _, deadline = parse_timeframe(gantt_meta.timeframe)
-
-                if deadline and task.end_date > deadline:
-                    days_late = (task.end_date - deadline).days
-                    result.warnings.append(
-                        f"Entity '{task.entity_id}' finishes {days_late} days after required date "
-                        f"({task.end_date} vs {deadline})"
-                    )
+            self._check_deadline_violations(result, entities_by_id)
 
         except ValueError as e:
             result.warnings.append(str(e))
@@ -408,9 +443,124 @@ class GanttScheduler:
         except ValueError:
             return None
 
-    def generate_mermaid(
+    def _build_mermaid_frontmatter(self, compact: bool, theme_css: str) -> list[str]:
+        """Build YAML frontmatter for Mermaid chart."""
+        if not (compact or theme_css):
+            return []
+
+        lines = ["---"]
+        if compact:
+            lines.append("displayMode: compact")
+        if theme_css:
+            lines.append("config:")
+            lines.append('    themeCSS: "')
+            for css_line in theme_css.split("\n"):
+                if css_line.strip():
+                    lines.append(f"        {css_line}  \\n")
+            lines.append('    "')
+        lines.append("---")
+        return lines
+
+    def _build_mermaid_header(
+        self, title: str, tick_interval: str | None, axis_format: str | None
+    ) -> list[str]:
+        """Build Mermaid chart header."""
+        current_date_str = self.current_date.strftime("%Y-%m-%d")
+
+        lines = [
+            "gantt",
+            f"    title {title}",
+            "    dateFormat YYYY-MM-DD",
+        ]
+
+        if tick_interval:
+            lines.append(f"    tickInterval {tick_interval}")
+
+        if axis_format:
+            lines.append(f"    axisFormat {axis_format}")
+
+        lines.append(f"    todayMarker {current_date_str}")
+        return lines
+
+    def _group_tasks_by_type(
+        self, result: ScheduleResult, entities_by_id: dict[str, Entity]
+    ) -> dict[str, list[ScheduledTask]]:
+        """Group tasks by entity type."""
+        tasks_by_type: dict[str, list[ScheduledTask]] = {}
+
+        for task in result.tasks:
+            entity = entities_by_id[task.entity_id]
+            entity_type = entity.type
+            if entity_type not in tasks_by_type:
+                tasks_by_type[entity_type] = []
+            tasks_by_type[entity_type].append(task)
+
+        return tasks_by_type
+
+    def _group_tasks_by_resource(self, result: ScheduleResult) -> dict[str, list[ScheduledTask]]:
+        """Group tasks by resource."""
+        tasks_by_resource: dict[str, list[ScheduledTask]] = {}
+
+        for task in result.tasks:
+            if not task.resources:
+                if "unassigned" not in tasks_by_resource:
+                    tasks_by_resource["unassigned"] = []
+                tasks_by_resource["unassigned"].append(task)
+            else:
+                for resource in task.resources:
+                    if resource not in tasks_by_resource:
+                        tasks_by_resource[resource] = []
+                    tasks_by_resource[resource].append(task)
+
+        return tasks_by_resource
+
+    def _add_tasks_by_type(
+        self,
+        lines: list[str],
+        result: ScheduleResult,
+        entities_by_id: dict[str, Entity],
+        markdown_base_url: str | None,
+    ) -> None:
+        """Add tasks grouped by type to Mermaid lines."""
+        tasks_by_type = self._group_tasks_by_type(result, entities_by_id)
+
+        type_order = {"capability": 0, "user_story": 1, "outcome": 2}
+        sorted_types = sorted(tasks_by_type.keys(), key=lambda t: type_order.get(t, 99))
+
+        for entity_type in sorted_types:
+            section_name = entity_type.replace("_", " ").title()
+            lines.append(f"    section {section_name}")
+
+            tasks = tasks_by_type[entity_type]
+            for task in tasks:
+                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
+
+    def _add_tasks_by_resource(
+        self,
+        lines: list[str],
+        result: ScheduleResult,
+        entities_by_id: dict[str, Entity],
+        markdown_base_url: str | None,
+    ) -> None:
+        """Add tasks grouped by resource to Mermaid lines."""
+        tasks_by_resource = self._group_tasks_by_resource(result)
+
+        sorted_resources = sorted(tasks_by_resource.keys())
+        if "unassigned" in sorted_resources:
+            sorted_resources.remove("unassigned")
+            sorted_resources.append("unassigned")
+
+        for resource in sorted_resources:
+            lines.append(f"    section {resource}")
+
+            tasks = tasks_by_resource[resource]
+            for task in tasks:
+                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
+
+    def generate_mermaid(  # noqa: PLR0913 - Gantt chart generation needs many formatting options
         self,
         result: ScheduleResult,
+        *,
         title: str = "Project Schedule",
         group_by: str = "type",
         tick_interval: str | None = None,
@@ -435,46 +585,16 @@ class GanttScheduler:
         Returns:
             Mermaid gantt chart syntax as a string
         """
-        # Set todayMarker to current_date so the red line appears at the right position
-        current_date_str = self.current_date.strftime("%Y-%m-%d")
-
         entities_by_id = {e.id: e for e in self.feature_map.entities}
-
-        # Collect CSS styles for all tasks
         theme_css = self._generate_theme_css(result.tasks, entities_by_id)
 
         lines: list[str] = []
 
         # Add YAML frontmatter for compact mode and/or themeCSS
-        if compact or theme_css:
-            lines.append("---")
-            if compact:
-                lines.append("displayMode: compact")
-            if theme_css:
-                lines.append("config:")
-                # Use multiline string format for themeCSS
-                lines.append('    themeCSS: "')
-                for css_line in theme_css.split("\n"):
-                    if css_line.strip():
-                        lines.append(f"        {css_line}  \\n")
-                lines.append('    "')
-            lines.append("---")
+        lines.extend(self._build_mermaid_frontmatter(compact, theme_css))
 
-        lines.extend(
-            [
-                "gantt",
-                f"    title {title}",
-                "    dateFormat YYYY-MM-DD",
-            ]
-        )
-
-        if tick_interval:
-            lines.append(f"    tickInterval {tick_interval}")
-
-        if axis_format:
-            lines.append(f"    axisFormat {axis_format}")
-
-        lines.append(f"    todayMarker {current_date_str}")
+        # Add header
+        lines.extend(self._build_mermaid_header(title, tick_interval, axis_format))
         lines.append("")
 
         # Add vertical dividers if requested
@@ -484,55 +604,11 @@ class GanttScheduler:
             if divider_lines:
                 lines.append("")
 
+        # Add tasks grouped by type or resource
         if group_by == "type":
-            tasks_by_type: dict[str, list[ScheduledTask]] = {}
-
-            for task in result.tasks:
-                entity = entities_by_id[task.entity_id]
-                entity_type = entity.type
-                if entity_type not in tasks_by_type:
-                    tasks_by_type[entity_type] = []
-                tasks_by_type[entity_type].append(task)
-
-            type_order = {"capability": 0, "user_story": 1, "outcome": 2}
-            sorted_types = sorted(
-                tasks_by_type.keys(),
-                key=lambda t: type_order.get(t, 99),
-            )
-
-            for entity_type in sorted_types:
-                section_name = entity_type.replace("_", " ").title()
-                lines.append(f"    section {section_name}")
-
-                tasks = tasks_by_type[entity_type]
-                for task in tasks:
-                    self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
-
+            self._add_tasks_by_type(lines, result, entities_by_id, markdown_base_url)
         elif group_by == "resource":
-            tasks_by_resource: dict[str, list[ScheduledTask]] = {}
-
-            for task in result.tasks:
-                if not task.resources:
-                    if "unassigned" not in tasks_by_resource:
-                        tasks_by_resource["unassigned"] = []
-                    tasks_by_resource["unassigned"].append(task)
-                else:
-                    for resource in task.resources:
-                        if resource not in tasks_by_resource:
-                            tasks_by_resource[resource] = []
-                        tasks_by_resource[resource].append(task)
-
-            sorted_resources = sorted(tasks_by_resource.keys())
-            if "unassigned" in sorted_resources:
-                sorted_resources.remove("unassigned")
-                sorted_resources.append("unassigned")
-
-            for resource in sorted_resources:
-                lines.append(f"    section {resource}")
-
-                tasks = tasks_by_resource[resource]
-                for task in tasks:
-                    self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
+            self._add_tasks_by_resource(lines, result, entities_by_id, markdown_base_url)
 
         return "\n".join(lines)
 
@@ -576,6 +652,62 @@ class GanttScheduler:
 
         return "\n".join(css_rules)
 
+    def _generate_quarter_dividers(self, min_date: date, max_date: date) -> list[str]:
+        """Generate quarterly vertical dividers."""
+        dividers: list[str] = []
+        current = date(min_date.year, 1, 1)
+
+        while current <= max_date:
+            if current >= min_date:
+                quarter = (current.month - 1) // 3 + 1
+                label = f"Q{quarter} {current.year}"
+                vert_id = f"q{quarter}_{current.year}"
+                dividers.append(
+                    f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                )
+            if current.month == OCTOBER:
+                current = date(current.year + 1, 1, 1)
+            else:
+                current = date(current.year, current.month + 3, 1)
+
+        return dividers
+
+    def _generate_halfyear_dividers(self, min_date: date, max_date: date) -> list[str]:
+        """Generate half-year vertical dividers."""
+        dividers: list[str] = []
+        current = date(min_date.year, 1, 1)
+
+        while current <= max_date:
+            if current >= min_date:
+                half = 1 if current.month == 1 else 2
+                label = f"H{half} {current.year}"
+                vert_id = f"h{half}_{current.year}"
+                dividers.append(
+                    f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                )
+            if current.month == 1:
+                current = date(current.year, 7, 1)
+            else:
+                current = date(current.year + 1, 1, 1)
+
+        return dividers
+
+    def _generate_year_dividers(self, min_date: date, max_date: date) -> list[str]:
+        """Generate yearly vertical dividers."""
+        dividers: list[str] = []
+        current = date(min_date.year, 1, 1)
+
+        while current <= max_date:
+            if current >= min_date:
+                label = str(current.year)
+                vert_id = f"y{current.year}"
+                dividers.append(
+                    f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
+                )
+            current = date(current.year + 1, 1, 1)
+
+        return dividers
+
     def _generate_vertical_dividers(
         self, tasks: list[ScheduledTask], divider_type: str
     ) -> list[str]:
@@ -595,50 +727,70 @@ class GanttScheduler:
         min_date = min(task.start_date for task in tasks)
         max_date = max(task.end_date for task in tasks)
 
-        dividers: list[str] = []
-
         if divider_type == "quarter":
-            current = date(min_date.year, 1, 1)
-            while current <= max_date:
-                if current >= min_date:
-                    quarter = (current.month - 1) // 3 + 1
-                    label = f"Q{quarter} {current.year}"
-                    vert_id = f"q{quarter}_{current.year}"
-                    dividers.append(
-                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
-                    )
-                if current.month == 10:
-                    current = date(current.year + 1, 1, 1)
-                else:
-                    current = date(current.year, current.month + 3, 1)
+            return self._generate_quarter_dividers(min_date, max_date)
+        if divider_type == "halfyear":
+            return self._generate_halfyear_dividers(min_date, max_date)
+        if divider_type == "year":
+            return self._generate_year_dividers(min_date, max_date)
 
-        elif divider_type == "halfyear":
-            current = date(min_date.year, 1, 1)
-            while current <= max_date:
-                if current >= min_date:
-                    half = 1 if current.month == 1 else 2
-                    label = f"H{half} {current.year}"
-                    vert_id = f"h{half}_{current.year}"
-                    dividers.append(
-                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
-                    )
-                if current.month == 1:
-                    current = date(current.year, 7, 1)
-                else:
-                    current = date(current.year + 1, 1, 1)
+        return []
 
-        elif divider_type == "year":
-            current = date(min_date.year, 1, 1)
-            while current <= max_date:
-                if current >= min_date:
-                    label = str(current.year)
-                    vert_id = f"y{current.year}"
-                    dividers.append(
-                        f"    {label} : vert, {vert_id}, {current.strftime('%Y-%m-%d')}, 0d"
-                    )
-                current = date(current.year + 1, 1, 1)
+    def _get_task_deadline(self, gantt_meta: GanttMetadata) -> date | None:
+        """Get task deadline from metadata."""
+        if gantt_meta.end_before is not None:
+            return self._parse_date(gantt_meta.end_before)
+        if gantt_meta.timeframe is not None:
+            _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+            return deadline_date
+        return None
 
-        return dividers
+    def _add_deadline_milestone(
+        self, lines: list[str], entity: Entity, task: ScheduledTask, deadline_date: date
+    ) -> None:
+        """Add deadline milestone if task is late."""
+        if task.end_date > deadline_date:
+            milestone_label = f"{entity.name} Deadline"
+            deadline_str = deadline_date.strftime("%Y-%m-%d")
+            lines.append(
+                f"    {milestone_label} :milestone, crit, {task.entity_id}_deadline, "
+                f"{deadline_str}, 0d"
+            )
+
+    def _build_task_label(self, entity: Entity, task: ScheduledTask) -> str:
+        """Build task label with resource information."""
+        label = entity.name
+        is_unassigned = task.resources == ["unassigned"] or not task.resources
+
+        if task.resources:
+            if is_unassigned:
+                label += " (unassigned)"
+            else:
+                label += f" ({', '.join(task.resources)})"
+
+        return label
+
+    def _get_task_tags(
+        self,
+        gantt_meta: GanttMetadata,
+        task: ScheduledTask,
+        task_style: dict[str, Any],
+        is_late: bool,
+    ) -> list[str]:
+        """Get task tags from style or default logic."""
+        if "tags" in task_style:
+            return task_style["tags"]
+
+        # Default tag behavior (backward compatibility)
+        tags: list[str] = []
+        if gantt_meta.status == "done":
+            tags.append("done")
+        elif is_late:
+            tags.append("crit")
+        elif task.resources == ["unassigned"] or not task.resources:
+            tags.append("active")
+
+        return tags
 
     def _add_task_to_mermaid(
         self,
@@ -659,52 +811,20 @@ class GanttScheduler:
         entity = entities_by_id[task.entity_id]
         gantt_meta = self._get_gantt_meta(entity)
 
-        # Check if task has a deadline (explicit or from timeframe) and if it's violated
-        is_late = False
-        deadline_date = None
+        # Check if task has a deadline and if it's violated
+        deadline_date = self._get_task_deadline(gantt_meta)
+        is_late = deadline_date is not None and task.end_date > deadline_date
 
-        if gantt_meta.end_before is not None:
-            deadline_date = self._parse_date(gantt_meta.end_before)
-        elif gantt_meta.timeframe is not None:
-            _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+        # Create milestone if task is late
+        if deadline_date is not None and is_late:
+            self._add_deadline_milestone(lines, entity, task, deadline_date)
 
-        # Check if task is late and create milestone if so
-        if deadline_date is not None:
-            is_late = task.end_date > deadline_date
-            if is_late:
-                milestone_label = f"{entity.name} Deadline"
-                deadline_str = deadline_date.strftime("%Y-%m-%d")
-                lines.append(
-                    f"    {milestone_label} :milestone, crit, {task.entity_id}_deadline, "
-                    f"{deadline_str}, 0d"
-                )
+        # Build task label with resources
+        label = self._build_task_label(entity, task)
 
-        label = entity.name
-
-        is_unassigned = task.resources == ["unassigned"] or not task.resources
-
-        if task.resources:
-            if is_unassigned:
-                label += " (unassigned)"
-            else:
-                label += f" ({', '.join(task.resources)})"
-
-        # Apply task styling from registered stylers
+        # Apply task styling and get tags
         task_style = apply_task_styles(entity, self.styling_context)
-
-        # Use styled tags if provided, otherwise fall back to default logic
-        tags: list[str]
-        if "tags" in task_style:
-            tags = task_style["tags"]
-        else:
-            # Default tag behavior (backward compatibility)
-            tags = []
-            if gantt_meta.status == "done":
-                tags.append("done")
-            elif is_late:
-                tags.append("crit")
-            elif is_unassigned:
-                tags.append("active")
+        tags = self._get_task_tags(gantt_meta, task, task_style, is_late)
 
         tags_str = ", ".join(tags) + ", " if tags else ""
         start_str = task.start_date.strftime("%Y-%m-%d")

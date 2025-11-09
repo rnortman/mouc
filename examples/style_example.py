@@ -183,10 +183,11 @@ def show_blocking_outcomes(entity: Entity, context: StylingContext) -> str | Non
         ent for e in enabled if (ent := context.get_entity(e)) and ent.type == "outcome"
     ]
 
+    max_outcomes_to_show = 3
     if enabled_outcomes:
-        outcome_names = ", ".join(o.name for o in enabled_outcomes[:3])
-        if len(enabled_outcomes) > 3:
-            outcome_names += f", +{len(enabled_outcomes) - 3} more"
+        outcome_names = ", ".join(o.name for o in enabled_outcomes[:max_outcomes_to_show])
+        if len(enabled_outcomes) > max_outcomes_to_show:
+            outcome_names += f", +{len(enabled_outcomes) - max_outcomes_to_show} more"
         return f"[Capability → {outcome_names}]"
 
     return None

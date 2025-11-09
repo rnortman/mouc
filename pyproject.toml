@@ -82,8 +82,14 @@ select = [
     "SIM",  # flake8-simplify
     "PTH",  # flake8-use-pathlib
     "PLC",  # Pylint Convention
+    "PLE",  # Pylint Error
+    "PLR",  # Pylint Refactor
+    "PLW",  # Pylint Warning
 ]
 ignore = ["E501"]  # line too long - handled by formatter
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["PLR2004"]  # Allow magic numbers in test assertions
 
 [tool.pyright]
 typeCheckingMode = "strict"

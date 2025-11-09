@@ -10,6 +10,13 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, overload
 if TYPE_CHECKING:
     from .models import FeatureMap
 
+# Constants for color calculations
+HEX_COLOR_SHORT_LENGTH = 3  # Length of shorthand hex colors (#RGB)
+HEX_COLOR_FULL_LENGTH = 6  # Length of full hex colors (#RRGGBB)
+WCAG_LUMINANCE_THRESHOLD = 0.03928  # WCAG luminance calculation threshold
+WCAG_CONTRAST_MIDPOINT = 0.5  # Luminance midpoint for contrast determination
+HSL_LIGHTNESS_MIDPOINT = 0.5  # HSL lightness midpoint for color conversion
+
 
 # ============================================================================
 # Public Protocols
@@ -549,10 +556,10 @@ def contrast_text_color(bg_color: str) -> str:
         return "#000000"  # Invalid format, default to black
 
     hex_color = bg_color.lstrip("#")
-    if len(hex_color) == 3:
+    if len(hex_color) == HEX_COLOR_SHORT_LENGTH:
         # Expand shorthand hex (#RGB -> #RRGGBB)
         hex_color = "".join(c * 2 for c in hex_color)
-    elif len(hex_color) != 6:
+    elif len(hex_color) != HEX_COLOR_FULL_LENGTH:
         return "#000000"  # Invalid hex length
 
     try:
@@ -564,7 +571,7 @@ def contrast_text_color(bg_color: str) -> str:
 
     # Calculate relative luminance using WCAG formula
     def luminance_component(c: float) -> float:
-        return c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4
+        return c / 12.92 if c <= WCAG_LUMINANCE_THRESHOLD else ((c + 0.055) / 1.055) ** 2.4
 
     luminance = (
         0.2126 * luminance_component(r)
@@ -573,7 +580,7 @@ def contrast_text_color(bg_color: str) -> str:
     )
 
     # Use white text on dark backgrounds, black on light
-    return "#ffffff" if luminance < 0.5 else "#000000"
+    return "#ffffff" if luminance < WCAG_CONTRAST_MIDPOINT else "#000000"
 
 
 # ============================================================================
@@ -613,7 +620,11 @@ def _hsl_to_hex(h: float, s: float, lightness: float) -> str:
                 return p + (q - p) * (2 / 3 - t) * 6
             return p
 
-        q = lightness * (1 + s) if lightness < 0.5 else lightness + s - lightness * s
+        q = (
+            lightness * (1 + s)
+            if lightness < HSL_LIGHTNESS_MIDPOINT
+            else lightness + s - lightness * s
+        )
         p = 2 * lightness - q
         r = hue_to_rgb(p, q, h + 1 / 3)
         g = hue_to_rgb(p, q, h)

@@ -19,6 +19,9 @@ logger = logging.getLogger(__name__)
 # Load environment variables from .env file
 load_dotenv()
 
+# Constants for timestamp parsing
+MIN_TIMESTAMP_LENGTH_WITH_TZ = 6  # Minimum length for timestamp with timezone offset
+
 
 class JiraError(MoucError):
     """Jira-specific error."""
@@ -163,7 +166,7 @@ class JiraClient:
                 # Python's fromisoformat needs colons in timezone offset
                 # Convert -0500 to -05:00
                 if (
-                    len(timestamp_str) > 6
+                    len(timestamp_str) > MIN_TIMESTAMP_LENGTH_WITH_TZ
                     and timestamp_str[-5] in ("+", "-")
                     and ":" not in timestamp_str[-5:]
                 ):
@@ -221,7 +224,7 @@ class JiraClient:
         self._field_name_to_id = self._fetch_field_mappings()
         return self._field_name_to_id
 
-    def get_custom_field_value(self, issue_data: JiraIssueData, field_name: str) -> Any:
+    def get_custom_field_value(self, issue_data: JiraIssueData, field_name: str) -> Any:  # noqa: PLR0911 - Field extraction requires checking multiple field types
         """Get value of a custom field by display name.
 
         Args:

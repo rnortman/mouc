@@ -320,7 +320,7 @@ class MarkdownGenerator:
 
         return rows
 
-    def _format_entity(self, entity: Entity) -> list[str]:
+    def _format_entity(self, entity: Entity) -> list[str]:  # noqa: PLR0912 - Entity formatting handles multiple optional fields and metadata
         """Format a single entity."""
         lines = [f"### {entity.name}", ""]
 

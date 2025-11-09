@@ -12,8 +12,13 @@ if TYPE_CHECKING:
     from mouc.models import Entity, FeatureMap
     from mouc.resources import ResourceConfig
 
+# Constants for date calculations
+MONTHS_PER_YEAR = 12  # Number of months in a year
+DECEMBER = 12  # Month number for December
+MAX_ISO_WEEK = 53  # Maximum ISO week number in a year
 
-def parse_timeframe(
+
+def parse_timeframe(  # noqa: PLR0911, PLR0912, PLR0915 - Timeframe parser handles multiple date formats and patterns
     timeframe_str: str, fiscal_year_start: int = 1
 ) -> tuple[date | None, date | None]:
     """Parse timeframe string to (start_date, end_date).
@@ -49,12 +54,12 @@ def parse_timeframe(
         # End is last day of third month in quarter
         end_month = quarter_start_month + 2
         end_year = quarter_start_year
-        if end_month > 12:
+        if end_month > MONTHS_PER_YEAR:
             end_month -= 12
             end_year += 1
 
         # Get last day of month
-        if end_month == 12:
+        if end_month == DECEMBER:
             end_date = date(end_year, 12, 31)
         else:
             end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
@@ -67,7 +72,7 @@ def parse_timeframe(
         year = int(week_match.group(1))
         week = int(week_match.group(2))
 
-        if week < 1 or week > 53:
+        if week < 1 or week > MAX_ISO_WEEK:
             return (None, None)
 
         # ISO week date: get Monday of the week
@@ -94,12 +99,12 @@ def parse_timeframe(
         # End is last day of sixth month in half
         end_month = half_start_month + 5
         end_year = half_start_year
-        if end_month > 12:
+        if end_month > MONTHS_PER_YEAR:
             end_month -= 12
             end_year += 1
 
         # Get last day of month
-        if end_month == 12:
+        if end_month == DECEMBER:
             end_date = date(end_year, 12, 31)
         else:
             end_date = date(end_year, end_month + 1, 1) - timedelta(days=1)
@@ -112,13 +117,13 @@ def parse_timeframe(
         year = int(month_match.group(1))
         month = int(month_match.group(2))
 
-        if month < 1 or month > 12:
+        if month < 1 or month > MONTHS_PER_YEAR:
             return (None, None)
 
         start_date = date(year, month, 1)
 
         # Get last day of month
-        if month == 12:
+        if month == DECEMBER:
             end_date = date(year, 12, 31)
         else:
             end_date = date(year, month + 1, 1) - timedelta(days=1)
@@ -740,7 +745,7 @@ class ParallelScheduler:
 
         return latest
 
-    def _schedule_forward(
+    def _schedule_forward(  # noqa: PLR0912, PLR0915 - Scheduling algorithm requires complex dependency and resource management
         self, latest_dates: dict[str, date], fixed_tasks: list[ScheduledTask]
     ) -> list[ScheduledTask]:
         """Schedule tasks using forward pass with Parallel SGS.

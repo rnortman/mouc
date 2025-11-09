@@ -25,6 +25,12 @@ from .unified_config import load_unified_config
 # Create Jira sub-app
 jira_app = typer.Typer(help="Jira integration commands")
 
+# Constants for display and formatting
+VERBOSITY_HIGH = 3  # Verbosity level for detailed output
+VERBOSITY_MEDIUM = 2  # Verbosity level for moderate output
+MAX_VALUE_DISPLAY_LENGTH = 100  # Maximum characters to display before truncating
+MAX_ENTITIES_TO_SHOW = 5  # Maximum entities to show in warning messages
+
 
 def _load_jira_config_from_path(config_path: Path) -> Any:
     """Load Jira config from unified config file.
@@ -103,7 +109,7 @@ def jira_validate(
 
 
 @jira_app.command("fetch")
-def jira_fetch(
+def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field types and scenarios
     ticket: Annotated[str, typer.Argument(help="Jira ticket ID (e.g., PROJ-123)")],
     config: Annotated[
         Path | None,
@@ -142,7 +148,7 @@ def jira_fetch(
         issue_data = client.fetch_issue(ticket)
 
         # Display results based on verbosity
-        if verbosity >= 3:
+        if verbosity >= VERBOSITY_HIGH:
             # Level 3: Dump raw Jira API response
             typer.echo(f"\n{'=' * 60}")
             typer.echo(f"RAW JIRA API RESPONSE for {ticket}")
@@ -179,13 +185,13 @@ def jira_fetch(
                 typer.echo("\nNo status transitions found in changelog")
 
             # Show all fields at level 2+
-            if verbosity >= 2:
+            if verbosity >= VERBOSITY_MEDIUM:
                 typer.echo("\nAll Fields:")
                 for field_name, value in sorted(issue_data.fields.items()):
                     if value is not None:
                         # Truncate long values
                         value_str = str(value)
-                        if len(value_str) > 100:
+                        if len(value_str) > MAX_VALUE_DISPLAY_LENGTH:
                             value_str = value_str[:100] + "..."
                         typer.echo(f"  {field_name}: {value_str}")
 
@@ -300,10 +306,11 @@ def _update_meta_in_place(yaml_entity: Any, new_meta: dict[str, Any]) -> None:
 
 
 @jira_app.command("sync")
-def jira_sync(
+def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multiple sync scenarios and options
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
+    *,
     config: Annotated[
         Path | None,
         typer.Option(
@@ -583,8 +590,12 @@ def write_feature_map(file_path: Path, feature_map: Any) -> None:
     if entities_not_found:
         typer.echo(
             f"Warning: {len(entities_not_found)} entities not found in YAML: "
-            f"{', '.join(entities_not_found[:5])}"
-            + (f" and {len(entities_not_found) - 5} more" if len(entities_not_found) > 5 else ""),
+            f"{', '.join(entities_not_found[:MAX_ENTITIES_TO_SHOW])}"
+            + (
+                f" and {len(entities_not_found) - MAX_ENTITIES_TO_SHOW} more"
+                if len(entities_not_found) > MAX_ENTITIES_TO_SHOW
+                else ""
+            ),
             err=True,
         )
 
@@ -895,7 +906,7 @@ def jira_ignore_value(
 
 
 @jira_app.command("show-overrides")
-def jira_show_overrides(
+def jira_show_overrides(  # noqa: PLR0912 - CLI command displaying multiple override types
     entity_id: Annotated[str | None, typer.Argument(help="Entity ID (optional)")] = None,
     file: Annotated[
         Path,
