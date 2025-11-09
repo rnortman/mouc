@@ -334,6 +334,74 @@ timeframes = context.collect_metadata_values('timeframe')
 # Returns: ['Q1 2025', 'Q2 2025', 'Q3 2025']
 ```
 
+### Entity Properties
+
+#### Schedule Annotations
+
+When using `mouc doc --schedule`, entities are populated with schedule annotations from the scheduler:
+
+```python
+# Access schedule annotations in your styling functions
+schedule = entity.annotations.get('schedule')
+
+if schedule:
+    # Computed dates from forward pass
+    start: date | None = schedule.estimated_start
+    end: date | None = schedule.estimated_end
+
+    # Deadline from backward pass (may differ from manual end_before)
+    deadline: date | None = schedule.computed_deadline
+
+    # Boolean indicating if task is late
+    late: bool = schedule.deadline_violated
+
+    # Resource assignments: list of (resource_name, allocation) tuples
+    resources: list[tuple[str, float]] = schedule.resource_assignments
+
+    # Whether resources were auto-assigned vs manual
+    auto_assigned: bool = schedule.resources_were_computed
+
+    # Whether task had fixed dates (start_date/end_date, not computed)
+    fixed: bool = schedule.was_fixed
+```
+
+**Important:** Schedule annotations are **only available** when running `mouc doc --schedule` or `mouc gantt`. They are not available in the YAML metadata by default.
+
+#### Injecting Schedule Data into Markdown
+
+To display schedule information in markdown output, use `@style_metadata()` functions:
+
+```python
+from mouc.styling import style_metadata
+
+@style_metadata()
+def inject_schedule_to_markdown(entity, context, metadata):
+    """Add schedule annotations to markdown metadata table."""
+    schedule = entity.annotations.get('schedule')
+    if not schedule or schedule.was_fixed:
+        return metadata  # Skip fixed-date tasks, return unchanged
+
+    # Copy metadata and add computed dates
+    result = metadata.copy()
+    if schedule.estimated_start:
+        result['Estimated Start'] = str(schedule.estimated_start)
+    if schedule.estimated_end:
+        result['Estimated End'] = str(schedule.estimated_end)
+
+    # Highlight deadline violations
+    if schedule.deadline_violated:
+        result['⚠️ Status'] = 'DEADLINE VIOLATED'
+
+    return result  # Return new dict, input not mutated
+```
+
+**Key points:**
+- Metadata styling functions are **chained** - output of one becomes input to next
+- Always return a **new** dict (use `.copy()`) - never mutate the input
+- Return the input unchanged if no modifications needed
+
+See `examples/schedule_markdown_style.py` for a complete example.
+
 ### Utility Functions
 
 #### sequential_hue()
@@ -489,7 +557,54 @@ def show_milestone_labels(entity, context):
     return None  # Use default label
 ```
 
-### Example 6: Gantt Chart Task Styling
+### Example 6: Schedule Annotations in Markdown
+
+Display computed schedule information in markdown documentation:
+
+```python
+from mouc.styling import *
+
+@style_metadata()
+def add_schedule_to_markdown(entity, context, metadata):
+    """Inject schedule annotations into markdown metadata table.
+
+    Run with: mouc doc --schedule --style-file my_styles.py
+    """
+    schedule = entity.annotations.get('schedule')
+    if not schedule or schedule.was_fixed:
+        return metadata  # No annotations or fixed dates - return unchanged
+
+    # Copy metadata and add computed fields
+    result = metadata.copy()
+
+    # Add estimated dates
+    if schedule.estimated_start:
+        result['📅 Estimated Start'] = str(schedule.estimated_start)
+    if schedule.estimated_end:
+        result['📅 Estimated End'] = str(schedule.estimated_end)
+
+    # Show computed deadline if it exists
+    if schedule.computed_deadline:
+        result['⏰ Deadline'] = str(schedule.computed_deadline)
+
+    # Warn about deadline violations
+    if schedule.deadline_violated:
+        result['⚠️  Status'] = 'LATE (deadline exceeded)'
+
+    # Show resource assignments
+    if schedule.resource_assignments:
+        resources = ', '.join(
+            f'{name}:{alloc}' for name, alloc in schedule.resource_assignments
+        )
+        suffix = ' (auto-assigned)' if schedule.resources_were_computed else ''
+        result['👥 Resources'] = resources + suffix
+
+    return result  # Return new dict with annotations added
+```
+
+See `examples/schedule_markdown_style.py` for a complete working example.
+
+### Example 7: Gantt Chart Task Styling
 
 ```python
 from mouc.styling import *
@@ -544,7 +659,7 @@ def highlight_blocking_tasks(entity, context):
     return {}
 ```
 
-### Example 7: Complex Multi-Function Styling
+### Example 8: Complex Multi-Function Styling
 
 ```python
 from mouc.styling import *

@@ -130,6 +130,7 @@ class Entity:
     links: list[str] = field(default_factory=_default_list)
     tags: list[str] = field(default_factory=_default_list)
     meta: dict[str, Any] = field(default_factory=_default_dict)
+    annotations: dict[str, Any] = field(default_factory=_default_dict)
 
     @property
     def parsed_links(self) -> list[Link]:

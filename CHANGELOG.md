@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scheduler deadline propagation**: Fixed bug preventing deadlines from propagating through long dependency chains
 
 ### Added
+- **Schedule annotations**: New `mouc schedule` command runs scheduling and outputs/persists results
+- **Scheduling in doc command**: `mouc doc --schedule` computes annotations before rendering markdown
+  - Enables styling functions to access and display computed scheduling information
+  - Example styling file: `examples/schedule_markdown_style.py`
 - **Gantt chart task styling**: Custom CSS colors for tasks via `@style_task` decorator (fill_color, stroke_color, text_color)
 - **Gantt chart clickable links**: Tasks in gantt charts can now link to markdown documentation
 - **Jira sync metadata**: New `jira_sync` metadata field controls sync behavior per entity

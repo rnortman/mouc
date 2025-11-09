@@ -1,11 +1,13 @@
 """Resource-Constrained Project Scheduling using Parallel SGS algorithm."""
 
 import bisect
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from mouc.models import Entity, FeatureMap
     from mouc.resources import ResourceConfig
 
 # Magic resource name for tasks with no assigned resources
@@ -38,6 +40,207 @@ class ScheduledTask:
     end_date: date
     duration_days: float
     resources: list[str]
+
+
+@dataclass
+class ScheduleAnnotations:
+    """Computed scheduling information for an entity.
+
+    This captures all the scheduling algorithm outputs to enable
+    consistent rendering across different backends (Gantt, markdown, etc.).
+    """
+
+    estimated_start: date | None  # Computed start date from forward pass
+    estimated_end: date | None  # Computed end date from forward pass
+    computed_deadline: date | None  # Deadline from backward pass
+    deadline_violated: bool  # True if estimated_end > computed_deadline
+    resource_assignments: list[tuple[str, float]]  # Actual assignments used
+    resources_were_computed: bool  # True if auto-assigned, False if manual
+    was_fixed: bool  # True if had start_on/end_on (not scheduled)
+
+
+class SchedulerInputValidator:
+    """Extracts and validates scheduling inputs from entity metadata.
+
+    This ensures consistent input extraction for all scheduling contexts
+    (Gantt, schedule command, etc.).
+    """
+
+    def __init__(self, resource_config: "ResourceConfig | None" = None):
+        """Initialize validator with optional resource configuration.
+
+        Args:
+            resource_config: Optional resource configuration for auto-assignment
+        """
+        self.resource_config = resource_config
+
+    def parse_effort(self, effort_str: str) -> float:
+        """Parse effort string to calendar days.
+
+        Supported formats:
+        - "5d" = 5 calendar days
+        - "2w" = 14 calendar days
+        - "1.5m" = 45 calendar days
+        - "L" = Large (60 days)
+        """
+        effort_str = effort_str.strip().lower()
+        if effort_str == "l":
+            return 60.0
+
+        match = re.match(r"^([\d.]+)([dwm])$", effort_str)
+        if not match:
+            return 7.0  # Default to 1 week
+
+        value, unit = match.groups()
+        num = float(value)
+
+        if unit == "d":
+            return num
+        if unit == "w":
+            return num * 7
+        if unit == "m":
+            return num * 30
+        return 7.0
+
+    def parse_date(self, date_val: str | date | None) -> date | None:
+        """Parse a date string or date object."""
+        if date_val is None:
+            return None
+        if isinstance(date_val, date):
+            return date_val
+        try:
+            return date.fromisoformat(date_val.strip())
+        except (ValueError, AttributeError):
+            return None
+
+    def parse_resources(
+        self, resources_raw: list[str | tuple[str, float]] | None
+    ) -> tuple[list[tuple[str, float]], str | None, bool]:
+        """Parse resources list.
+
+        Returns:
+            Tuple of (resource list, resource_spec, is_computed)
+            - resource list: concrete assignments
+            - resource_spec: spec for auto-assignment (if needed)
+            - is_computed: True if resources will be auto-assigned
+        """
+        if not resources_raw:
+            if self.resource_config and self.resource_config.default_resource:
+                return ([], self.resource_config.default_resource, True)
+            return ([(UNASSIGNED_RESOURCE, 1.0)], None, False)
+
+        # Check for auto-assignment specs
+        if len(resources_raw) == 1:
+            spec_str = str(resources_raw[0])
+            if spec_str == "*" or "|" in spec_str:
+                return ([], spec_str, True)
+
+        # Parse concrete resources
+        result: list[tuple[str, float]] = []
+        for resource_str in resources_raw:
+            if isinstance(resource_str, tuple):
+                name, capacity = resource_str
+                result.append((str(name), float(capacity)))
+            elif ":" in str(resource_str):
+                parts = str(resource_str).split(":", 1)
+                name = parts[0].strip()
+                try:
+                    capacity = float(parts[1].strip())
+                except ValueError:
+                    capacity = 1.0
+                result.append((name, capacity))
+            else:
+                spec_str = str(resource_str).strip()
+                if self.resource_config and spec_str in self.resource_config.groups:
+                    return ([], spec_str, True)
+                result.append((spec_str, 1.0))
+
+        return (result, None, False)
+
+    def parse_timeframe(self, timeframe_str: str) -> tuple[date | None, date | None]:
+        """Parse timeframe string to (start_date, end_date)."""
+        from mouc.gantt import parse_timeframe as gantt_parse_timeframe
+
+        return gantt_parse_timeframe(timeframe_str)
+
+    def entity_to_task(self, entity: "Entity") -> tuple[Task | None, bool, bool]:
+        """Convert entity to scheduler Task.
+
+        Returns:
+            Tuple of (Task, is_done_without_dates, resources_were_computed)
+            - Task: None if entity is done without dates
+            - is_done_without_dates: True if excluded from scheduling
+            - resources_were_computed: True if resources will be auto-assigned
+        """
+        meta = entity.meta
+        effort = meta.get("effort", "1w")
+        resources_raw = meta.get("resources", [])
+        start_date = self.parse_date(meta.get("start_date"))
+        end_date = self.parse_date(meta.get("end_date"))
+        start_after = self.parse_date(meta.get("start_after"))
+        end_before = self.parse_date(meta.get("end_before"))
+        timeframe = meta.get("timeframe")
+        status = meta.get("status")
+
+        # Check if done without dates
+        if status == "done" and start_date is None and end_date is None:
+            return (None, True, False)
+
+        # Parse resources
+        resources, resource_spec, is_computed = self.parse_resources(resources_raw)
+
+        # Calculate duration
+        effort_days = self.parse_effort(str(effort))
+        total_capacity = 1.0 if resource_spec else sum(c for _, c in resources) or 1.0
+        duration = effort_days / total_capacity
+
+        # Handle timeframe
+        if timeframe and not start_after and not end_before:
+            timeframe_start, timeframe_end = self.parse_timeframe(str(timeframe))
+            if not start_after:
+                start_after = timeframe_start
+            if not end_before:
+                end_before = timeframe_end
+
+        # Create task
+        task = Task(
+            id=entity.id,
+            duration_days=duration,
+            resources=resources,
+            dependencies=list(entity.requires),
+            start_after=start_after,
+            end_before=end_before,
+            start_on=start_date,
+            end_on=end_date,
+            resource_spec=resource_spec,
+        )
+
+        return (task, False, is_computed)
+
+    def extract_tasks(
+        self, feature_map: "FeatureMap"
+    ) -> tuple[list[Task], set[str], dict[str, bool]]:
+        """Extract all tasks from feature map.
+
+        Returns:
+            Tuple of (tasks, done_without_dates, resources_computed_map)
+            - tasks: List of Task objects to schedule
+            - done_without_dates: Set of entity IDs marked done without dates
+            - resources_computed_map: Map of entity_id → resources_were_computed
+        """
+        tasks: list[Task] = []
+        done_without_dates: set[str] = set()
+        resources_computed_map: dict[str, bool] = {}
+
+        for entity in feature_map.entities:
+            task, is_done, is_computed = self.entity_to_task(entity)
+            if is_done:
+                done_without_dates.add(entity.id)
+            elif task:
+                tasks.append(task)
+                resources_computed_map[entity.id] = is_computed
+
+        return (tasks, done_without_dates, resources_computed_map)
 
 
 class ResourceSchedule:
@@ -87,6 +290,149 @@ class ResourceSchedule:
         return True
 
 
+def _default_str_list() -> list[str]:
+    return []
+
+
+@dataclass
+class SchedulingResult:
+    """Complete result of scheduling operation including annotations."""
+
+    scheduled_tasks: list[ScheduledTask]
+    annotations: dict[str, ScheduleAnnotations]
+    warnings: list[str] = field(default_factory=_default_str_list)
+
+
+class SchedulingService:
+    """High-level service for scheduling entities and creating annotations.
+
+    This service coordinates SchedulerInputValidator and ParallelScheduler
+    to provide a complete scheduling solution with annotations.
+    """
+
+    def __init__(
+        self,
+        feature_map: "FeatureMap",
+        current_date: date | None = None,
+        resource_config: "ResourceConfig | None" = None,
+    ):
+        """Initialize scheduling service.
+
+        Args:
+            feature_map: Feature map to schedule
+            current_date: Current date for scheduling (defaults to today)
+            resource_config: Optional resource configuration
+        """
+        self.feature_map = feature_map
+        self.current_date = current_date or date.today()  # noqa: DTZ011
+        self.resource_config = resource_config
+        self.validator = SchedulerInputValidator(resource_config)
+
+    def schedule(self) -> SchedulingResult:
+        """Schedule all entities and create annotations.
+
+        Returns:
+            SchedulingResult with tasks, annotations, and warnings
+        """
+        # Extract tasks from feature map
+        tasks, done_without_dates, resources_computed_map = self.validator.extract_tasks(
+            self.feature_map
+        )
+
+        # Run scheduler
+        scheduler = ParallelScheduler(
+            tasks,
+            self.current_date,
+            resource_config=self.resource_config,
+            completed_task_ids=done_without_dates,
+        )
+
+        try:
+            scheduled_tasks = scheduler.schedule()
+            computed_deadlines = scheduler.get_computed_deadlines()
+        except ValueError as e:
+            # Scheduling failed
+            return SchedulingResult(
+                scheduled_tasks=[],
+                annotations={},
+                warnings=[f"Scheduling failed: {e}"],
+            )
+
+        # Create annotations for each entity
+        annotations: dict[str, ScheduleAnnotations] = {}
+        scheduled_by_id = {task.task_id: task for task in scheduled_tasks}
+        task_by_id = {task.id: task for task in tasks}
+
+        for entity in self.feature_map.entities:
+            entity_id = entity.id
+
+            # Skip entities done without dates
+            if entity_id in done_without_dates:
+                continue
+
+            # Get task info
+            task = task_by_id.get(entity_id)
+            if not task:
+                continue
+
+            scheduled = scheduled_by_id.get(entity_id)
+            if not scheduled:
+                continue
+
+            # Determine if it was fixed
+            was_fixed = task.start_on is not None or task.end_on is not None
+
+            # Get computed deadline
+            computed_deadline = computed_deadlines.get(entity_id)
+
+            # Check deadline violation
+            deadline_violated = False
+            if computed_deadline and scheduled.end_date > computed_deadline:
+                deadline_violated = True
+
+            # Get resource assignments
+            resource_assignments = list(task.resources)
+
+            # Create annotation
+            annotations[entity_id] = ScheduleAnnotations(
+                estimated_start=scheduled.start_date,
+                estimated_end=scheduled.end_date,
+                computed_deadline=computed_deadline,
+                deadline_violated=deadline_violated,
+                resource_assignments=resource_assignments,
+                resources_were_computed=resources_computed_map.get(entity_id, False),
+                was_fixed=was_fixed,
+            )
+
+        # Generate warnings
+        warnings: list[str] = []
+        for entity_id in done_without_dates:
+            warnings.append(
+                f"Task '{entity_id}' marked done without dates - excluded from schedule"
+            )
+
+        for entity_id, annot in annotations.items():
+            if annot.deadline_violated and annot.computed_deadline and annot.estimated_end:
+                days_late = (annot.estimated_end - annot.computed_deadline).days
+                warnings.append(
+                    f"Entity '{entity_id}' finishes {days_late} days after required date "
+                    f"({annot.estimated_end} vs {annot.computed_deadline})"
+                )
+
+        return SchedulingResult(
+            scheduled_tasks=scheduled_tasks,
+            annotations=annotations,
+            warnings=warnings,
+        )
+
+    def populate_feature_map_annotations(self) -> None:
+        """Run scheduling and populate entity.annotations['schedule'] in feature map."""
+        result = self.schedule()
+        for entity in self.feature_map.entities:
+            if entity.id in result.annotations:
+                entity.annotations["schedule"] = result.annotations[entity.id]
+
+
 class ParallelScheduler:
     """Implements Parallel Schedule Generation Scheme (SGS) for RCPSP.
 
@@ -116,6 +462,7 @@ class ParallelScheduler:
         self.current_date = current_date
         self.resource_config = resource_config
         self.completed_task_ids = completed_task_ids or set()
+        self._computed_deadlines: dict[str, date] = {}
 
     def schedule(self) -> list[ScheduledTask]:
         """Schedule all tasks using Parallel SGS algorithm.
@@ -132,12 +479,21 @@ class ParallelScheduler:
 
         # Phase 2: Backward pass to calculate deadlines
         latest_dates = self._calculate_latest_dates(topo_order)
+        self._computed_deadlines = latest_dates.copy()
 
         # Phase 3: Forward pass with Parallel SGS
         scheduled_tasks = self._schedule_forward(latest_dates, fixed_tasks)
 
         # Combine fixed and scheduled tasks
         return fixed_tasks + scheduled_tasks
+
+    def get_computed_deadlines(self) -> dict[str, date]:
+        """Get computed deadlines from backward pass.
+
+        Returns:
+            Dictionary mapping task_id to computed deadline
+        """
+        return self._computed_deadlines.copy()
 
     def _process_fixed_tasks(self) -> list[ScheduledTask]:
         """Process tasks with fixed dates (start_on/end_on).

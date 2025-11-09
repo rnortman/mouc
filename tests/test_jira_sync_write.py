@@ -61,9 +61,9 @@ user_stories:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
-    _write_feature_map(test_file, feature_map)
+    write_feature_map(test_file, feature_map)
 
     # Re-read and verify changes were written to the correct sections
     with test_file.open() as f:
@@ -115,9 +115,9 @@ entities:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
-    _write_feature_map(test_file, feature_map)
+    write_feature_map(test_file, feature_map)
 
     # Verify
     with test_file.open() as f:
@@ -160,9 +160,9 @@ user_stories:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
-    _write_feature_map(test_file, feature_map)
+    write_feature_map(test_file, feature_map)
 
     # Verify
     with test_file.open() as f:
@@ -200,7 +200,7 @@ def test_write_no_entity_sections_fails(tmp_path: Path) -> None:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
     with pytest.raises(ValueError, match="No entity sections found"):
-        _write_feature_map(test_file, feature_map)
+        write_feature_map(test_file, feature_map)

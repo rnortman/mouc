@@ -10,13 +10,15 @@ from typing import Annotated
 
 import typer
 
-from . import context
+from . import context, styling
 from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
-from .jira_cli import jira_app
+from .jira_cli import jira_app, write_feature_map
 from .markdown import MarkdownGenerator
 from .parser import FeatureMapParser
+from .scheduler import SchedulingService
+from .unified_config import load_unified_config
 
 app = typer.Typer(
     name="mouc",
@@ -135,6 +137,20 @@ def doc(
         "feature_map.yaml"
     ),
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
+    schedule: Annotated[
+        bool,
+        typer.Option(
+            "--schedule",
+            help="Run scheduler and populate schedule annotations for use in styling functions",
+        ),
+    ] = False,
+    current_date: Annotated[
+        str | None,
+        typer.Option(
+            "--current-date",
+            help="Current/as-of date for scheduling (YYYY-MM-DD). Only used with --schedule",
+        ),
+    ] = None,
     style_module: Annotated[
         str | None,
         typer.Option("--style-module", help="Python module path for styling functions"),
@@ -157,6 +173,31 @@ def doc(
         # Parse the feature map
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
+
+        # Optionally run scheduler to populate annotations
+        if schedule:
+            # Parse current date if provided
+            parsed_current_date: date | None = None
+            if current_date:
+                try:
+                    parsed_current_date = date.fromisoformat(current_date)
+                except ValueError:
+                    typer.echo(
+                        f"Error: Invalid date format '{current_date}'. Use YYYY-MM-DD",
+                        err=True,
+                    )
+                    raise typer.Exit(1) from None
+
+            # Load resource config if available
+            resource_config = None
+            config_path = get_config_path() or Path("mouc_config.yaml")
+            if config_path.exists():
+                unified = load_unified_config(config_path)
+                resource_config = unified.resources
+
+            # Run scheduling and populate annotations
+            service = SchedulingService(feature_map, parsed_current_date, resource_config)
+            service.populate_feature_map_annotations()
 
         # Generate the markdown
         generator = MarkdownGenerator(feature_map)
@@ -333,8 +374,6 @@ def gantt(
         if resource_config_path:
             from contextlib import suppress
 
-            from .unified_config import load_unified_config
-
             with suppress(FileNotFoundError, ValueError):
                 unified_config = load_unified_config(resource_config_path)
                 if unified_config.gantt and unified_config.gantt.markdown_base_url:
@@ -394,6 +433,116 @@ def gantt(
 
 
 @app.command()
+def schedule(
+    file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
+        "feature_map.yaml"
+    ),
+    current_date: Annotated[
+        str | None,
+        typer.Option(
+            "--current-date",
+            "-c",
+            help="Current/as-of date for scheduling (YYYY-MM-DD). Defaults to today",
+        ),
+    ] = None,
+    annotate_yaml: Annotated[
+        bool,
+        typer.Option(
+            "--annotate-yaml",
+            help="Write estimated_start/estimated_end back to YAML file",
+        ),
+    ] = False,
+) -> None:
+    """Run scheduling algorithm and display or persist results."""
+    import traceback
+
+    try:
+        # Parse current date if provided
+        parsed_current_date: date | None = None
+        if current_date:
+            try:
+                parsed_current_date = date.fromisoformat(current_date)
+            except ValueError:
+                typer.echo(
+                    f"Error: Invalid date format '{current_date}'. Use YYYY-MM-DD",
+                    err=True,
+                )
+                raise typer.Exit(1) from None
+
+        # Parse the feature map
+        parser = FeatureMapParser()
+        feature_map = parser.parse_file(file)
+
+        # Load resource config if available
+        resource_config = None
+        config_path = get_config_path() or Path("mouc_config.yaml")
+        if config_path.exists():
+            unified = load_unified_config(config_path)
+            resource_config = unified.resources
+
+        # Run scheduling service
+        service = SchedulingService(feature_map, parsed_current_date, resource_config)
+        result = service.schedule()
+
+        # Display or persist results
+        if annotate_yaml:
+            # Write annotations back to YAML
+            # Populate feature map with annotations
+            for entity in feature_map.entities:
+                if entity.id in result.annotations:
+                    annot = result.annotations[entity.id]
+                    if annot.estimated_start:
+                        entity.meta["estimated_start"] = annot.estimated_start.isoformat()
+                    if annot.estimated_end:
+                        entity.meta["estimated_end"] = annot.estimated_end.isoformat()
+
+            # Write back to file
+            write_feature_map(file, feature_map)
+            typer.echo(f"Annotations written to {file}")
+
+        else:
+            # Display results to stdout
+            typer.echo("Schedule Results")
+            typer.echo("=" * 80)
+            typer.echo("")
+
+            for entity in feature_map.entities:
+                if entity.id not in result.annotations:
+                    continue
+
+                annot = result.annotations[entity.id]
+                typer.echo(f"{entity.name} ({entity.id})")
+                typer.echo(f"  Estimated Start:  {annot.estimated_start}")
+                typer.echo(f"  Estimated End:    {annot.estimated_end}")
+                if annot.computed_deadline:
+                    typer.echo(f"  Computed Deadline: {annot.computed_deadline}")
+                if annot.deadline_violated:
+                    typer.echo("  ⚠️  DEADLINE VIOLATED")
+                typer.echo(
+                    f"  Resources: {', '.join(f'{r}:{a}' for r, a in annot.resource_assignments)}"
+                )
+                if annot.resources_were_computed:
+                    typer.echo("  (resources auto-assigned)")
+                if annot.was_fixed:
+                    typer.echo("  (fixed dates, not scheduled)")
+                typer.echo("")
+
+        # Display warnings
+        if result.warnings:
+            typer.echo("\nWarnings:", err=True)
+            for warning in result.warnings:
+                typer.echo(f"  - {warning}", err=True)
+
+    except MoucError as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1) from None
+    except Exception as e:
+        typer.echo(f"Unexpected error: {e}", err=True)
+        traceback.print_exc()
+        raise typer.Exit(1) from None
+
+
+@app.command()
 def status(
     target: Annotated[str, typer.Argument(help="Outcome ID to check status for")],
     file: Annotated[
@@ -424,8 +573,6 @@ app.add_typer(jira_app, name="jira")
 
 def _load_styling(style_module: str | None, style_file: Path | None) -> None:
     """Load user styling module or file."""
-    from . import styling
-
     # Clear any previous registrations
     styling.clear_registrations()
 

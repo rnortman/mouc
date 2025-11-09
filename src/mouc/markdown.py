@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
+
+from . import styling
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -50,8 +52,6 @@ class MarkdownGenerator:
         """Initialize with a feature map."""
         self.feature_map = feature_map
         # Create styling context
-        from . import styling
-
         self.styling_context = styling.create_styling_context(feature_map)
 
     def generate(self) -> str:
@@ -299,8 +299,14 @@ class MarkdownGenerator:
         table_rows: list[str] = []
         table_rows.append(f"| ID | `{entity.id}` |")
 
+        # Apply metadata styling functions to get display metadata
+        # This allows styling functions to add computed fields without mutation
+        display_metadata: dict[str, Any] = styling.apply_metadata_styles(
+            entity, self.styling_context, entity.meta
+        )  # type: ignore
+
         # Add all metadata fields
-        for key, value in sorted(entity.meta.items()):
+        for key, value in sorted(display_metadata.items()):
             # Format the key nicely
             pretty_key = key.replace("_", " ").title()
             # Format the value based on type
@@ -375,8 +381,6 @@ class MarkdownGenerator:
 
     def _format_type_label(self, entity: Entity) -> str:
         """Format type label with styling applied."""
-        from . import styling
-
         # Apply user styling
         user_label = styling.apply_label_styles(entity, self.styling_context)  # type: ignore
 

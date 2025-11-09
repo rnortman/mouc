@@ -60,6 +60,11 @@ class Entity(Protocol):
         ...
 
     @property
+    def annotations(self) -> dict[str, Any]:
+        """Computed annotations dictionary (e.g., schedule annotations)."""
+        ...
+
+    @property
     def parsed_links(self) -> Sequence[Link]:
         """Parsed link objects."""
         ...
@@ -216,6 +221,7 @@ NodeStylerFunc = Callable[[Entity, StylingContext], NodeStyle]
 EdgeStylerFunc = Callable[[str, str, str, StylingContext], EdgeStyle]
 LabelStylerFunc = Callable[[Entity, StylingContext], str | None]
 TaskStylerFunc = Callable[[Entity, StylingContext], TaskStyle]
+MetadataStylerFunc = Callable[[Entity, StylingContext, dict[str, Any]], dict[str, Any]]
 
 
 # ============================================================================
@@ -226,6 +232,7 @@ _node_stylers: list[tuple[int, NodeStylerFunc]] = []
 _edge_stylers: list[tuple[int, EdgeStylerFunc]] = []
 _label_stylers: list[tuple[int, LabelStylerFunc]] = []
 _task_stylers: list[tuple[int, TaskStylerFunc]] = []
+_metadata_stylers: list[tuple[int, MetadataStylerFunc]] = []
 
 
 # ============================================================================
@@ -417,6 +424,61 @@ def style_task(
     return decorator(func)
 
 
+@overload
+def style_metadata(func: MetadataStylerFunc) -> MetadataStylerFunc: ...
+
+
+@overload
+def style_metadata(*, priority: int = 10) -> Callable[[MetadataStylerFunc], MetadataStylerFunc]: ...
+
+
+def style_metadata(
+    func: MetadataStylerFunc | None = None, *, priority: int = 10
+) -> MetadataStylerFunc | Callable[[MetadataStylerFunc], MetadataStylerFunc]:
+    """Register a metadata styling function for markdown output.
+
+    The function receives an entity, context, and current metadata dict,
+    and returns a new metadata dict to display. Functions are chained in
+    priority order - the output of one becomes the input to the next.
+
+    This allows styling functions to add computed fields (like schedule
+    annotations) to the markdown metadata table without mutating entity.meta.
+
+    Signature: (entity: Entity, context: StylingContext, metadata: dict) -> dict
+
+    Examples:
+        @style_metadata
+        def add_schedule_info(entity, context, metadata):
+            schedule = entity.annotations.get('schedule')
+            if not schedule:
+                return metadata
+
+            result = metadata.copy()
+            if schedule.estimated_start:
+                result['Estimated Start'] = str(schedule.estimated_start)
+            return result
+
+        @style_metadata(priority=20)
+        def add_deadline_warning(entity, context, metadata):
+            schedule = entity.annotations.get('schedule')
+            if schedule and schedule.deadline_violated:
+                result = metadata.copy()
+                result['⚠️ Status'] = 'LATE'
+                return result
+            return metadata
+    """
+
+    def decorator(f: MetadataStylerFunc) -> MetadataStylerFunc:
+        _metadata_stylers.append((priority, f))
+        return f
+
+    if func is None:
+        # Called with arguments: @style_metadata(priority=20)
+        return decorator
+    # Called without arguments: @style_metadata
+    return decorator(func)
+
+
 # ============================================================================
 # Utility Functions
 # ============================================================================
@@ -566,6 +628,7 @@ def clear_registrations() -> None:
     _edge_stylers.clear()
     _label_stylers.clear()
     _task_stylers.clear()
+    _metadata_stylers.clear()
 
 
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
@@ -638,6 +701,33 @@ def apply_task_styles(entity: Entity, context: StylingContext) -> dict[str, Any]
                 final_style.update(result)
 
     return final_style
+
+
+def apply_metadata_styles(
+    entity: Entity, context: StylingContext, base_metadata: dict[str, Any]
+) -> dict[str, Any]:
+    """Apply all registered metadata styling functions in priority order.
+
+    Functions are chained - the output of one becomes the input to the next.
+    This allows pure functional composition without mutation.
+
+    Args:
+        entity: The entity being styled
+        context: The styling context
+        base_metadata: The initial metadata dict (typically entity.meta)
+
+    Returns:
+        New metadata dict with styling functions applied
+    """
+    # Sort by priority (lower numbers first)
+    stylers = sorted(_metadata_stylers, key=lambda x: x[0])
+
+    # Chain functions - output of one becomes input to next
+    result = base_metadata
+    for _priority, styler in stylers:
+        result = styler(entity, context, result)
+
+    return result
 
 
 # ============================================================================

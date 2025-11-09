@@ -650,3 +650,320 @@ def test_style_task_tags_and_css_combined() -> None:
     assert result["tags"] == ["active"]
     assert result["fill_color"] == "#ff0000"
     assert result["stroke_color"] == "#00ff00"
+
+
+# =============================================================================
+# Metadata Styling Tests (Markdown Output)
+# =============================================================================
+
+
+def test_style_metadata_decorator() -> None:
+    """Test that style_metadata decorator registers functions."""
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def my_metadata_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["custom_field"] = "custom_value"
+        return result
+
+    # Create a test feature map
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test",
+            meta={"existing": "value"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+    assert result["existing"] == "value"
+    assert result["custom_field"] == "custom_value"
+
+
+def test_style_metadata_chaining() -> None:
+    """Test that multiple metadata stylers are chained correctly."""
+    styling.clear_registrations()
+
+    @styling.style_metadata(priority=10)
+    def first_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["field1"] = "from_first"
+        return result
+
+    @styling.style_metadata(priority=20)
+    def second_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        # Input should have field1 from first styler
+        assert "field1" in metadata
+        result = metadata.copy()
+        result["field2"] = "from_second"
+        return result
+
+    # Create a test feature map
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test",
+            meta={"original": "value"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - should have all fields
+    result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+    assert result["original"] == "value"
+    assert result["field1"] == "from_first"
+    assert result["field2"] == "from_second"
+
+
+def test_style_metadata_no_mutation() -> None:
+    """Test that metadata stylers do not mutate the input dict."""
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def adding_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["new_field"] = "new_value"
+        return result
+
+    # Create a test feature map
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test",
+            meta={"original": "value"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Store original reference
+    original_meta = entities[0].meta
+    original_keys = set(original_meta.keys())
+
+    # Apply styling
+    result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+
+    # Original should be unchanged
+    assert set(original_meta.keys()) == original_keys
+    assert "new_field" not in original_meta
+
+    # Result should have new field
+    assert "new_field" in result
+
+
+def test_style_metadata_return_unchanged() -> None:
+    """Test that metadata stylers can return input unchanged."""
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def conditional_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        # Only modify if entity has specific tag
+        if "special" in entity.tags:
+            result = metadata.copy()
+            result["modified"] = True
+            return result
+        return metadata  # Return unchanged
+
+    # Create test entities
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Special Capability",
+            description="Test",
+            tags=["special"],
+            meta={"original": "value"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Normal Capability",
+            description="Test",
+            meta={"original": "value"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply to special entity - should be modified
+    result1 = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+    assert result1["modified"] is True
+
+    # Apply to normal entity - should be unchanged
+    result2 = styling.apply_metadata_styles(entities[1], ctx, entities[1].meta)
+    assert "modified" not in result2
+    assert result2["original"] == "value"
+
+
+def test_style_metadata_with_schedule_annotations() -> None:
+    """Test metadata styling with schedule annotations."""
+    from datetime import date
+
+    from mouc.scheduler import ScheduleAnnotations
+
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def inject_schedule_dates(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        schedule = entity.annotations.get("schedule")
+        if not schedule or schedule.was_fixed:
+            return metadata
+
+        result = metadata.copy()
+        if schedule.estimated_start:
+            result["Estimated Start"] = str(schedule.estimated_start)
+        if schedule.estimated_end:
+            result["Estimated End"] = str(schedule.estimated_end)
+
+        return result
+
+    # Create entity with schedule annotations
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test",
+            meta={"duration": 5},
+            annotations={
+                "schedule": ScheduleAnnotations(
+                    estimated_start=date(2025, 1, 1),
+                    estimated_end=date(2025, 1, 5),
+                    computed_deadline=None,
+                    deadline_violated=False,
+                    resource_assignments=[],
+                    resources_were_computed=False,
+                    was_fixed=False,
+                )
+            },
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+    assert result["duration"] == 5
+    assert result["Estimated Start"] == "2025-01-01"
+    assert result["Estimated End"] == "2025-01-05"
+
+
+def test_style_metadata_priority_ordering() -> None:
+    """Test that metadata stylers are applied in priority order."""
+    styling.clear_registrations()
+
+    call_order: list[str] = []
+
+    @styling.style_metadata(priority=20)
+    def second_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        call_order.append("second")
+        result = metadata.copy()
+        result["order"] = "second"
+        return result
+
+    @styling.style_metadata(priority=10)
+    def first_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        call_order.append("first")
+        result = metadata.copy()
+        result["order"] = "first"
+        return result
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling
+    result = styling.apply_metadata_styles(entities[0], ctx, {})
+
+    # First styler should run first, second should override
+    assert call_order == ["first", "second"]
+    assert result["order"] == "second"
+
+
+def test_style_metadata_empty_input() -> None:
+    """Test metadata styling with empty input dict."""
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def build_from_scratch(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["field1"] = "value1"
+        result["field2"] = "value2"
+        return result
+
+    # Create a test feature map
+    entities = [
+        Entity(type="capability", id="cap1", name="Test Capability", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling with empty dict
+    result = styling.apply_metadata_styles(entities[0], ctx, {})
+    assert result["field1"] == "value1"
+    assert result["field2"] == "value2"
+
+
+def test_style_metadata_cleared_by_clear_registrations() -> None:
+    """Test that metadata stylers are cleared by clear_registrations."""
+
+    @styling.style_metadata()
+    def my_styler(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["custom"] = "value"
+        return result
+
+    # Clear registrations
+    styling.clear_registrations()
+
+    # Create a test feature map
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test",
+            meta={"original": "value"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+    ctx = styling.create_styling_context(feature_map)
+
+    # Apply styling - should return input unchanged
+    result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
+    assert result == entities[0].meta
+    assert "custom" not in result

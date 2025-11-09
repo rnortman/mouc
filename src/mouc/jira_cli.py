@@ -505,7 +505,7 @@ def jira_sync(
                     if verbosity >= 1:
                         typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
 
-            _write_feature_map(file, feature_map)
+            write_feature_map(file, feature_map)
             typer.echo(f"\n✓ Changes written to {file}")
 
         elif dry_run:
@@ -534,8 +534,8 @@ def jira_sync(
         raise typer.Exit(1) from None
 
 
-def _write_feature_map(file_path: Path, feature_map: Any) -> None:
-    """Write feature map back to YAML file.
+def write_feature_map(file_path: Path, feature_map: Any) -> None:
+    """Write feature map back to YAML file with formatting preservation.
 
     Args:
         file_path: Path to feature map file
@@ -856,7 +856,7 @@ def jira_ignore_field(
         jira_sync.ignore_fields.append(field_name)
         entity.set_jira_sync_metadata(jira_sync)
 
-        _write_feature_map(file, feature_map)
+        write_feature_map(file, feature_map)
         typer.echo(f"✓ Added '{field_name}' to ignore_fields for {entity_id} in {file}")
 
     except MoucError as e:
@@ -906,7 +906,7 @@ def jira_ignore_value(
         jira_sync.ignore_values[field_name].append(value)
         entity.set_jira_sync_metadata(jira_sync)
 
-        _write_feature_map(file, feature_map)
+        write_feature_map(file, feature_map)
         typer.echo(
             f"✓ Added value '{value}' to ignore_values for {entity_id}.{field_name} in {file}"
         )

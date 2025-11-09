@@ -34,9 +34,9 @@ capabilities:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
-    _write_feature_map(test_file, feature_map)
+    write_feature_map(test_file, feature_map)
 
     # Read back and check formatting is preserved
     result = test_file.read_text()
@@ -78,9 +78,9 @@ capabilities:
     import sys
 
     sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import _write_feature_map
+    from mouc.jira_cli import write_feature_map
 
-    _write_feature_map(test_file, feature_map)
+    write_feature_map(test_file, feature_map)
 
     # Read back and check test-2 still has no meta
     result = test_file.read_text()
