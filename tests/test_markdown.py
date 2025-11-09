@@ -6,6 +6,7 @@ import pytest
 from mouc.markdown import MarkdownGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
+from mouc.unified_config import MarkdownConfig
 
 
 class TestMarkdownGenerator:
@@ -558,3 +559,172 @@ class TestMarkdownGenerator:
 
         # No warning section should be generated
         assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_custom_section_ordering(self, simple_feature_map: FeatureMap) -> None:
+        """Test that sections appear in configured order."""
+        config = MarkdownConfig(sections=["outcomes", "user_stories", "capabilities"])
+        generator = MarkdownGenerator(simple_feature_map, config)
+        markdown = generator.generate()
+
+        # Find positions of section headers
+        outcomes_pos = markdown.find("## Outcomes")
+        stories_pos = markdown.find("## User Stories")
+        capabilities_pos = markdown.find("## Capabilities")
+
+        # Verify they appear in the configured order
+        assert outcomes_pos < stories_pos
+        assert stories_pos < capabilities_pos
+
+    def test_section_exclusion(self, simple_feature_map: FeatureMap) -> None:
+        """Test that excluded sections don't appear in output."""
+        config = MarkdownConfig(sections=["capabilities", "outcomes"])
+        generator = MarkdownGenerator(simple_feature_map, config)
+        markdown = generator.generate()
+
+        # Capabilities and outcomes should appear
+        assert "## Capabilities" in markdown
+        assert "## Outcomes" in markdown
+
+        # User stories should not appear
+        assert "## User Stories" not in markdown
+
+    def test_timeline_visibility_control(self) -> None:
+        """Test that timeline section can be excluded via config."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+
+        entities = [cap1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # With timeline in sections
+        config_with_timeline = MarkdownConfig(sections=["timeline", "capabilities"])
+        generator_with = MarkdownGenerator(feature_map, config_with_timeline)
+        markdown_with = generator_with.generate()
+        assert "## Timeline" in markdown_with
+
+        # Without timeline in sections
+        config_without_timeline = MarkdownConfig(sections=["capabilities"])
+        generator_without = MarkdownGenerator(feature_map, config_without_timeline)
+        markdown_without = generator_without.generate()
+        assert "## Timeline" not in markdown_without
+
+    def test_toc_respects_section_ordering(self, simple_feature_map: FeatureMap) -> None:
+        """Test that TOC entries appear in configured section order."""
+        config = MarkdownConfig(sections=["user_stories", "outcomes", "capabilities"])
+        generator = MarkdownGenerator(simple_feature_map, config)
+        markdown = generator.generate()
+
+        # Extract TOC section
+        toc_start = markdown.find("## Table of Contents")
+        toc_end = markdown.find("## ", toc_start + 1)
+        toc_section = markdown[toc_start:toc_end]
+
+        # Find positions within TOC
+        stories_toc = toc_section.find("- [User Stories]")
+        outcomes_toc = toc_section.find("- [Outcomes]")
+        capabilities_toc = toc_section.find("- [Capabilities]")
+
+        # Verify order in TOC matches config
+        assert stories_toc < outcomes_toc
+        assert outcomes_toc < capabilities_toc
+
+    def test_toc_excludes_missing_sections(self, simple_feature_map: FeatureMap) -> None:
+        """Test that TOC only includes enabled sections."""
+        config = MarkdownConfig(sections=["capabilities", "outcomes"])
+        generator = MarkdownGenerator(simple_feature_map, config)
+        markdown = generator.generate()
+
+        # Extract TOC section
+        toc_start = markdown.find("## Table of Contents")
+        toc_end = markdown.find("## ", toc_start + 1)
+        toc_section = markdown[toc_start:toc_end]
+
+        # Capabilities and outcomes should be in TOC
+        assert "- [Capabilities]" in toc_section
+        assert "- [Outcomes]" in toc_section
+
+        # User stories should not be in TOC
+        assert "- [User Stories]" not in toc_section
+
+    def test_default_behavior_without_config(self, simple_feature_map: FeatureMap) -> None:
+        """Test that default behavior includes all sections in standard order."""
+        generator = MarkdownGenerator(simple_feature_map)
+        markdown = generator.generate()
+
+        # All sections should appear
+        assert "## Capabilities" in markdown
+        assert "## User Stories" in markdown
+        assert "## Outcomes" in markdown
+
+        # Verify default order (capabilities, user_stories, outcomes)
+        cap_pos = markdown.find("## Capabilities")
+        stories_pos = markdown.find("## User Stories")
+        outcomes_pos = markdown.find("## Outcomes")
+
+        assert cap_pos < stories_pos
+        assert stories_pos < outcomes_pos
+
+    def test_backward_dependencies_excluded_when_timeline_disabled(self) -> None:
+        """Test that backward dependency warnings don't appear when timeline is disabled."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            requires={"cap2"},
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            meta={"timeframe": "2024-Q2"},
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # With timeline disabled
+        config = MarkdownConfig(sections=["capabilities"])
+        generator = MarkdownGenerator(feature_map, config)
+        markdown = generator.generate()
+
+        # No warning section should appear
+        assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_empty_sections_list(self) -> None:
+        """Test that empty sections list produces minimal output."""
+        metadata = FeatureMapMetadata()
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+
+        entities = [cap1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        config = MarkdownConfig(sections=[])
+        generator = MarkdownGenerator(feature_map, config)
+        markdown = generator.generate()
+
+        # Only header should appear
+        assert "# Feature Map" in markdown
+
+        # No content sections
+        assert "## Capabilities" not in markdown
+        assert "## User Stories" not in markdown
+        assert "## Outcomes" not in markdown
+        assert "## Timeline" not in markdown
+
+        # No TOC (since no sections to list)
+        assert "## Table of Contents" not in markdown

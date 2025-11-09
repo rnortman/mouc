@@ -9,6 +9,7 @@ from . import styling
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
+    from .unified_config import MarkdownConfig
 
 
 def make_anchor(entity_id: str, feature_map: FeatureMap) -> str:
@@ -48,25 +49,46 @@ def make_anchor(entity_id: str, feature_map: FeatureMap) -> str:
 class MarkdownGenerator:
     """Generate markdown documentation from a feature map."""
 
-    def __init__(self, feature_map: FeatureMap):
-        """Initialize with a feature map."""
+    def __init__(self, feature_map: FeatureMap, markdown_config: MarkdownConfig | None = None):
+        """Initialize with a feature map and optional markdown configuration."""
         self.feature_map = feature_map
         # Create styling context
         self.styling_context = styling.create_styling_context(feature_map)
+        # Store sections to generate (default to all if no config provided)
+        self.sections = (
+            markdown_config.sections
+            if markdown_config
+            else ["timeline", "capabilities", "user_stories", "outcomes"]
+        )
 
     def generate(self) -> str:
         """Generate complete markdown documentation."""
-        sections = [
-            self._generate_header(),
-            self._generate_timeline(),
-            self._check_backward_dependencies(),
-            self._generate_toc(),
-            self._generate_capabilities_section(),
-            self._generate_user_stories_section(),
-            self._generate_outcomes_section(),
-        ]
+        # Map section names to their generator methods
+        section_generators = {
+            "capabilities": self._generate_capabilities_section,
+            "user_stories": self._generate_user_stories_section,
+            "outcomes": self._generate_outcomes_section,
+        }
 
-        return "\n\n".join(section for section in sections if section)
+        # Always include header
+        output_sections = [self._generate_header()]
+
+        # Add timeline before TOC if included (maintains original ordering)
+        if "timeline" in self.sections:
+            output_sections.append(self._generate_timeline())
+            output_sections.append(self._check_backward_dependencies())
+
+        # Add TOC if any content sections are enabled
+        content_sections = [s for s in self.sections if s in section_generators]
+        if content_sections:
+            output_sections.append(self._generate_toc())
+
+        # Generate content sections in configured order
+        for section_name in self.sections:
+            if section_name in section_generators:
+                output_sections.append(section_generators[section_name]())
+
+        return "\n\n".join(section for section in output_sections if section)
 
     def _generate_header(self) -> str:
         """Generate document header."""
@@ -90,31 +112,39 @@ class MarkdownGenerator:
         """Generate table of contents."""
         lines = ["## Table of Contents", ""]
 
-        # Group entities by type
-        capabilities = self.feature_map.get_entities_by_type("capability")
-        user_stories = self.feature_map.get_entities_by_type("user_story")
-        outcomes = self.feature_map.get_entities_by_type("outcome")
+        # Map section names to their entity types and section headers
+        section_config = {
+            "capabilities": {
+                "entity_type": "capability",
+                "header": "Capabilities",
+                "anchor": "capabilities",
+            },
+            "user_stories": {
+                "entity_type": "user_story",
+                "header": "User Stories",
+                "anchor": "user-stories",
+            },
+            "outcomes": {
+                "entity_type": "outcome",
+                "header": "Outcomes",
+                "anchor": "outcomes",
+            },
+        }
 
-        if capabilities:
-            lines.append("- [Capabilities](#capabilities)")
-            for entity in sorted(capabilities, key=lambda e: e.id):
-                anchor = self._make_anchor(entity.id)
-                type_label = self._format_type_label(entity)
-                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
+        # Generate TOC entries in configured section order
+        for section_name in self.sections:
+            if section_name not in section_config:
+                continue
 
-        if user_stories:
-            lines.append("- [User Stories](#user-stories)")
-            for entity in sorted(user_stories, key=lambda e: e.id):
-                anchor = self._make_anchor(entity.id)
-                type_label = self._format_type_label(entity)
-                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
+            config = section_config[section_name]
+            entities = self.feature_map.get_entities_by_type(config["entity_type"])
 
-        if outcomes:
-            lines.append("- [Outcomes](#outcomes)")
-            for entity in sorted(outcomes, key=lambda e: e.id):
-                anchor = self._make_anchor(entity.id)
-                type_label = self._format_type_label(entity)
-                lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
+            if entities:
+                lines.append(f"- [{config['header']}](#{config['anchor']})")
+                for entity in sorted(entities, key=lambda e: e.id):
+                    anchor = self._make_anchor(entity.id)
+                    type_label = self._format_type_label(entity)
+                    lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
 
         return "\n".join(lines)
 

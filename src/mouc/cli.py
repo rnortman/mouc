@@ -174,6 +174,12 @@ def doc(
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
+        # Load unified config if available
+        unified_config = None
+        config_path = get_config_path() or Path("mouc_config.yaml")
+        if config_path.exists():
+            unified_config = load_unified_config(config_path)
+
         # Optionally run scheduler to populate annotations
         if schedule:
             # Parse current date if provided
@@ -188,19 +194,16 @@ def doc(
                     )
                     raise typer.Exit(1) from None
 
-            # Load resource config if available
-            resource_config = None
-            config_path = get_config_path() or Path("mouc_config.yaml")
-            if config_path.exists():
-                unified = load_unified_config(config_path)
-                resource_config = unified.resources
+            # Get resource config from unified config if available
+            resource_config = unified_config.resources if unified_config else None
 
             # Run scheduling and populate annotations
             service = SchedulingService(feature_map, parsed_current_date, resource_config)
             service.populate_feature_map_annotations()
 
         # Generate the markdown
-        generator = MarkdownGenerator(feature_map)
+        markdown_config = unified_config.markdown if unified_config else None
+        generator = MarkdownGenerator(feature_map, markdown_config)
         markdown_output = generator.generate()
 
         # Output the result

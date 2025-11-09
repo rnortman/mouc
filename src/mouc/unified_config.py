@@ -22,12 +22,19 @@ class GanttConfig(BaseModel):
     markdown_base_url: str | None = None
 
 
+class MarkdownConfig(BaseModel):
+    """Configuration for markdown document generation."""
+
+    sections: list[str] = ["timeline", "capabilities", "user_stories", "outcomes"]
+
+
 class UnifiedConfig(BaseModel):
     """Unified configuration containing resources and optional Jira settings."""
 
     resources: ResourceConfig
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
+    markdown: MarkdownConfig | None = None
 
 
 def load_unified_config(config_path: Path | str) -> UnifiedConfig:
@@ -81,7 +88,17 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     if "gantt" in data:
         gantt_config = GanttConfig.model_validate(data["gantt"])
 
-    return UnifiedConfig(resources=resource_config, jira=jira_config, gantt=gantt_config)
+    # Build MarkdownConfig if markdown section exists
+    markdown_config = None
+    if "markdown" in data:
+        markdown_config = MarkdownConfig.model_validate(data["markdown"])
+
+    return UnifiedConfig(
+        resources=resource_config,
+        jira=jira_config,
+        gantt=gantt_config,
+        markdown=markdown_config,
+    )
 
 
 def map_jira_user_to_resource(

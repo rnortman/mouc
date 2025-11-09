@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Scheduler deadline propagation**: Fixed bug preventing deadlines from propagating through long dependency chains
 
 ### Added
+- **Markdown output configuration**: New `markdown.sections` config controls which sections appear and in what order
 - **Schedule annotations**: New `mouc schedule` command runs scheduling and outputs/persists results
 - **Scheduling in doc command**: `mouc doc --schedule` computes annotations before rendering markdown
   - Enables styling functions to access and display computed scheduling information
