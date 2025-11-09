@@ -2,7 +2,7 @@
 
 from datetime import date, timedelta
 
-from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
+from mouc.resources import UNASSIGNED_RESOURCE, DNSPeriod, ResourceConfig, ResourceDefinition
 from mouc.scheduler import ParallelScheduler, Task
 
 
@@ -298,8 +298,6 @@ def test_no_resource_spec_no_assignment():
 
 def test_empty_resource_spec_uses_unassigned():
     """Test that tasks with no resources get assigned to 'unassigned' resource."""
-    from mouc.scheduler import UNASSIGNED_RESOURCE
-
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),

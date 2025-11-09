@@ -4,8 +4,11 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 from mouc import styling
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.scheduler import ScheduleAnnotations
 
 
 def test_style_node_decorator() -> None:
@@ -818,10 +821,6 @@ def test_style_metadata_return_unchanged() -> None:
 
 def test_style_metadata_with_schedule_annotations() -> None:
     """Test metadata styling with schedule annotations."""
-    from datetime import date
-
-    from mouc.scheduler import ScheduleAnnotations
-
     styling.clear_registrations()
 
     @styling.style_metadata()

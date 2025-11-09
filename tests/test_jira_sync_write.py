@@ -7,14 +7,16 @@ from pathlib import Path
 import pytest
 import yaml
 
+from mouc.jira_cli import write_feature_map
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.parser import FeatureMapParser
+
 # pyright: reportPrivateUsage=false
 
 
 def test_write_mixed_format_yaml(tmp_path: Path) -> None:
     """Test jira sync handles mixed old/new format YAML correctly."""
     # Test uses parser and internal write function to avoid circular imports
-    from mouc.parser import FeatureMapParser
-
     # Create a test file with MIXED format (both entities: and capabilities:)
     test_file = tmp_path / "mixed_format.yaml"
     test_file.write_text("""metadata:
@@ -58,11 +60,6 @@ user_stories:
         entity.meta["test_field"] = "test_value"
 
     # Write back using internal function (import in function to avoid circular import at module level)
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     write_feature_map(test_file, feature_map)
 
     # Re-read and verify changes were written to the correct sections
@@ -90,8 +87,6 @@ user_stories:
 
 def test_write_new_format_only(tmp_path: Path) -> None:
     """Test jira sync handles new unified format."""
-    from mouc.parser import FeatureMapParser
-
     test_file = tmp_path / "new_format.yaml"
     test_file.write_text("""metadata:
   version: "1.0"
@@ -112,11 +107,6 @@ entities:
     feature_map.entities[0].meta["status"] = "done"
 
     # Write back
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     write_feature_map(test_file, feature_map)
 
     # Verify
@@ -128,8 +118,6 @@ entities:
 
 def test_write_old_format_only(tmp_path: Path) -> None:
     """Test jira sync handles old legacy format."""
-    from mouc.parser import FeatureMapParser
-
     test_file = tmp_path / "old_format.yaml"
     test_file.write_text("""metadata:
   version: "1.0"
@@ -157,11 +145,6 @@ user_stories:
         entity.meta["status"] = "done"
 
     # Write back
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     write_feature_map(test_file, feature_map)
 
     # Verify
@@ -181,8 +164,6 @@ def test_write_no_entity_sections_fails(tmp_path: Path) -> None:
 # No entity sections at all
 """)
 
-    from mouc.models import Entity, FeatureMap, FeatureMapMetadata
-
     feature_map = FeatureMap(
         entities=[
             Entity(
@@ -197,10 +178,5 @@ def test_write_no_entity_sections_fails(tmp_path: Path) -> None:
     )
 
     # Should raise ValueError
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     with pytest.raises(ValueError, match="No entity sections found"):
         write_feature_map(test_file, feature_map)

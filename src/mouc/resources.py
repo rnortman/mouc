@@ -10,6 +10,9 @@ from datetime import date
 
 from pydantic import BaseModel, Field, model_validator
 
+# Magic resource name for tasks with no assigned resources
+UNASSIGNED_RESOURCE = "unassigned"
+
 
 class DNSPeriod(BaseModel):
     """A do-not-schedule period for a resource."""
@@ -117,8 +120,6 @@ def create_default_config() -> ResourceConfig:
     Returns a config with a single "unassigned" resource and no groups.
     Used when no resource config is provided.
     """
-    from .scheduler import UNASSIGNED_RESOURCE
-
     return ResourceConfig(
         resources=[ResourceDefinition(name=UNASSIGNED_RESOURCE, dns_periods=[])], groups={}
     )

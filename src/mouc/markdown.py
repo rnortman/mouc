@@ -6,6 +6,7 @@ import sys
 from typing import TYPE_CHECKING, Any
 
 from . import styling
+from .models import Link
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -296,8 +297,6 @@ class MarkdownGenerator:
         """Format links for display in a table."""
         if not links:
             return []
-
-        from .models import Link
 
         # Parse all links
         parsed_links = [Link.parse(link) for link in links]

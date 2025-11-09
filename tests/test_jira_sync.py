@@ -16,7 +16,7 @@ from mouc.jira_config import (
     JiraConnection,
 )
 from mouc.jira_sync import FieldExtractor, JiraSynchronizer
-from mouc.models import Entity, FeatureMap
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.resources import ResourceConfig, ResourceDefinition
 
 
@@ -266,8 +266,6 @@ class TestJiraSynchronizerVerbosity:
             links=["jira:TEST-123"],
             meta={"start_date": date(2025, 1, 1)},
         )
-        from mouc.models import FeatureMapMetadata
-
         return FeatureMap(metadata=FeatureMapMetadata(), entities=[entity])
 
     @pytest.fixture

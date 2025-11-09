@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -36,8 +37,6 @@ class EntitySchema(BaseModel):
     @model_validator(mode="after")
     def handle_dependencies_alias(self) -> EntitySchema:
         """Handle backward compatibility for 'dependencies' field."""
-        import sys
-
         if self.dependencies is not None:
             if self.requires:
                 raise ValueError(

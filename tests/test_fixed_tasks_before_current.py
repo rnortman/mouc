@@ -4,6 +4,7 @@ from datetime import date
 
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.parser import resolve_graph_edges
 
 
 class TestFixedTasksBeforeCurrent:
@@ -71,8 +72,6 @@ class TestFixedTasksBeforeCurrent:
             requires={"past_task"},
             meta={"effort": "1w", "resources": ["alice"]},
         )
-
-        from mouc.parser import resolve_graph_edges
 
         entities = [past_task, current_task]
         resolve_graph_edges(entities)

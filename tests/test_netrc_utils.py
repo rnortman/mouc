@@ -1,5 +1,6 @@
 """Tests for netrc_utils module."""
 
+from netrc import NetrcParseError
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -63,8 +64,6 @@ class TestGetJiraCredentialsFromNetrc:
     @patch("mouc.netrc_utils.Path.home")
     def test_netrc_parse_error(self, mock_home: MagicMock, mock_netrc_class: MagicMock) -> None:
         """Test graceful handling of .netrc parse errors."""
-        from netrc import NetrcParseError
-
         mock_home.return_value = Path("/home/user")
         mock_netrc_class.side_effect = NetrcParseError("Invalid format")
 

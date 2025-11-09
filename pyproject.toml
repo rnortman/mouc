@@ -81,6 +81,7 @@ select = [
     "RET",  # flake8-return
     "SIM",  # flake8-simplify
     "PTH",  # flake8-use-pathlib
+    "PLC",  # Pylint Convention
 ]
 ignore = ["E501"]  # line too long - handled by formatter
 

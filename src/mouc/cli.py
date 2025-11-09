@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import traceback
+from contextlib import suppress
 from datetime import date
 from pathlib import Path
 from typing import Annotated
@@ -124,8 +126,6 @@ def graph(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -217,8 +217,6 @@ def doc(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -375,8 +373,6 @@ def gantt(
         # Load gantt config from unified config if available
         gantt_config_markdown_url = None
         if resource_config_path:
-            from contextlib import suppress
-
             with suppress(FileNotFoundError, ValueError):
                 unified_config = load_unified_config(resource_config_path)
                 if unified_config.gantt and unified_config.gantt.markdown_base_url:
@@ -428,8 +424,6 @@ def gantt(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -457,8 +451,6 @@ def schedule(
     ] = False,
 ) -> None:
     """Run scheduling algorithm and display or persist results."""
-    import traceback
-
     try:
         # Parse current date if provided
         parsed_current_date: date | None = None

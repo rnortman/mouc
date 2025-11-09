@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mouc.jira_cli import write_feature_map
+from mouc.parser import FeatureMapParser
+
 # pyright: reportPrivateUsage=false
 
 
 def test_flow_style_list_in_meta_preserved(tmp_path: Path) -> None:
     """Test that flow-style lists inside meta are preserved during write-back."""
-    from mouc.parser import FeatureMapParser
-
     test_file = tmp_path / "flow_style.yaml"
     test_file.write_text("""metadata:
   version: '1.0'
@@ -31,11 +32,6 @@ capabilities:
     feature_map.entities[0].meta["status"] = "in_progress"
 
     # Write back
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     write_feature_map(test_file, feature_map)
 
     # Read back and check formatting is preserved
@@ -54,8 +50,6 @@ capabilities:
 
 def test_no_meta_stays_no_meta(tmp_path: Path) -> None:
     """Test that entities without meta field don't get meta: {} added."""
-    from mouc.parser import FeatureMapParser
-
     test_file = tmp_path / "no_meta.yaml"
     test_file.write_text("""metadata:
   version: '1.0'
@@ -75,11 +69,6 @@ capabilities:
     feature_map = parser.parse_file(test_file)
 
     # Write back without changing anything
-    import sys
-
-    sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
-    from mouc.jira_cli import write_feature_map
-
     write_feature_map(test_file, feature_map)
 
     # Read back and check test-2 still has no meta

@@ -13,6 +13,7 @@ from mouc.exceptions import MoucError
 from mouc.jira_client import JiraClient, JiraError, JiraIssueData
 from mouc.jira_config import ConflictResolution, JiraConfig
 from mouc.models import Entity, FeatureMap, Link
+from mouc.unified_config import map_jira_user_to_resource
 
 
 class JiraSyncError(MoucError):
@@ -229,8 +230,6 @@ class FieldExtractor:
             return None
 
         # Use the new unified mapping logic
-        from mouc.unified_config import map_jira_user_to_resource
-
         if self.verbosity >= 3:
             if issue_data.assignee_email:
                 typer.echo(f"      [DEBUG] resources: assignee = '{issue_data.assignee_email}'")

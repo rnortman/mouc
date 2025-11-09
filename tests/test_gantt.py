@@ -9,6 +9,7 @@ import pytest
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
+from mouc.scheduler import parse_timeframe
 
 
 class TestGanttScheduler:
@@ -1531,8 +1532,6 @@ class TestTimeframeParsing:
 
     def test_parse_quarter_q1(self) -> None:
         """Test parsing Q1 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025q1")
         assert start == date(2025, 1, 1)
         assert end == date(2025, 3, 31)
@@ -1544,32 +1543,24 @@ class TestTimeframeParsing:
 
     def test_parse_quarter_q2(self) -> None:
         """Test parsing Q2 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025q2")
         assert start == date(2025, 4, 1)
         assert end == date(2025, 6, 30)
 
     def test_parse_quarter_q3(self) -> None:
         """Test parsing Q3 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025q3")
         assert start == date(2025, 7, 1)
         assert end == date(2025, 9, 30)
 
     def test_parse_quarter_q4(self) -> None:
         """Test parsing Q4 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025q4")
         assert start == date(2025, 10, 1)
         assert end == date(2025, 12, 31)
 
     def test_parse_week_w01(self) -> None:
         """Test parsing week 1 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025w01")
         # Jan 4, 2025 is a Saturday, so week 1 starts on Dec 30, 2024 (Monday)
         assert start == date(2024, 12, 30)
@@ -1577,8 +1568,6 @@ class TestTimeframeParsing:
 
     def test_parse_week_w10(self) -> None:
         """Test parsing week 10 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025W10")
         # Week 10 is 9 weeks after week 1
         week1_start = date(2024, 12, 30)
@@ -1589,8 +1578,6 @@ class TestTimeframeParsing:
 
     def test_parse_week_w52(self) -> None:
         """Test parsing week 52 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025w52")
         # Week 52 is 51 weeks after week 1
         week1_start = date(2024, 12, 30)
@@ -1601,8 +1588,6 @@ class TestTimeframeParsing:
 
     def test_parse_half_h1(self) -> None:
         """Test parsing H1 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025h1")
         assert start == date(2025, 1, 1)
         assert end == date(2025, 6, 30)
@@ -1614,64 +1599,48 @@ class TestTimeframeParsing:
 
     def test_parse_half_h2(self) -> None:
         """Test parsing H2 format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025h2")
         assert start == date(2025, 7, 1)
         assert end == date(2025, 12, 31)
 
     def test_parse_year(self) -> None:
         """Test parsing full year format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025")
         assert start == date(2025, 1, 1)
         assert end == date(2025, 12, 31)
 
     def test_parse_month_january(self) -> None:
         """Test parsing January format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025-01")
         assert start == date(2025, 1, 1)
         assert end == date(2025, 1, 31)
 
     def test_parse_month_february(self) -> None:
         """Test parsing February (non-leap year)."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025-02")
         assert start == date(2025, 2, 1)
         assert end == date(2025, 2, 28)
 
     def test_parse_month_february_leap_year(self) -> None:
         """Test parsing February in a leap year."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2024-02")
         assert start == date(2024, 2, 1)
         assert end == date(2024, 2, 29)
 
     def test_parse_month_december(self) -> None:
         """Test parsing December format."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("2025-12")
         assert start == date(2025, 12, 1)
         assert end == date(2025, 12, 31)
 
     def test_parse_invalid_format(self) -> None:
         """Test parsing invalid format returns None."""
-        from mouc.gantt import parse_timeframe
-
         start, end = parse_timeframe("invalid")
         assert start is None
         assert end is None
 
     def test_parse_invalid_quarter(self) -> None:
         """Test parsing invalid quarter number."""
-        from mouc.gantt import parse_timeframe
-
         # Q5 doesn't exist
         start, end = parse_timeframe("2025q5")
         assert start is None
@@ -1679,8 +1648,6 @@ class TestTimeframeParsing:
 
     def test_parse_invalid_week(self) -> None:
         """Test parsing invalid week number."""
-        from mouc.gantt import parse_timeframe
-
         # Week 54 doesn't exist
         start, end = parse_timeframe("2025w54")
         assert start is None
@@ -1688,8 +1655,6 @@ class TestTimeframeParsing:
 
     def test_parse_invalid_half(self) -> None:
         """Test parsing invalid half number."""
-        from mouc.gantt import parse_timeframe
-
         # H3 doesn't exist
         start, end = parse_timeframe("2025h3")
         assert start is None
@@ -1697,8 +1662,6 @@ class TestTimeframeParsing:
 
     def test_parse_invalid_month(self) -> None:
         """Test parsing invalid month number."""
-        from mouc.gantt import parse_timeframe
-
         # Month 13 doesn't exist
         start, end = parse_timeframe("2025-13")
         assert start is None
@@ -2093,8 +2056,6 @@ class TestFixedScheduleTasks:
 
     def test_fixed_dates_as_date_objects(self, base_date: date) -> None:
         """Test that date objects (as YAML would parse them) work correctly."""
-        from datetime import date as date_type
-
         metadata = FeatureMapMetadata()
 
         # Simulate what happens when YAML parses "2025-02-01" - it creates a date object
@@ -2104,8 +2065,8 @@ class TestFixedScheduleTasks:
             name="YAML Date Task",
             description="Uses date objects not strings",
             meta={
-                "start_date": date_type(2025, 2, 1),  # date object, not string
-                "end_date": date_type(2025, 2, 15),  # date object, not string
+                "start_date": date(2025, 2, 1),  # date object, not string
+                "end_date": date(2025, 2, 15),  # date object, not string
                 "resources": ["alice"],
             },
         )

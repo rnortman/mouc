@@ -28,8 +28,6 @@ class GraphGenerator:
         """Initialize with a feature map."""
         self.feature_map = feature_map
         # Create styling context
-        from . import styling
-
         self.styling_context = styling.create_styling_context(feature_map)
 
     def generate(
@@ -189,8 +187,6 @@ class GraphGenerator:
 
     def _format_node(self, entity: Entity, override_style: dict[str, Any] | None = None) -> str:
         """Format a node with styling applied."""
-        from . import styling
-
         label = self._escape_label(entity.name)
 
         # Get default style based on entity type
@@ -228,8 +224,6 @@ class GraphGenerator:
 
     def _format_edge(self, from_id: str, to_id: str, edge_type: str) -> str:
         """Format an edge with styling applied."""
-        from . import styling
-
         # Apply user styling
         user_style = styling.apply_edge_styles(from_id, to_id, edge_type, self.styling_context)
 

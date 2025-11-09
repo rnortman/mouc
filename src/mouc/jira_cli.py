@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import csv
+import json
+import traceback
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,12 +13,14 @@ import yaml
 from ruamel.yaml import YAML
 
 from . import context
+from .exceptions import MoucError
 from .jira_client import JiraAuthError, JiraClient, JiraError
 from .jira_interactive import InteractiveResolver
 from .jira_report import ReportGenerator
 from .jira_sync import FieldConflict, JiraSynchronizer
 from .models import Entity, Link
 from .parser import FeatureMapParser
+from .unified_config import load_unified_config
 
 # Create Jira sub-app
 jira_app = typer.Typer(help="Jira integration commands")
@@ -35,8 +39,6 @@ def _load_jira_config_from_path(config_path: Path) -> Any:
         FileNotFoundError: If config doesn't exist
         ValueError: If config doesn't contain Jira settings
     """
-    from .unified_config import load_unified_config
-
     unified = load_unified_config(config_path)
     if unified.jira is None:
         raise ValueError(f"Config file {config_path} doesn't contain 'jira' section")
@@ -55,8 +57,6 @@ def jira_validate(
     ] = None,
 ) -> None:
     """Validate Jira configuration and test connection."""
-    from .exceptions import MoucError
-
     try:
         # Determine config path
         if config is None:
@@ -97,8 +97,6 @@ def jira_validate(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -117,10 +115,6 @@ def jira_fetch(
     ] = None,
 ) -> None:
     """Fetch and display data for a single Jira ticket."""
-    import json
-
-    from .exceptions import MoucError
-
     try:
         # Get verbosity level
         verbosity = context.get_verbosity()
@@ -223,8 +217,6 @@ def jira_fetch(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -237,8 +229,6 @@ def jira_list(
     ),
 ) -> None:
     """List all entities with Jira links."""
-    from .exceptions import MoucError
-
     try:
         # Parse the feature map
         parser = FeatureMapParser()
@@ -268,8 +258,6 @@ def jira_list(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -341,8 +329,6 @@ def jira_sync(
     ] = False,
 ) -> None:
     """Sync Mouc entities with Jira issues."""
-    from .exceptions import MoucError
-
     try:
         # Validate arguments
         if sum([interactive, bool(report), bool(answers)]) > 1:
@@ -378,8 +364,6 @@ def jira_sync(
             typer.echo(f"Loading config from {config}...")
 
         # Load unified config to get both Jira and Resource configs
-        from .unified_config import load_unified_config
-
         unified_config = None
         resource_config = None
         try:
@@ -527,8 +511,6 @@ def jira_sync(
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1) from None
     except Exception as e:
-        import traceback
-
         typer.echo(f"Unexpected error: {e}", err=True)
         traceback.print_exc()
         raise typer.Exit(1) from None
@@ -836,8 +818,6 @@ def jira_ignore_field(
     This will add the field to the entity's jira_sync.ignore_fields list,
     preventing any future Jira updates to that field.
     """
-    from .exceptions import MoucError
-
     try:
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
@@ -883,8 +863,6 @@ def jira_ignore_value(
     Example:
         mouc jira ignore-value my_feature start_date 2024-12-01
     """
-    from .exceptions import MoucError
-
     try:
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
@@ -929,8 +907,6 @@ def jira_show_overrides(
     If entity_id is provided, shows overrides for that entity only.
     Otherwise, shows overrides for all entities.
     """
-    from .exceptions import MoucError
-
     try:
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
