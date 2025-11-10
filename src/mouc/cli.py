@@ -13,11 +13,12 @@ from typing import Annotated
 import typer
 
 from . import context, styling
+from .backends import MarkdownBackend
+from .document import DocumentGenerator
 from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
-from .markdown import MarkdownGenerator
 from .models import FeatureMap
 from .parser import FeatureMapParser
 from .resources import ResourceConfig
@@ -135,7 +136,7 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
 
 
 @app.command()
-def doc(  # noqa: PLR0913 - CLI command needs multiple options
+def doc(  # noqa: PLR0913, PLR0912 - CLI command needs multiple options and has complex logic
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
@@ -205,15 +206,22 @@ def doc(  # noqa: PLR0913 - CLI command needs multiple options
             service = SchedulingService(feature_map, parsed_current_date, resource_config)
             service.populate_feature_map_annotations()
 
-        # Generate the markdown
+        # Generate the documentation
         markdown_config = unified_config.markdown if unified_config else None
-        generator = MarkdownGenerator(feature_map, markdown_config)
+        styling_context = styling.create_styling_context(feature_map)
+        backend = MarkdownBackend(feature_map, styling_context)
+        generator = DocumentGenerator(feature_map, backend, markdown_config)
         markdown_output = generator.generate()
 
         # Output the result
         if output:
-            output.write_text(markdown_output, encoding="utf-8")
+            if isinstance(markdown_output, bytes):
+                output.write_bytes(markdown_output)
+            else:
+                output.write_text(markdown_output, encoding="utf-8")
             typer.echo(f"Documentation written to {output}")
+        elif isinstance(markdown_output, bytes):
+            typer.echo(markdown_output.decode("utf-8"))
         else:
             typer.echo(markdown_output)
 
@@ -430,6 +438,13 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         )
         result = scheduler.schedule()
 
+        # Create anchor function for markdown links if needed
+        anchor_fn = None
+        if final_markdown_url:
+            styling_context = styling.create_styling_context(feature_map)
+            backend = MarkdownBackend(feature_map, styling_context)
+            anchor_fn = backend.make_anchor
+
         # Generate Mermaid chart
         mermaid_output = scheduler.generate_mermaid(
             result,
@@ -440,6 +455,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
             vertical_dividers=vertical_dividers,
             compact=compact,
             markdown_base_url=final_markdown_url,
+            anchor_fn=anchor_fn,
         )
 
         # Output the result

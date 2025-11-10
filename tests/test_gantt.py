@@ -6,6 +6,8 @@ from datetime import date, timedelta
 
 import pytest
 
+from mouc import styling
+from mouc.backends import MarkdownBackend
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
@@ -786,9 +788,16 @@ class TestGanttScheduler:
         scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
-        # Generate mermaid with markdown_base_url
+        # Create anchor function for markdown links
+        styling_context = styling.create_styling_context(simple_feature_map)
+        backend = MarkdownBackend(simple_feature_map, styling_context)
+        anchor_fn = backend.make_anchor
+
+        # Generate mermaid with markdown_base_url and anchor function
         markdown_url = "./feature_map.md"
-        mermaid_output = scheduler.generate_mermaid(result, markdown_base_url=markdown_url)
+        mermaid_output = scheduler.generate_mermaid(
+            result, markdown_base_url=markdown_url, anchor_fn=anchor_fn
+        )
 
         # Check that click directives are present for all tasks
         # Anchors are based on entity names, not IDs
@@ -818,9 +827,16 @@ class TestGanttScheduler:
         scheduler = GanttScheduler(simple_feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
-        # Generate mermaid with absolute URL
+        # Create anchor function for markdown links
+        styling_context = styling.create_styling_context(simple_feature_map)
+        backend = MarkdownBackend(simple_feature_map, styling_context)
+        anchor_fn = backend.make_anchor
+
+        # Generate mermaid with absolute URL and anchor function
         markdown_url = "https://github.com/user/repo/blob/main/feature_map.md"
-        mermaid_output = scheduler.generate_mermaid(result, markdown_base_url=markdown_url)
+        mermaid_output = scheduler.generate_mermaid(
+            result, markdown_base_url=markdown_url, anchor_fn=anchor_fn
+        )
 
         # Check that click directives are present with absolute URLs
         # Anchors are based on entity names, not IDs

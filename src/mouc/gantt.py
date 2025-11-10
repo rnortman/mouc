@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from .markdown import make_anchor
+from .backends.base import AnchorFunction
 from .resources import UNASSIGNED_RESOURCE
 from .scheduler import ParallelScheduler, Task, parse_timeframe
 from .scheduler import ScheduledTask as SchedulerTask
@@ -520,6 +520,7 @@ class GanttScheduler:
         result: ScheduleResult,
         entities_by_id: dict[str, Entity],
         markdown_base_url: str | None,
+        anchor_fn: AnchorFunction | None,
     ) -> None:
         """Add tasks grouped by type to Mermaid lines."""
         tasks_by_type = self._group_tasks_by_type(result, entities_by_id)
@@ -533,7 +534,7 @@ class GanttScheduler:
 
             tasks = tasks_by_type[entity_type]
             for task in tasks:
-                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
+                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url, anchor_fn)
 
     def _add_tasks_by_resource(
         self,
@@ -541,6 +542,7 @@ class GanttScheduler:
         result: ScheduleResult,
         entities_by_id: dict[str, Entity],
         markdown_base_url: str | None,
+        anchor_fn: AnchorFunction | None,
     ) -> None:
         """Add tasks grouped by resource to Mermaid lines."""
         tasks_by_resource = self._group_tasks_by_resource(result)
@@ -555,7 +557,7 @@ class GanttScheduler:
 
             tasks = tasks_by_resource[resource]
             for task in tasks:
-                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url)
+                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url, anchor_fn)
 
     def generate_mermaid(  # noqa: PLR0913 - Gantt chart generation needs many formatting options
         self,
@@ -568,6 +570,7 @@ class GanttScheduler:
         vertical_dividers: str | None = None,
         compact: bool = False,
         markdown_base_url: str | None = None,
+        anchor_fn: AnchorFunction | None = None,
     ) -> str:
         """Generate Mermaid gantt chart from schedule result.
 
@@ -581,6 +584,7 @@ class GanttScheduler:
             compact: Use compact display mode to show multiple tasks in same row when possible
             markdown_base_url: Base URL for markdown links (e.g., "./feature_map.md"). If provided,
                               tasks will be clickable and link to their corresponding markdown headers.
+            anchor_fn: Function to generate anchors for markdown links. Required if markdown_base_url is provided.
 
         Returns:
             Mermaid gantt chart syntax as a string
@@ -606,9 +610,9 @@ class GanttScheduler:
 
         # Add tasks grouped by type or resource
         if group_by == "type":
-            self._add_tasks_by_type(lines, result, entities_by_id, markdown_base_url)
+            self._add_tasks_by_type(lines, result, entities_by_id, markdown_base_url, anchor_fn)
         elif group_by == "resource":
-            self._add_tasks_by_resource(lines, result, entities_by_id, markdown_base_url)
+            self._add_tasks_by_resource(lines, result, entities_by_id, markdown_base_url, anchor_fn)
 
         return "\n".join(lines)
 
@@ -798,6 +802,7 @@ class GanttScheduler:
         task: ScheduledTask,
         entities_by_id: dict[str, Entity],
         markdown_base_url: str | None = None,
+        anchor_fn: AnchorFunction | None = None,
     ) -> None:
         """Add a task to the Mermaid lines list.
 
@@ -807,6 +812,7 @@ class GanttScheduler:
             entities_by_id: Map of entity IDs to entities
             markdown_base_url: Base URL for markdown links. If provided, a click directive
                               will be added to make the task clickable.
+            anchor_fn: Function to generate anchors for markdown links. Required if markdown_base_url is provided.
         """
         entity = entities_by_id[task.entity_id]
         gantt_meta = self._get_gantt_meta(entity)
@@ -833,7 +839,7 @@ class GanttScheduler:
         lines.append(f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}")
 
         # Add click directive if markdown_base_url is provided
-        if markdown_base_url:
-            anchor = make_anchor(task.entity_id, self.feature_map)
+        if markdown_base_url and anchor_fn:
+            anchor = anchor_fn(task.entity_id, entity.name)
             url = f"{markdown_base_url}#{anchor}"
             lines.append(f'    click {task.entity_id} href "{url}"')

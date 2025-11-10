@@ -3,14 +3,26 @@
 
 import pytest
 
-from mouc.markdown import MarkdownGenerator
+from mouc import styling
+from mouc.backends import MarkdownBackend
+from mouc.document import DocumentGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
 from mouc.unified_config import MarkdownConfig, OrganizationConfig
 
 
+def create_generator(feature_map: FeatureMap, config: MarkdownConfig | None = None) -> str:
+    """Helper to create markdown output from a feature map."""
+    styling_context = styling.create_styling_context(feature_map)
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend, config)
+    result = generator.generate()
+    assert isinstance(result, str), "MarkdownBackend should return a string"
+    return result
+
+
 class TestMarkdownGenerator:
-    """Test the MarkdownGenerator."""
+    """Test the markdown document generator."""
 
     @pytest.fixture
     def simple_feature_map(self) -> FeatureMap:
@@ -69,8 +81,7 @@ class TestMarkdownGenerator:
 
     def test_generate_header(self, simple_feature_map: FeatureMap) -> None:
         """Test header generation."""
-        generator = MarkdownGenerator(simple_feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map)
 
         assert "# Feature Map" in markdown
         assert "| Team | test_team |" in markdown
@@ -81,8 +92,7 @@ class TestMarkdownGenerator:
         """Test table of contents generation."""
         # Use by_type organization to get type-based sections
         config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         assert "## Table of Contents" in markdown
         assert "- [Capabilities](#capabilities)" in markdown
@@ -97,8 +107,7 @@ class TestMarkdownGenerator:
         """Test capabilities section generation."""
         # Use by_type organization to get type-based sections
         config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         assert "## Capabilities" in markdown
         assert "### Cap 1" in markdown
@@ -119,8 +128,7 @@ class TestMarkdownGenerator:
         """Test user stories section generation."""
         # Use by_type organization to get type-based sections
         config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         assert "## User Stories" in markdown
         assert "### Story 1" in markdown
@@ -132,8 +140,7 @@ class TestMarkdownGenerator:
         """Test outcomes section generation."""
         # Use by_type organization to get type-based sections
         config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         assert "## Outcomes" in markdown
         assert "### Outcome 1" in markdown
@@ -166,8 +173,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # Check that cap1 shows it's required by cap2 and cap3
         cap1_section = markdown[markdown.find("### Cap 1") : markdown.find("### Cap 2")]
@@ -198,14 +204,16 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
+        # Create backend to test anchor generation
+        styling_context = styling.create_styling_context(feature_map)
+        backend = MarkdownBackend(feature_map, styling_context)
 
         # Test the anchor generation
-        anchor = generator._make_anchor("complex_id_123")
+        anchor = backend.make_anchor("complex_id_123", "Complex Name with Special Chars!")
         assert anchor == "complex-name-with-special-chars"
 
-        # Test with non-existent ID
-        anchor2 = generator._make_anchor("non_existent")
+        # Test with simple text
+        anchor2 = backend.make_anchor("", "non existent")
         assert anchor2 == "non-existent"
 
     def test_empty_sections(self) -> None:
@@ -224,8 +232,7 @@ class TestMarkdownGenerator:
 
         # Use by_type organization to get type-based sections
         config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
-        generator = MarkdownGenerator(feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map, config)
 
         assert "## Capabilities" in markdown
         assert "## User Stories" not in markdown
@@ -272,8 +279,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # Check timeline section exists
         assert "## Timeline" in markdown
@@ -311,8 +317,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # No timeline section should be generated
         assert "## Timeline" not in markdown
@@ -342,8 +347,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # Check all metadata fields are displayed
         cap1_section = markdown[markdown.find("### Cap 1") :]
@@ -388,8 +392,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # Check warning section exists
         assert "## ⚠️ Timeline Warnings" in markdown
@@ -426,8 +429,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # No warning section should be generated
         assert "## ⚠️ Timeline Warnings" not in markdown
@@ -459,8 +461,8 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        generator.generate()
+        # Generating the document triggers console warnings
+        create_generator(feature_map)
 
         # Check console output
         captured = capsys.readouterr()
@@ -497,8 +499,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # Check warning section exists
         assert "## ⚠️ Timeline Warnings" in markdown
@@ -531,8 +532,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # No warning section should be generated
         assert "## ⚠️ Timeline Warnings" not in markdown
@@ -564,8 +564,7 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map)
 
         # No warning section should be generated
         assert "## ⚠️ Timeline Warnings" not in markdown
@@ -577,8 +576,7 @@ class TestMarkdownGenerator:
                 primary="by_type", entity_type_order=["outcome", "user_story", "capability"]
             )
         )
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         # Find positions of section headers
         outcomes_pos = markdown.find("## Outcomes")
@@ -597,8 +595,7 @@ class TestMarkdownGenerator:
                 entity_type_order=["capability", "outcome"],  # Exclude user_story
             )
         )
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         # Capabilities and outcomes should appear
         assert "## Capabilities" in markdown
@@ -625,14 +622,12 @@ class TestMarkdownGenerator:
 
         # With timeline in sections
         config_with_timeline = MarkdownConfig(toc_sections=["timeline", "capabilities"])
-        generator_with = MarkdownGenerator(feature_map, config_with_timeline)
-        markdown_with = generator_with.generate()
+        markdown_with = create_generator(feature_map, config_with_timeline)
         assert "## Timeline" in markdown_with
 
         # Without timeline in sections
         config_without_timeline = MarkdownConfig(toc_sections=["capabilities"])
-        generator_without = MarkdownGenerator(feature_map, config_without_timeline)
-        markdown_without = generator_without.generate()
+        markdown_without = create_generator(feature_map, config_without_timeline)
         assert "## Timeline" not in markdown_without
 
     def test_toc_respects_section_ordering(self, simple_feature_map: FeatureMap) -> None:
@@ -642,8 +637,7 @@ class TestMarkdownGenerator:
                 primary="by_type", entity_type_order=["user_story", "outcome", "capability"]
             )
         )
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         # Extract TOC section
         toc_start = markdown.find("## Table of Contents")
@@ -667,8 +661,7 @@ class TestMarkdownGenerator:
                 entity_type_order=["capability", "outcome"],  # Exclude user_story
             )
         )
-        generator = MarkdownGenerator(simple_feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map, config)
 
         # Extract TOC section
         toc_start = markdown.find("## Table of Contents")
@@ -684,8 +677,7 @@ class TestMarkdownGenerator:
 
     def test_default_behavior_without_config(self, simple_feature_map: FeatureMap) -> None:
         """Test that default behavior includes all sections in standard order."""
-        generator = MarkdownGenerator(simple_feature_map)
-        markdown = generator.generate()
+        markdown = create_generator(simple_feature_map)
 
         # All sections should appear
         assert "## Capabilities" in markdown
@@ -726,8 +718,7 @@ class TestMarkdownGenerator:
 
         # With timeline disabled
         config = MarkdownConfig(toc_sections=["capabilities"])
-        generator = MarkdownGenerator(feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map, config)
 
         # No warning section should appear
         assert "## ⚠️ Timeline Warnings" not in markdown
@@ -742,8 +733,7 @@ class TestMarkdownGenerator:
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
         config = MarkdownConfig(toc_sections=[])
-        generator = MarkdownGenerator(feature_map, config)
-        markdown = generator.generate()
+        markdown = create_generator(feature_map, config)
 
         # Header should appear
         assert "# Feature Map" in markdown

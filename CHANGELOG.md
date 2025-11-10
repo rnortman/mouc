@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - **Breaking**: `markdown.sections` renamed to `markdown.toc_sections` for clarity
+- **Breaking**: Refactored markdown generation to use pluggable backend architecture for future format support (docx, html)
 
 ## [0.1.9] - 2025-11-09
 
