@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Critical Ratio scheduling**: Scheduler now prioritizes tasks by CR (slack/duration) instead of raw deadlines, correctly accounting for task duration
+- **Priority metadata field**: New `priority` field (0-100, default 50) controls task urgency independent of deadlines
+- **Scheduling strategies**: Configurable via `SchedulingConfig` (programmatic only for now)
+  - `priority_first`: Sort by priority, then CR (lexicographic)
+  - `cr_first`: Sort by CR, then priority (lexicographic)
+  - `weighted`: Composite score with tunable weights (default: CR-heavy with 10:1 ratio)
+- **Adaptive median CR**: Tasks without deadlines automatically get median CR of deadline tasks, updated dynamically as work progresses
 - **DOCX output format**: `mouc doc --format docx` generates Microsoft Word documents
 - **Markdown document organization**: New `markdown.organization` config controls entity grouping and sorting
   - Primary grouping: `by_type`, `by_timeframe`, `alpha_by_id`, or `yaml_order`
@@ -18,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **Breaking**: `markdown.sections` renamed to `markdown.toc_sections` for clarity
 - **Breaking**: Refactored markdown generation to use pluggable backend architecture for future format support (docx, html)
+- **Breaking**: Scheduler now uses CR-based prioritization; tasks with same deadline but different durations schedule differently
 
 ## [0.1.9] - 2025-11-09
 

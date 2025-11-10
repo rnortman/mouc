@@ -8,6 +8,7 @@ Mouc uses a single unified configuration file (`mouc_config.yaml`) that contains
 - [Configuration File Location](#configuration-file-location)
 - [File Structure](#file-structure)
 - [Resources Section](#resources-section)
+  - [Task Priority](#task-priority)
 - [Markdown Section](#markdown-section)
 - [DOCX Section](#docx-section)
 - [Jira Section](#jira-section)
@@ -155,6 +156,47 @@ Options:
 - `""` - Leave unassigned
 
 See [Resources Documentation](resources.md) for detailed scheduling behavior.
+
+### Task Priority
+
+Tasks can include a `priority` field in their metadata to control scheduling urgency:
+
+```yaml
+capabilities:
+  - id: auth_service
+    name: "Authentication Service"
+    meta:
+      effort: "20d"
+      priority: 80  # High priority (0-100, default 50)
+      resources: ["backend_team"]
+      end_before: "2025-01-31"
+```
+
+**Priority Scale (0-100):**
+- `100` - Maximum priority (critical/urgent)
+- `50` - Neutral/default (typical work)
+- `0` - Minimum priority (nice-to-have)
+
+**How Priority Works:**
+
+The scheduler uses **Critical Ratio (CR)** to prioritize tasks, which accounts for both deadline and duration:
+- `CR = slack / duration` where slack = days until deadline
+
+Priority modulates the CR-based urgency:
+- **For deadline tasks**: Priority represents "importance of meeting this deadline"
+- **For no-deadline tasks**: Priority represents "general importance"
+
+By default, the scheduler uses a weighted combination:
+```
+urgency_score = 10×CR + 1×(100-priority)
+```
+
+Lower score = more urgent. This gives CR 10× influence vs priority, meaning:
+- A 50-point priority difference shifts urgency by ~5 CR units
+- High priority tasks can overcome moderate CR differences
+- Very urgent deadlines (low CR) still dominate
+
+See [Scheduling Documentation](scheduling.md) for detailed CR and priority behavior.
 
 ## Markdown Section
 

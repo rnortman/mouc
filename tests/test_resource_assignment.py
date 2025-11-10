@@ -230,7 +230,7 @@ def test_assignment_waits_for_resource_availability():
 
 
 def test_deadline_priority_with_auto_assignment():
-    """Test that tasks with deadlines get first pick of resources."""
+    """Test that tasks with tight deadlines get first pick of resources."""
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),
@@ -238,17 +238,22 @@ def test_deadline_priority_with_auto_assignment():
         groups={},
     )
 
-    # Task with deadline
+    # Task with tight deadline: 3 days away, 3 days duration → CR = 3/3 = 1.0 (critical!)
+    # Give it higher priority to ensure it wins
+    # With CR=1.0 and priority=80: score = 10*1.0 + 1*(100-80) = 30
     task1 = Task(
         id="task_urgent",
         duration_days=3.0,
         resources=[],
         dependencies=[],
         resource_spec="*",
-        end_before=date(2025, 1, 10),  # Has deadline
+        end_before=date(2025, 1, 3),  # Critical deadline
+        meta={"priority": 80},
     )
 
-    # Task without deadline
+    # Task without deadline (will get median CR = 1.0, priority=50)
+    # With CR=1.0 and priority=50: score = 10*1.0 + 1*(100-50) = 60
+    # Higher score = less urgent, so this task waits
     task2 = Task(
         id="task_regular",
         duration_days=3.0,

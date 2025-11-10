@@ -298,13 +298,31 @@ class TestGanttScheduler:
         """Test that urgent tasks are scheduled first."""
         metadata = FeatureMapMetadata()
 
-        # Two independent tasks, one with tight deadline
+        # Two independent tasks, one with very tight deadline
+        # Urgent task: deadline in 7 days, duration 7 days → CR = 7/7 = 1.0 (critical!)
         task_urgent = Entity(
             type="capability",
             id="task_urgent",
             name="Urgent",
-            description="Has deadline",
-            meta={"effort": "1w", "resources": ["alice"], "end_before": "2025-01-15"},
+            description="Has critical deadline",
+            meta={"effort": "1w", "resources": ["alice"], "end_before": "2025-01-07"},
+        )
+        # Normal task: no deadline, will get median CR = 1.0, but lower priority alphabetically
+        # To ensure normal task loses, give urgent task higher priority
+        # With CR=1.0 and priority=80: score = 10*1.0 + 1*(100-80) = 30
+        # Normal with CR=1.0 and priority=50: score = 10*1.0 + 1*(100-50) = 60
+        # Lower score = more urgent, so urgent wins
+        task_urgent2 = Entity(
+            type="capability",
+            id="task_urgent",
+            name="Urgent",
+            description="Has critical deadline",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "end_before": "2025-01-07",
+                "priority": 80,
+            },
         )
         task_normal = Entity(
             type="capability",
@@ -313,6 +331,9 @@ class TestGanttScheduler:
             description="No deadline",
             meta={"effort": "1w", "resources": ["alice"]},
         )
+
+        # Use the version with priority
+        task_urgent = task_urgent2
 
         entities = [task_normal, task_urgent]  # Intentionally wrong order
         feature_map = FeatureMap(metadata=metadata, entities=entities)
@@ -323,7 +344,7 @@ class TestGanttScheduler:
         task_urgent_result = next(t for t in result.tasks if t.entity_id == "task_urgent")
         task_normal_result = next(t for t in result.tasks if t.entity_id == "task_normal")
 
-        # Urgent task should be scheduled first
+        # Urgent task should be scheduled first (lower CR = more urgent)
         assert task_urgent_result.start_date < task_normal_result.start_date
 
     def test_start_after_constraint(self, base_date: date) -> None:

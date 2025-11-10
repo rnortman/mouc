@@ -4,7 +4,7 @@ import bisect
 import re
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mouc.resources import UNASSIGNED_RESOURCE
 
@@ -143,6 +143,16 @@ def parse_timeframe(  # noqa: PLR0911, PLR0912, PLR0915 - Timeframe parser handl
 
 
 @dataclass
+class SchedulingConfig:
+    """Configuration for task prioritization."""
+
+    strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted"
+    cr_weight: float = 10.0
+    priority_weight: float = 1.0
+    default_cr: float | str = "median"
+
+
+@dataclass
 class Task:
     """A task to be scheduled."""
 
@@ -157,6 +167,7 @@ class Task:
     resource_spec: str | None = (
         None  # Original resource spec for auto-assignment (e.g., "*", "john|mary")
     )
+    meta: dict[str, Any] | None = None  # Entity metadata (including priority)
 
 
 @dataclass
@@ -339,6 +350,7 @@ class SchedulerInputValidator:
             start_on=start_date,
             end_on=end_date,
             resource_spec=resource_spec,
+            meta=entity.meta,
         )
 
         return (task, False, is_computed)
@@ -565,7 +577,7 @@ class ParallelScheduler:
     This scheduler:
     1. Computes latest acceptable dates via backward pass
     2. Advances through time chronologically
-    3. At each time point, schedules eligible tasks by deadline priority
+    3. At each time point, schedules eligible tasks by critical ratio and priority
     4. Fills gaps naturally by always trying to schedule work as early as possible
     """
 
@@ -575,6 +587,7 @@ class ParallelScheduler:
         current_date: date,
         resource_config: "ResourceConfig | None" = None,
         completed_task_ids: set[str] | None = None,
+        config: SchedulingConfig | None = None,
     ):
         """Initialize the scheduler.
 
@@ -583,11 +596,13 @@ class ParallelScheduler:
             current_date: The current date (baseline for scheduling)
             resource_config: Optional resource configuration for auto-assignment
             completed_task_ids: Set of task IDs that are already completed (done without dates)
+            config: Optional scheduling configuration for prioritization strategy
         """
         self.tasks = {task.id: task for task in tasks}
         self.current_date = current_date
         self.resource_config = resource_config
         self.completed_task_ids = completed_task_ids or set()
+        self.config = config or SchedulingConfig()
         self._computed_deadlines: dict[str, date] = {}
 
     def schedule(self) -> list[ScheduledTask]:
@@ -745,6 +760,94 @@ class ParallelScheduler:
 
         return latest
 
+    def _compute_default_cr(
+        self,
+        unscheduled_task_ids: set[str],
+        current_time: date,
+        latest_dates: dict[str, date],
+    ) -> float:
+        """Compute median CR for tasks without deadlines.
+
+        Recomputed at each scheduling step to adapt to remaining work.
+
+        Args:
+            unscheduled_task_ids: Set of task IDs not yet scheduled
+            current_time: Current scheduling time
+            latest_dates: Latest acceptable finish dates from backward pass
+
+        Returns:
+            Median critical ratio or fallback value
+        """
+        # Handle explicit numeric default_cr
+        if isinstance(self.config.default_cr, (int, float)):
+            return float(self.config.default_cr)
+
+        # Compute CRs for all deadline tasks
+        crs: list[float] = []
+        for task_id in unscheduled_task_ids:
+            deadline = latest_dates.get(task_id)
+            if deadline and deadline != date.max:
+                slack = (deadline - current_time).days
+                duration = self.tasks[task_id].duration_days
+                cr = slack / max(duration, 0.1)  # Avoid division by zero
+                crs.append(cr)
+
+        # No deadline tasks left - use fallback
+        if not crs:
+            return 15.0
+
+        # Return median
+        sorted_crs = sorted(crs)
+        return sorted_crs[len(sorted_crs) // 2]
+
+    def _compute_sort_key(
+        self,
+        task_id: str,
+        current_time: date,
+        latest_dates: dict[str, date],
+        default_cr: float,
+    ) -> tuple[float, ...] | tuple[float, float, str] | tuple[float, str]:
+        """Compute sort key for task prioritization.
+
+        Returns tuple for sorting (lower = higher priority).
+
+        Args:
+            task_id: Task ID to compute key for
+            current_time: Current scheduling time
+            latest_dates: Latest acceptable finish dates from backward pass
+            default_cr: Default CR for tasks without deadlines
+
+        Returns:
+            Tuple suitable for sorting (lower = more urgent)
+        """
+        task = self.tasks[task_id]
+
+        # Get priority (default 50)
+        priority = 50
+        if task.meta:
+            priority_value = task.meta.get("priority", 50)
+            if isinstance(priority_value, (int, float)):
+                priority = int(priority_value)
+
+        # Compute critical ratio
+        deadline = latest_dates.get(task_id)
+        if deadline and deadline != date.max:
+            slack = (deadline - current_time).days
+            cr = slack / max(task.duration_days, 0.1)
+        else:
+            cr = default_cr
+
+        # Apply strategy
+        if self.config.strategy == "priority_first":
+            return (float(-priority), cr, task_id)
+        if self.config.strategy == "cr_first":
+            return (cr, float(-priority), task_id)
+        if self.config.strategy == "weighted":
+            score = self.config.cr_weight * cr + self.config.priority_weight * (100 - priority)
+            return (score, task_id)
+        msg = f"Unknown scheduling strategy: {self.config.strategy}"
+        raise ValueError(msg)
+
     def _schedule_forward(  # noqa: PLR0912, PLR0915 - Scheduling algorithm requires complex dependency and resource management
         self, latest_dates: dict[str, date], fixed_tasks: list[ScheduledTask]
     ) -> list[ScheduledTask]:
@@ -837,15 +940,12 @@ class ParallelScheduler:
                 if earliest <= current_time:
                     eligible.append(task_id)
 
-            # Sort eligible tasks by deadline priority
-            # Tasks with deadlines always beat tasks without deadlines
-            # Among deadline tasks, sooner deadlines win
-            # Among non-deadline tasks, deterministic by ID
+            # Compute adaptive default CR for this time step
+            default_cr = self._compute_default_cr(unscheduled, current_time, latest_dates)
+
+            # Sort by configured strategy (CR, priority, or weighted combination)
             eligible.sort(
-                key=lambda tid: (
-                    latest_dates.get(tid, date.max),  # Primary: deadline (sooner is better)
-                    tid,  # Secondary: deterministic tiebreaker
-                )
+                key=lambda tid: self._compute_sort_key(tid, current_time, latest_dates, default_cr)
             )
 
             # Try to schedule each eligible task

@@ -10,7 +10,7 @@ The scheduler implements a variant of the **Parallel Schedule Generation Scheme 
 2. **Respect constraints** - Honor `start_after` and `end_before` dates
 3. **Manage resources** - Prevent resource over-allocation
 4. **Minimize gaps** - Fill available time slots as early as possible
-5. **Meet deadlines** - Prioritize tasks by deadline urgency
+5. **Prioritize intelligently** - Use Critical Ratio and Priority to determine task urgency
 
 ## Algorithm Phases
 
@@ -84,11 +84,11 @@ while unscheduled:
             if earliest_start <= current_time:
                 eligible.append(task)
 
-    # Step 2: Sort by deadline urgency
-    eligible.sort(key=lambda t: (
-        latest_dates.get(t, date.max),  # Primary: deadline
-        t.id                             # Secondary: stable sort
-    ))
+    # Step 2: Sort by urgency (Critical Ratio + Priority)
+    default_cr = compute_median_cr(unscheduled, current_time, latest_dates)
+    eligible.sort(key=lambda t:
+        compute_sort_key(t, current_time, latest_dates, default_cr)
+    )
 
     # Step 3: Schedule tasks that fit
     scheduled_any = False
@@ -106,6 +106,98 @@ while unscheduled:
 ```
 
 ## Key Concepts
+
+### Critical Ratio (CR)
+
+**Critical Ratio** measures the urgency of a deadline task by comparing available time to work needed:
+
+```
+CR = slack / duration
+```
+
+Where:
+- `slack` = days until deadline (from current scheduling time)
+- `duration` = days of work needed
+
+**Interpretation:**
+- **CR = 1.0**: Exactly enough time, must start now (critical)
+- **CR < 1.0**: Deadline will be missed without intervention
+- **CR = 2-3**: Tight deadline, urgent
+- **CR = 5-8**: Normal buffer
+- **CR = 10+**: Relaxed, plenty of time
+
+**Lower CR = more urgent**
+
+**Example:**
+
+At Jan 1, two tasks with the same deadline (Jan 31):
+- Task A: duration 20 days → slack=30, CR=30/20=1.5 (tight, needs to start soon)
+- Task B: duration 1 day → slack=30, CR=30/1=30.0 (relaxed, can wait)
+
+CR correctly identifies that Task A needs to start earlier despite having the same deadline as Task B.
+
+**Why Critical Ratio?**
+
+The old approach sorted tasks by raw deadline, ignoring duration. This caused problems:
+- Task with 1-day duration and Jan 31 deadline got same priority as
+- Task with 20-day duration and Jan 31 deadline
+
+CR fixes this by accounting for how long each task takes.
+
+### Priority
+
+**Priority** is a user-specified urgency indicator (0-100, default 50) in task metadata:
+
+```yaml
+task_id:
+  effort: 5d
+  resources: [alice]
+  end_before: 2025-01-31
+  meta:
+    priority: 80  # Higher than default = more urgent
+```
+
+**For tasks with deadlines:** Priority represents "importance of meeting this deadline"
+- High priority = treat as more urgent than CR alone suggests
+- Low priority = treat as less urgent than CR alone suggests
+
+**For tasks without deadlines:** Priority represents "general importance/urgency"
+- High priority = should be done soon despite no deadline
+- Low priority = background work, do when there's slack
+
+**No-Deadline Tasks:**
+
+Tasks without `end_before` constraints get assigned the **median CR** of all deadline tasks at each scheduling step. This median adapts as work progresses:
+- Tight project (median CR=2): No-deadline work waits for urgent deadline work
+- Relaxed project (median CR=20): No-deadline work gets scheduled sooner
+- If no deadline tasks exist, fallback CR of 15.0 is used
+
+### Scheduling Strategies
+
+The scheduler combines CR and Priority using one of three strategies (currently hardcoded to `weighted`; configuration planned for future):
+
+**1. Weighted (default):**
+```
+score = cr_weight × CR + priority_weight × (100 - priority)
+```
+- Default weights: `cr_weight=10.0`, `priority_weight=1.0`
+- Lower score = more urgent
+- Smoothly blends both factors
+- High priority can overcome moderate CR differences
+
+**2. Priority-First (lexicographic):**
+```
+sort_key = (-priority, CR, task_id)
+```
+- Priority dominates, CR only breaks ties
+- Use when priority is paramount
+
+**3. CR-First (lexicographic):**
+```
+sort_key = (CR, -priority, task_id)
+```
+- CR dominates, priority only breaks ties
+- Use when deadlines are critical
 
 ### Eligible Tasks
 
@@ -143,50 +235,62 @@ Consider three tasks, all requiring the same resource "alice":
 
 ```yaml
 task_A:
-  effort: 5d
+  effort: 20d
   resources: [alice]
-  # No constraints
+  end_before: 2025-01-31  # 30 days out
 
 task_B:
   effort: 5d
   resources: [alice]
-  end_before: 2025-11-20  # Deadline
+  end_before: 2025-01-31  # Same deadline, but shorter!
+  meta:
+    priority: 50
 
 task_C:
   effort: 5d
   resources: [alice]
-  start_after: 2025-12-01  # Can't start until December
+  start_after: 2025-02-01  # Can't start until February
+  meta:
+    priority: 80  # High priority
 ```
 
 **Backward Pass Results:**
-- task_B: latest_date = 2025-11-20 (explicit deadline)
-- task_A: latest_date = None (no deadline)
+- task_A: latest_date = 2025-01-31 (explicit deadline)
+- task_B: latest_date = 2025-01-31 (same deadline)
 - task_C: latest_date = None (no deadline)
 
-**Forward Pass Execution:**
+**Forward Pass Execution (starting Jan 1, 2025):**
 
-*Time = 2025-11-04:*
-- Eligible: task_A (no constraints), task_B (no constraints)
+*Time = 2025-01-01:*
+- Eligible: task_A, task_B (both have satisfied constraints)
 - NOT eligible: task_C (start_after > current_time)
-- Sort by deadline: [task_B (2025-11-20), task_A (None)]
-- Schedule: task_B from Nov 4-9
-- Alice is now busy until Nov 9
+- Compute CRs:
+  - task_A: CR = 30/20 = 1.5 (tight! needs to start soon)
+  - task_B: CR = 30/5 = 6.0 (relaxed, can wait)
+- Median CR for no-deadline tasks: 3.75 (median of [1.5, 6.0])
+- Compute weighted scores (cr_weight=10, priority_weight=1):
+  - task_A: 10×1.5 + 1×50 = 65
+  - task_B: 10×6.0 + 1×50 = 110
+- Sort: [task_A (65), task_B (110)] — task_A wins despite same deadline!
+- Schedule: task_A from Jan 1-21
+- Alice is now busy until Jan 21
 
-*Time = 2025-11-10:*
-- Eligible: task_A (no constraints)
+*Time = 2025-01-22:*
+- Eligible: task_B (no constraints)
 - NOT eligible: task_C (start_after > current_time)
-- Schedule: task_A from Nov 10-15
-- Alice is now busy until Nov 15
+- Schedule: task_B from Jan 22-27
+- Alice is now busy until Jan 27
 
-*Time = 2025-11-16:*
+*Time = 2025-01-28:*
 - No eligible tasks (task_C still can't start)
-- Advance to next event: 2025-12-01
+- Advance to next event: 2025-02-01
 
-*Time = 2025-12-01:*
+*Time = 2025-02-01:*
 - Eligible: task_C (start_after satisfied)
-- Schedule: task_C from Dec 1-6
+- No deadline tasks left, so task_C gets fallback CR = 15.0
+- Schedule: task_C from Feb 1-6
 
-**Result:** No gaps! Tasks are scheduled contiguously when possible, with deadline-constrained tasks getting priority.
+**Result:** CR-based scheduling correctly prioritized the long-duration task (task_A) over the short-duration task (task_B) even though they had the same deadline. The old deadline-only approach would have scheduled them arbitrarily or by task ID, potentially missing the Jan 31 deadline for task_A.
 
 ## Differences from Priority Queue Approach
 
@@ -241,10 +345,37 @@ Tasks with no specified resources (or `resources: [unassigned]`) don't compete f
   - Need to track busy periods for each resource
   - ResourceSchedule uses sorted lists for efficient interval queries
 
+## Configuration
+
+Currently, the scheduler is hardcoded to use the **weighted strategy** with default weights:
+- `strategy: "weighted"`
+- `cr_weight: 10.0`
+- `priority_weight: 1.0`
+- `default_cr: "median"`
+
+These parameters control how CR and Priority are combined to determine task urgency. In the future, these may be exposed via configuration files.
+
+**Priority in YAML:**
+
+Add priority to task metadata:
+
+```yaml
+capabilities:
+  - id: auth_service
+    name: "Authentication Service"
+    meta:
+      effort: "20d"
+      priority: 80  # High priority (0-100, default 50)
+      resources: ["backend_team"]
+      end_before: "2025-01-31"
+```
+
 ## Benefits
 
 1. **No gaps**: The algorithm naturally fills available time slots
-2. **Deadline aware**: Tasks with deadlines get appropriate priority
-3. **Predictable**: Chronological processing is intuitive
-4. **Optimal**: Follows proven RCPSP scheduling approaches
-5. **Flexible**: Handles various constraints (dependencies, time windows, resources)
+2. **Duration-aware**: CR accounts for task duration when prioritizing deadlines
+3. **User control**: Priority metadata allows manual urgency adjustments
+4. **Adaptive**: Median CR for no-deadline tasks adjusts to project urgency
+5. **Predictable**: Chronological processing is intuitive
+6. **Optimal**: Follows proven RCPSP scheduling approaches
+7. **Flexible**: Handles various constraints (dependencies, time windows, resources, priorities)

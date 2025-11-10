@@ -37,6 +37,7 @@ class GanttMetadata(BaseModel):
     end_before: str | date | None = None  # Constraint: hard deadline
     timeframe: str | None = None  # Convenience: sets start_after and end_before from timeframe
     status: str | None = None  # Task status: "done" marks task as completed
+    priority: int = 50  # Urgency indicator (0-100, default 50)
 
 
 @dataclass(slots=True, frozen=True)
@@ -143,6 +144,7 @@ class GanttScheduler:
             start_on=start,
             end_on=end,
             resource_spec=resource_spec,
+            meta=entity.meta,
         )
 
     def _extract_constraints(self, gantt_meta: GanttMetadata) -> tuple[date | None, date | None]:
@@ -184,6 +186,7 @@ class GanttScheduler:
             start_after=start_after,
             end_before=end_before,
             resource_spec=resource_spec,
+            meta=entity.meta,
         )
 
     def _convert_scheduler_results(
