@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Markdown document organization**: New `markdown.organization` config controls entity grouping and sorting
+  - Primary grouping: `by_type`, `by_timeframe`, `alpha_by_id`, or `yaml_order`
+  - Secondary grouping: nest timeframes within types or types within timeframes
+  - Configurable entity type order when using `by_type`
+- **ToC suppression**: Set `markdown.toc_sections: []` to suppress table of contents
+
+### Changed
+- **Breaking**: `markdown.sections` renamed to `markdown.toc_sections` for clarity
+
 ## [0.1.9] - 2025-11-09
 
 ### Fixed

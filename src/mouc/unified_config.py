@@ -22,10 +22,19 @@ class GanttConfig(BaseModel):
     markdown_base_url: str | None = None
 
 
+class OrganizationConfig(BaseModel):
+    """Configuration for markdown document organization."""
+
+    primary: str = "by_type"  # "alpha_by_id", "yaml_order", "by_type", "by_timeframe"
+    secondary: str | None = None  # "by_timeframe" or "by_type"
+    entity_type_order: list[str] = ["capability", "user_story", "outcome"]
+
+
 class MarkdownConfig(BaseModel):
     """Configuration for markdown document generation."""
 
-    sections: list[str] = ["timeline", "capabilities", "user_stories", "outcomes"]
+    toc_sections: list[str] = ["timeline", "capabilities", "user_stories", "outcomes"]
+    organization: OrganizationConfig = OrganizationConfig()
 
 
 class UnifiedConfig(BaseModel):

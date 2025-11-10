@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from . import styling
 from .models import Link
+from .unified_config import OrganizationConfig
 
 if TYPE_CHECKING:
-    from .models import Entity, FeatureMap
+    from .models import FeatureMap
     from .unified_config import MarkdownConfig
+
+# Import Entity for runtime use (needed for cast and type annotations)
+from .models import Entity
+
+# Type aliases for organization structure
+OrganizedSection = tuple[str, list[Entity]]
+NestedOrganizedSection = tuple[str, list[tuple[str, list[Entity]]]]
+OrganizedStructure = list[OrganizedSection] | list[NestedOrganizedSection]
 
 
 def make_anchor(entity_id: str, feature_map: FeatureMap) -> str:
@@ -55,39 +64,33 @@ class MarkdownGenerator:
         self.feature_map = feature_map
         # Create styling context
         self.styling_context = styling.create_styling_context(feature_map)
-        # Store sections to generate (default to all if no config provided)
-        self.sections = (
-            markdown_config.sections
+        # Store TOC sections to generate (default to all if no config provided)
+        self.toc_sections = (
+            markdown_config.toc_sections
             if markdown_config
             else ["timeline", "capabilities", "user_stories", "outcomes"]
+        )
+        # Store organization config (default to alpha_by_id if no config provided)
+        self.organization = (
+            markdown_config.organization if markdown_config else OrganizationConfig()
         )
 
     def generate(self) -> str:
         """Generate complete markdown documentation."""
-        # Map section names to their generator methods
-        section_generators = {
-            "capabilities": self._generate_capabilities_section,
-            "user_stories": self._generate_user_stories_section,
-            "outcomes": self._generate_outcomes_section,
-        }
-
         # Always include header
         output_sections = [self._generate_header()]
 
         # Add timeline before TOC if included (maintains original ordering)
-        if "timeline" in self.sections:
+        if "timeline" in self.toc_sections:
             output_sections.append(self._generate_timeline())
             output_sections.append(self._check_backward_dependencies())
 
-        # Add TOC if any content sections are enabled
-        content_sections = [s for s in self.sections if s in section_generators]
-        if content_sections:
+        # Add TOC if enabled (skip if toc_sections is empty)
+        if self.toc_sections:
             output_sections.append(self._generate_toc())
 
-        # Generate content sections in configured order
-        for section_name in self.sections:
-            if section_name in section_generators:
-                output_sections.append(section_generators[section_name]())
+        # Generate body sections based on organization config
+        output_sections.append(self._generate_organized_sections())
 
         return "\n\n".join(section for section in output_sections if section)
 
@@ -110,42 +113,37 @@ class MarkdownGenerator:
         return "\n".join(lines)
 
     def _generate_toc(self) -> str:
-        """Generate table of contents."""
+        """Generate table of contents based on body organization."""
         lines = ["## Table of Contents", ""]
 
-        # Map section names to their entity types and section headers
-        section_config = {
-            "capabilities": {
-                "entity_type": "capability",
-                "header": "Capabilities",
-                "anchor": "capabilities",
-            },
-            "user_stories": {
-                "entity_type": "user_story",
-                "header": "User Stories",
-                "anchor": "user-stories",
-            },
-            "outcomes": {
-                "entity_type": "outcome",
-                "header": "Outcomes",
-                "anchor": "outcomes",
-            },
-        }
+        # Get organized structure
+        organized = self._organize_entities()
 
-        # Generate TOC entries in configured section order
-        for section_name in self.sections:
-            if section_name not in section_config:
-                continue
+        # Generate TOC entries based on actual body structure
+        for item in organized:
+            heading, content = item
+            section_anchor = self._make_anchor_from_text(heading)
 
-            config = section_config[section_name]
-            entities = self.feature_map.get_entities_by_type(config["entity_type"])
-
-            if entities:
-                lines.append(f"- [{config['header']}](#{config['anchor']})")
-                for entity in sorted(entities, key=lambda e: e.id):
-                    anchor = self._make_anchor(entity.id)
+            # Check if content has subsections (nested structure)
+            if content and isinstance(content[0], tuple):
+                # Has subsections - add top-level link
+                nested_content = cast(list[tuple[str, list[Entity]]], content)
+                lines.append(f"- [{heading}](#{section_anchor})")
+                for subheading, entities in nested_content:
+                    subsection_anchor = self._make_anchor_from_text(subheading)
+                    lines.append(f"  - [{subheading}](#{subsection_anchor})")
+                    for entity in entities:
+                        entity_anchor = self._make_anchor(entity.id)
+                        type_label = self._format_type_label(entity)
+                        lines.append(f"    - [{entity.name}](#{entity_anchor}){type_label}")
+            else:
+                # Direct list of entities
+                entity_list = cast(list[Entity], content)
+                lines.append(f"- [{heading}](#{section_anchor})")
+                for entity in entity_list:
+                    entity_anchor = self._make_anchor(entity.id)
                     type_label = self._format_type_label(entity)
-                    lines.append(f"  - [{entity.name}](#{anchor}){type_label}")
+                    lines.append(f"  - [{entity.name}](#{entity_anchor}){type_label}")
 
         return "\n".join(lines)
 
@@ -250,6 +248,167 @@ class MarkdownGenerator:
             return "\n".join(lines)
 
         return ""
+
+    def _get_sorted_entities(self, entities: list[Entity]) -> list[Entity]:
+        """Sort entities based on the primary organization mode."""
+        if self.organization.primary == "alpha_by_id":
+            return sorted(entities, key=lambda e: e.id)
+        if self.organization.primary == "yaml_order":
+            # Entities are already in YAML order in the list
+            return entities
+        # For by_type and by_timeframe, sorting happens in grouping
+        return sorted(entities, key=lambda e: e.id)
+
+    def _group_entities_by_type(self, entities: list[Entity]) -> dict[str, list[Entity]]:
+        """Group entities by their type."""
+        groups: dict[str, list[Entity]] = {}
+        for entity in entities:
+            if entity.type not in groups:
+                groups[entity.type] = []
+            groups[entity.type].append(entity)
+        return groups
+
+    def _group_entities_by_timeframe(self, entities: list[Entity]) -> dict[str, list[Entity]]:
+        """Group entities by their timeframe metadata."""
+        groups: dict[str, list[Entity]] = {}
+        for entity in entities:
+            timeframe = entity.meta.get("timeframe", "Unscheduled")
+            if timeframe not in groups:
+                groups[timeframe] = []
+            groups[timeframe].append(entity)
+        return groups
+
+    def _get_type_display_name(self, entity_type: str) -> str:
+        """Get display name for entity type."""
+        type_names = {
+            "capability": "Capabilities",
+            "user_story": "User Stories",
+            "outcome": "Outcomes",
+        }
+        return type_names.get(entity_type, entity_type.title())
+
+    def _organize_entities(  # noqa: PLR0911, PLR0912
+        self,
+    ) -> OrganizedStructure:
+        """Organize entities based on configuration.
+
+        Returns:
+            For no secondary grouping: list of (heading, entities)
+            For secondary grouping: list of (primary_heading, [(secondary_heading, entities)])
+        """
+        all_entities = self.feature_map.entities
+
+        # Handle primary grouping
+        if self.organization.primary in ("alpha_by_id", "yaml_order"):
+            # Single flat section with all entities
+            sorted_entities = self._get_sorted_entities(all_entities)
+            if self.organization.secondary == "by_timeframe":
+                # Group by timeframe within the flat list
+                timeframe_groups = self._group_entities_by_timeframe(sorted_entities)
+                sorted_timeframes = sorted(timeframe_groups.keys())
+                subsections = [
+                    (tf, sorted(timeframe_groups[tf], key=lambda e: e.id))
+                    for tf in sorted_timeframes
+                ]
+                return [("Entities", subsections)]
+            if self.organization.secondary == "by_type":
+                # Group by type within the flat list
+                type_groups = self._group_entities_by_type(sorted_entities)
+                ordered_types = self.organization.entity_type_order
+                subsections = [
+                    (self._get_type_display_name(t), sorted(type_groups[t], key=lambda e: e.id))
+                    for t in ordered_types
+                    if t in type_groups
+                ]
+                return [("Entities", subsections)]
+            # No secondary grouping
+            return [("Entities", sorted_entities)]
+
+        if self.organization.primary == "by_type":
+            type_groups = self._group_entities_by_type(all_entities)
+            ordered_types = self.organization.entity_type_order
+
+            if self.organization.secondary == "by_timeframe":
+                # Primary: type sections, Secondary: timeframe subsections
+                result: list[NestedOrganizedSection] = []
+                for entity_type in ordered_types:
+                    if entity_type not in type_groups:
+                        continue
+                    type_entities = type_groups[entity_type]
+                    timeframe_groups = self._group_entities_by_timeframe(type_entities)
+                    sorted_timeframes = sorted(timeframe_groups.keys())
+                    subsections: list[tuple[str, list[Entity]]] = [
+                        (tf, sorted(timeframe_groups[tf], key=lambda e: e.id))
+                        for tf in sorted_timeframes
+                    ]
+                    result.append((self._get_type_display_name(entity_type), subsections))
+                return result
+            # No secondary grouping, just sorted by ID within each type
+            result_simple: list[OrganizedSection] = []
+            for entity_type in ordered_types:
+                if entity_type not in type_groups:
+                    continue
+                sorted_entities = sorted(type_groups[entity_type], key=lambda e: e.id)
+                result_simple.append((self._get_type_display_name(entity_type), sorted_entities))
+            return result_simple
+
+        if self.organization.primary == "by_timeframe":
+            timeframe_groups = self._group_entities_by_timeframe(all_entities)
+            sorted_timeframes = sorted(timeframe_groups.keys())
+
+            if self.organization.secondary == "by_type":
+                # Primary: timeframe sections, Secondary: type subsections
+                result_nested: list[NestedOrganizedSection] = []
+                for timeframe in sorted_timeframes:
+                    tf_entities = timeframe_groups[timeframe]
+                    type_groups = self._group_entities_by_type(tf_entities)
+                    ordered_types = self.organization.entity_type_order
+                    subsections_list: list[tuple[str, list[Entity]]] = [
+                        (self._get_type_display_name(t), sorted(type_groups[t], key=lambda e: e.id))
+                        for t in ordered_types
+                        if t in type_groups
+                    ]
+                    result_nested.append((timeframe, subsections_list))
+                return result_nested
+            # No secondary grouping, just sorted by ID within each timeframe
+            result_flat: list[OrganizedSection] = []
+            for timeframe in sorted_timeframes:
+                sorted_entities = sorted(timeframe_groups[timeframe], key=lambda e: e.id)
+                result_flat.append((timeframe, sorted_entities))
+            return result_flat
+
+        # Default fallback
+        return [("Entities", sorted(all_entities, key=lambda e: e.id))]
+
+    def _generate_organized_sections(self) -> str:
+        """Generate document body sections based on organization config."""
+        organized = self._organize_entities()
+        lines: list[str] = []
+
+        for item in organized:
+            heading, content = item
+            # Check if content is a list of entities or a list of subsections
+            if content and isinstance(content[0], tuple):
+                # Has subsections - nested structure
+                nested_content = cast(list[tuple[str, list[Entity]]], content)
+                lines.append(f"## {heading}")
+                lines.append("")
+                for subheading, entities in nested_content:
+                    lines.append(f"### {subheading}")
+                    lines.append("")
+                    for entity in entities:
+                        lines.extend(self._format_entity(entity))
+                        lines.append("")
+            else:
+                # Direct list of entities
+                entity_list = cast(list[Entity], content)
+                lines.append(f"## {heading}")
+                lines.append("")
+                for entity in entity_list:
+                    lines.extend(self._format_entity(entity))
+                    lines.append("")
+
+        return "\n".join(lines).rstrip()
 
     def _generate_capabilities_section(self) -> str:
         """Generate capabilities section."""
@@ -407,6 +566,18 @@ class MarkdownGenerator:
     def _make_anchor(self, entity_id: str) -> str:
         """Create a valid HTML anchor from an entity name."""
         return make_anchor(entity_id, self.feature_map)
+
+    def _make_anchor_from_text(self, text: str) -> str:
+        """Create a valid markdown anchor from any text."""
+        # Convert to lowercase, replace spaces with hyphens
+        anchor = text.lower().replace(" ", "-")
+        # Remove characters that aren't alphanumeric or hyphens
+        anchor = "".join(c for c in anchor if c.isalnum() or c == "-")
+        # Remove multiple consecutive hyphens
+        while "--" in anchor:
+            anchor = anchor.replace("--", "-")
+        # Remove leading/trailing hyphens
+        return anchor.strip("-")
 
     def _format_type_label(self, entity: Entity) -> str:
         """Format type label with styling applied."""

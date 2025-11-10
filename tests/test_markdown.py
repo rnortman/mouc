@@ -6,7 +6,7 @@ import pytest
 from mouc.markdown import MarkdownGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
-from mouc.unified_config import MarkdownConfig
+from mouc.unified_config import MarkdownConfig, OrganizationConfig
 
 
 class TestMarkdownGenerator:
@@ -79,7 +79,9 @@ class TestMarkdownGenerator:
 
     def test_generate_toc(self, simple_feature_map: FeatureMap) -> None:
         """Test table of contents generation."""
-        generator = MarkdownGenerator(simple_feature_map)
+        # Use by_type organization to get type-based sections
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
         assert "## Table of Contents" in markdown
@@ -93,7 +95,9 @@ class TestMarkdownGenerator:
 
     def test_generate_capabilities_section(self, simple_feature_map: FeatureMap) -> None:
         """Test capabilities section generation."""
-        generator = MarkdownGenerator(simple_feature_map)
+        # Use by_type organization to get type-based sections
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
         assert "## Capabilities" in markdown
@@ -113,7 +117,9 @@ class TestMarkdownGenerator:
 
     def test_generate_user_stories_section(self, simple_feature_map: FeatureMap) -> None:
         """Test user stories section generation."""
-        generator = MarkdownGenerator(simple_feature_map)
+        # Use by_type organization to get type-based sections
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
         assert "## User Stories" in markdown
@@ -124,7 +130,9 @@ class TestMarkdownGenerator:
 
     def test_generate_outcomes_section(self, simple_feature_map: FeatureMap) -> None:
         """Test outcomes section generation."""
-        generator = MarkdownGenerator(simple_feature_map)
+        # Use by_type organization to get type-based sections
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
         assert "## Outcomes" in markdown
@@ -214,7 +222,9 @@ class TestMarkdownGenerator:
             entities=entities,
         )
 
-        generator = MarkdownGenerator(feature_map)
+        # Use by_type organization to get type-based sections
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        generator = MarkdownGenerator(feature_map, config)
         markdown = generator.generate()
 
         assert "## Capabilities" in markdown
@@ -562,7 +572,11 @@ class TestMarkdownGenerator:
 
     def test_custom_section_ordering(self, simple_feature_map: FeatureMap) -> None:
         """Test that sections appear in configured order."""
-        config = MarkdownConfig(sections=["outcomes", "user_stories", "capabilities"])
+        config = MarkdownConfig(
+            organization=OrganizationConfig(
+                primary="by_type", entity_type_order=["outcome", "user_story", "capability"]
+            )
+        )
         generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
@@ -576,8 +590,13 @@ class TestMarkdownGenerator:
         assert stories_pos < capabilities_pos
 
     def test_section_exclusion(self, simple_feature_map: FeatureMap) -> None:
-        """Test that excluded sections don't appear in output."""
-        config = MarkdownConfig(sections=["capabilities", "outcomes"])
+        """Test that excluded types don't appear when not in entity_type_order."""
+        config = MarkdownConfig(
+            organization=OrganizationConfig(
+                primary="by_type",
+                entity_type_order=["capability", "outcome"],  # Exclude user_story
+            )
+        )
         generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
@@ -605,20 +624,24 @@ class TestMarkdownGenerator:
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
         # With timeline in sections
-        config_with_timeline = MarkdownConfig(sections=["timeline", "capabilities"])
+        config_with_timeline = MarkdownConfig(toc_sections=["timeline", "capabilities"])
         generator_with = MarkdownGenerator(feature_map, config_with_timeline)
         markdown_with = generator_with.generate()
         assert "## Timeline" in markdown_with
 
         # Without timeline in sections
-        config_without_timeline = MarkdownConfig(sections=["capabilities"])
+        config_without_timeline = MarkdownConfig(toc_sections=["capabilities"])
         generator_without = MarkdownGenerator(feature_map, config_without_timeline)
         markdown_without = generator_without.generate()
         assert "## Timeline" not in markdown_without
 
     def test_toc_respects_section_ordering(self, simple_feature_map: FeatureMap) -> None:
-        """Test that TOC entries appear in configured section order."""
-        config = MarkdownConfig(sections=["user_stories", "outcomes", "capabilities"])
+        """Test that TOC entries match body organization."""
+        config = MarkdownConfig(
+            organization=OrganizationConfig(
+                primary="by_type", entity_type_order=["user_story", "outcome", "capability"]
+            )
+        )
         generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
@@ -632,13 +655,18 @@ class TestMarkdownGenerator:
         outcomes_toc = toc_section.find("- [Outcomes]")
         capabilities_toc = toc_section.find("- [Capabilities]")
 
-        # Verify order in TOC matches config
+        # Verify order in TOC matches body organization
         assert stories_toc < outcomes_toc
         assert outcomes_toc < capabilities_toc
 
     def test_toc_excludes_missing_sections(self, simple_feature_map: FeatureMap) -> None:
-        """Test that TOC only includes enabled sections."""
-        config = MarkdownConfig(sections=["capabilities", "outcomes"])
+        """Test that TOC only includes sections from body organization."""
+        config = MarkdownConfig(
+            organization=OrganizationConfig(
+                primary="by_type",
+                entity_type_order=["capability", "outcome"],  # Exclude user_story
+            )
+        )
         generator = MarkdownGenerator(simple_feature_map, config)
         markdown = generator.generate()
 
@@ -697,7 +725,7 @@ class TestMarkdownGenerator:
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
         # With timeline disabled
-        config = MarkdownConfig(sections=["capabilities"])
+        config = MarkdownConfig(toc_sections=["capabilities"])
         generator = MarkdownGenerator(feature_map, config)
         markdown = generator.generate()
 
@@ -713,18 +741,15 @@ class TestMarkdownGenerator:
         resolve_graph_edges(entities)
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        config = MarkdownConfig(sections=[])
+        config = MarkdownConfig(toc_sections=[])
         generator = MarkdownGenerator(feature_map, config)
         markdown = generator.generate()
 
-        # Only header should appear
+        # Header should appear
         assert "# Feature Map" in markdown
 
-        # No content sections
-        assert "## Capabilities" not in markdown
-        assert "## User Stories" not in markdown
-        assert "## Outcomes" not in markdown
-        assert "## Timeline" not in markdown
+        # Content sections should still appear (toc_sections only controls ToC)
+        assert "## Capabilities" in markdown
 
-        # No TOC (since no sections to list)
+        # No TOC (since toc_sections is empty)
         assert "## Table of Contents" not in markdown

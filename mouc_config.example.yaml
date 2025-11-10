@@ -32,6 +32,16 @@ groups:
 # Default resource for unassigned tasks
 default_resource: "*"
 
+# Markdown output settings (optional)
+markdown:
+  # Table of contents control
+  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  # Document organization
+  organization:
+    primary: "by_type"                              # or "by_timeframe", "alpha_by_id", "yaml_order"
+    secondary: null                                  # or "by_timeframe", "by_type"
+    entity_type_order: [capability, user_story, outcome]
+
 # Jira integration settings
 jira:
   base_url: "https://example.atlassian.net"
