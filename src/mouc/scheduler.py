@@ -427,6 +427,82 @@ class ResourceSchedule:
 
         return True
 
+    def next_available_time(self, from_date: date) -> date:
+        """Find the next date when this resource is available (not in a busy period).
+
+        Args:
+            from_date: Starting date to search from
+
+        Returns:
+            Next available date (may be from_date itself if not currently busy)
+        """
+        for busy_start, busy_end in self.busy_periods:
+            # If we're before or within a busy period that covers from_date
+            if busy_end >= from_date:
+                # If from_date is before the busy period, it's available now
+                if from_date < busy_start:
+                    return from_date
+                # Otherwise, from_date is within busy period, next available is after it
+                return busy_end + timedelta(days=1)
+
+        # No busy periods cover or follow from_date
+        return from_date
+
+    def calculate_completion_time(self, start: date, duration_days: float) -> date:
+        """Calculate when a task will actually complete, accounting for busy periods (including DNS gaps).
+
+        This method walks through the schedule from start date, accumulating work days
+        and skipping over busy periods (DNS, other tasks, etc.) until the full duration
+        is accounted for.
+
+        Args:
+            start: Proposed start date
+            duration_days: Work days needed
+
+        Returns:
+            Date when the task would complete (exclusive end, matching scheduler convention)
+        """
+        if duration_days == 0:
+            return start
+
+        work_remaining = duration_days
+        current = start
+
+        # Walk through schedule, working around busy periods
+        while work_remaining > 0:
+            # Find next busy period that starts at or after current date
+            next_busy_start: date | None = None
+            next_busy_end: date | None = None
+
+            for busy_start, busy_end in self.busy_periods:
+                if busy_start >= current:
+                    next_busy_start = busy_start
+                    next_busy_end = busy_end
+                    break
+
+            if next_busy_start is None:
+                # No more busy periods ahead, can complete remaining work
+                # Return exclusive end (start + duration, not start + duration - 1)
+                return current + timedelta(days=work_remaining)
+
+            # At this point, next_busy_end must also be set (they're set together)
+            assert next_busy_end is not None
+
+            # Calculate work days available before next busy period
+            work_days_available = (next_busy_start - current).days
+
+            if work_days_available >= work_remaining:
+                # Can complete before next busy period
+                # Return exclusive end (start + duration, not start + duration - 1)
+                return current + timedelta(days=work_remaining)
+
+            # Use up available work days, then skip busy period
+            work_remaining -= work_days_available
+            current = next_busy_end + timedelta(days=1)
+
+        # All work consumed (edge case: work_remaining became exactly 0)
+        return current
+
 
 def _default_str_list() -> list[str]:
     return []
@@ -848,6 +924,64 @@ class ParallelScheduler:
         msg = f"Unknown scheduling strategy: {self.config.strategy}"
         raise ValueError(msg)
 
+    def _find_best_resource_for_task(
+        self,
+        task: Task,
+        current_time: date,
+        resource_schedules: dict[str, ResourceSchedule],
+    ) -> tuple[str | None, date | None, date | None]:
+        """Find the best resource for a task based on completion time (greedy with foresight).
+
+        For each candidate resource, calculates:
+        1. When the resource will be available (might be now, might be future)
+        2. When the task would complete if assigned to that resource (accounting for DNS gaps)
+
+        Returns the resource that completes the task soonest.
+
+        Args:
+            task: Task to find resource for
+            current_time: Current scheduling time
+            resource_schedules: Resource availability schedules
+
+        Returns:
+            Tuple of (resource_name, start_date, completion_date) for best resource,
+            or (None, None, None) if no resources can do the task
+        """
+        best_resource: str | None = None
+        best_start: date | None = None
+        best_completion: date | None = None
+
+        # Determine candidate resources
+        candidates: list[str] = []
+
+        if task.resource_spec and self.resource_config:
+            # Auto-assignment: expand resource spec to candidate list
+            candidates = self.resource_config.expand_resource_spec(task.resource_spec)
+        elif task.resources:
+            # Explicit assignment: use specified resources
+            candidates = [r[0] for r in task.resources]
+
+        # Evaluate each candidate
+        for resource_name in candidates:
+            if resource_name not in resource_schedules:
+                continue
+
+            schedule = resource_schedules[resource_name]
+
+            # Find when this resource becomes available
+            available_at = schedule.next_available_time(current_time)
+
+            # Calculate when task would complete if started at available_at
+            completion = schedule.calculate_completion_time(available_at, task.duration_days)
+
+            # Track best option (earliest completion)
+            if best_completion is None or completion < best_completion:
+                best_resource = resource_name
+                best_start = available_at
+                best_completion = completion
+
+        return (best_resource, best_start, best_completion)
+
     def _schedule_forward(  # noqa: PLR0912, PLR0915 - Scheduling algorithm requires complex dependency and resource management
         self, latest_dates: dict[str, date], fixed_tasks: list[ScheduledTask]
     ) -> list[ScheduledTask]:
@@ -948,47 +1082,86 @@ class ParallelScheduler:
                 key=lambda tid: self._compute_sort_key(tid, current_time, latest_dates, default_cr)
             )
 
-            # Try to schedule each eligible task
+            # Try to schedule each eligible task using greedy-with-foresight approach
             scheduled_any = False
             for task_id in eligible:
                 task = self.tasks[task_id]
 
-                # Auto-assign resources if needed
+                # Check if this is auto-assignment or explicit multi-resource assignment
                 if task.resource_spec and self.resource_config:
-                    # Expand resource spec to ordered candidate list
-                    candidates = self.resource_config.expand_resource_spec(task.resource_spec)
+                    # AUTO-ASSIGNMENT: Use greedy with foresight to find best single resource
+                    best_resource, best_start, best_completion = self._find_best_resource_for_task(
+                        task, current_time, resource_schedules
+                    )
 
-                    # Filter to available resources at current_time
-                    available_candidates = [
-                        r
-                        for r in candidates
-                        if r in resource_schedules
-                        and resource_schedules[r].is_available(current_time, task.duration_days)
-                    ]
-
-                    if not available_candidates:
-                        # No resources available, skip this task for now
+                    if best_resource is None or best_start is None or best_completion is None:
+                        # No valid resource found for this task
                         continue
 
-                    # Pick first available (preserves order from spec/config)
-                    selected_resource = available_candidates[0]
-                    task.resources = [(selected_resource, 1.0)]
+                    # GREEDY WITH FORESIGHT: Only schedule if best resource is available NOW
+                    if best_start != current_time:
+                        # Best resource completes task fastest, but isn't available now
+                        # Skip this task - will reconsider when resource becomes available
+                        continue
 
-                # Check if all required resources are available
-                resources_available = True
-                if task.resources:
+                    # Best resource is available now - assign and schedule!
+                    task.resources = [(best_resource, 1.0)]
+                    end_date: date = best_completion
+
+                    # Update resource schedule
+                    resource_schedules[best_resource].add_busy_period(current_time, end_date)
+
+                    # Record schedule
+                    scheduled[task_id] = (current_time, end_date)
+                    unscheduled.remove(task_id)
+                    scheduled_any = True
+
+                    result.append(
+                        ScheduledTask(
+                            task_id=task_id,
+                            start_date=current_time,
+                            end_date=end_date,
+                            duration_days=task.duration_days,
+                            resources=[best_resource],
+                        )
+                    )
+
+                else:
+                    # EXPLICIT RESOURCE ASSIGNMENT: Check if all required resources are available at current_time
+                    # Use DNS-aware completion time, but don't skip if resources aren't available (no greedy foresight)
+                    if not task.resources:
+                        continue
+
+                    # Check if all resources are available to START now (not if they can complete without interruption)
+                    all_available_now = True
                     for resource_name, _ in task.resources:
-                        if not resource_schedules[resource_name].is_available(
-                            current_time, task.duration_days
-                        ):
-                            resources_available = False
+                        if resource_name not in resource_schedules:
+                            all_available_now = False
+                            break
+                        # Check if resource is available RIGHT NOW (not for full duration)
+                        next_avail = resource_schedules[resource_name].next_available_time(
+                            current_time
+                        )
+                        if next_avail != current_time:
+                            all_available_now = False
                             break
 
-                if resources_available:
-                    # Schedule the task!
-                    end_date: date = current_time + timedelta(days=task.duration_days)
+                    if not all_available_now:
+                        # Resources not available now, skip this task
+                        continue
 
-                    # Update resource schedules
+                    # All resources available now - calculate DNS-aware completion time
+                    # For multi-resource tasks, use the longest completion time among all resources
+                    max_completion = current_time
+                    for resource_name, _ in task.resources:
+                        completion = resource_schedules[resource_name].calculate_completion_time(
+                            current_time, task.duration_days
+                        )
+                        max_completion = max(max_completion, completion)
+
+                    end_date = max_completion
+
+                    # Update resource schedules (mark all calendar days as busy)
                     for resource_name, _ in task.resources:
                         resource_schedules[resource_name].add_busy_period(current_time, end_date)
 

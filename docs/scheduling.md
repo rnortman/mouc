@@ -370,6 +370,17 @@ capabilities:
       end_before: "2025-01-31"
 ```
 
+## DNS-Aware Scheduling with Completion-Time Foresight
+
+The scheduler accounts for DNS (Do Not Schedule) periods when making resource assignments:
+
+- **DNS interruptions are allowed**: Tasks can start before DNS and resume after, if this completes the task sooner than waiting for an alternative resource
+- **Completion-time comparison**: For auto-assigned tasks (`*` or `alice|bob`), the scheduler compares when each candidate resource would actually complete the task (accounting for DNS gaps), and picks the fastest
+- **Greedy with foresight**: High-urgency tasks wait for the optimal resource if it's not immediately available, while lower-urgency tasks backfill with available resources
+- **Multi-resource tasks**: Tasks with multiple explicit resources (e.g., `[alice, bob]`) schedule when all resources are available and calculate completion time based on the slowest resource
+
+This allows the scheduler to make globally better decisions (e.g., "start now with a short DNS interruption" vs "wait for a resource with a long delay") while maintaining the efficient greedy chronological processing of Parallel SGS.
+
 ## Benefits
 
 1. **No gaps**: The algorithm naturally fills available time slots
@@ -379,3 +390,4 @@ capabilities:
 5. **Predictable**: Chronological processing is intuitive
 6. **Optimal**: Follows proven RCPSP scheduling approaches
 7. **Flexible**: Handles various constraints (dependencies, time windows, resources, priorities)
+8. **DNS-aware**: Accounts for DNS interruptions when choosing resources and calculating completion times
