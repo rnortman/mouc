@@ -83,11 +83,12 @@ dot -Tpng deps.dot -o deps.png
 
 ### Documentation Generation
 
-Generate markdown documentation from your feature map:
+Generate documentation from your feature map:
 
 ```bash
-mouc doc                           # Output to stdout
-mouc doc --output docs.md          # Output to file
+mouc doc                           # Markdown to stdout (default)
+mouc doc --output docs.md          # Markdown to file
+mouc doc --format docx --output docs.docx  # Microsoft Word format
 mouc feature_map.yaml doc          # Specify input file
 ```
 

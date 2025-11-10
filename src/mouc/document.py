@@ -13,7 +13,7 @@ from mouc.unified_config import OrganizationConfig
 if TYPE_CHECKING:
     from mouc.backends.base import DocumentBackend
     from mouc.models import FeatureMap
-    from mouc.unified_config import MarkdownConfig
+    from mouc.unified_config import DocumentConfig
 
 # Type aliases for organization structure
 OrganizedSection = tuple[str, list[Entity]]
@@ -32,27 +32,25 @@ class DocumentGenerator:
         self,
         feature_map: FeatureMap,
         backend: DocumentBackend,
-        markdown_config: MarkdownConfig | None = None,
+        doc_config: DocumentConfig | None = None,
     ):
         """Initialize with a feature map, backend, and optional configuration.
 
         Args:
             feature_map: The feature map to document
             backend: Backend implementation for format-specific rendering
-            markdown_config: Configuration for document organization and TOC
+            doc_config: Configuration for document organization and TOC
         """
         self.feature_map = feature_map
         self.backend = backend
         # Store TOC sections to generate (default to all if no config provided)
         self.toc_sections = (
-            markdown_config.toc_sections
-            if markdown_config
+            doc_config.toc_sections
+            if doc_config
             else ["timeline", "capabilities", "user_stories", "outcomes"]
         )
         # Store organization config (default to alpha_by_id if no config provided)
-        self.organization = (
-            markdown_config.organization if markdown_config else OrganizationConfig()
-        )
+        self.organization = doc_config.organization if doc_config else OrganizationConfig()
         # Build anchor registry in first pass
         self.anchor_registry: dict[str, str] = {}
 

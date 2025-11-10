@@ -13,7 +13,7 @@ from typing import Annotated
 import typer
 
 from . import context, styling
-from .backends import MarkdownBackend
+from .backends import DocxBackend, MarkdownBackend
 from .document import DocumentGenerator
 from .exceptions import MoucError
 from .gantt import GanttScheduler
@@ -136,12 +136,16 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
 
 
 @app.command()
-def doc(  # noqa: PLR0913, PLR0912 - CLI command needs multiple options and has complex logic
+def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options and has complex logic
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
     *,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
+    format: Annotated[  # noqa: A002 - 'format' is appropriate name for CLI option
+        str,
+        typer.Option("--format", "-f", help="Output format (markdown or docx)"),
+    ] = "markdown",
     schedule: Annotated[
         bool,
         typer.Option(
@@ -165,8 +169,16 @@ def doc(  # noqa: PLR0913, PLR0912 - CLI command needs multiple options and has 
         typer.Option("--style-file", help="Python file path for styling functions"),
     ] = None,
 ) -> None:
-    """Generate documentation in Markdown format."""
+    """Generate documentation in Markdown or DOCX format."""
     try:
+        # Validate format option
+        if format not in ("markdown", "docx"):
+            typer.echo(
+                f"Error: Invalid format '{format}'. Must be 'markdown' or 'docx'.",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+
         if style_module and style_file:
             typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
             raise typer.Exit(1) from None
@@ -207,23 +219,31 @@ def doc(  # noqa: PLR0913, PLR0912 - CLI command needs multiple options and has 
             service.populate_feature_map_annotations()
 
         # Generate the documentation
-        markdown_config = unified_config.markdown if unified_config else None
         styling_context = styling.create_styling_context(feature_map)
-        backend = MarkdownBackend(feature_map, styling_context)
-        generator = DocumentGenerator(feature_map, backend, markdown_config)
-        markdown_output = generator.generate()
+
+        # Select backend and config based on format
+        if format == "docx":
+            doc_config = unified_config.docx if unified_config else None
+            table_style = doc_config.table_style if doc_config else "Table Grid"
+            backend = DocxBackend(feature_map, styling_context, table_style)
+        else:
+            backend = MarkdownBackend(feature_map, styling_context)
+            doc_config = unified_config.markdown if unified_config else None
+
+        generator = DocumentGenerator(feature_map, backend, doc_config)
+        doc_output = generator.generate()
 
         # Output the result
         if output:
-            if isinstance(markdown_output, bytes):
-                output.write_bytes(markdown_output)
+            if isinstance(doc_output, bytes):
+                output.write_bytes(doc_output)
             else:
-                output.write_text(markdown_output, encoding="utf-8")
+                output.write_text(doc_output, encoding="utf-8")
             typer.echo(f"Documentation written to {output}")
-        elif isinstance(markdown_output, bytes):
-            typer.echo(markdown_output.decode("utf-8"))
+        elif isinstance(doc_output, bytes):
+            typer.echo(doc_output.decode("utf-8"))
         else:
-            typer.echo(markdown_output)
+            typer.echo(doc_output)
 
     except MoucError as e:
         typer.echo(f"Error: {e}", err=True)

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **DOCX output format**: `mouc doc --format docx` generates Microsoft Word documents
 - **Markdown document organization**: New `markdown.organization` config controls entity grouping and sorting
   - Primary grouping: `by_type`, `by_timeframe`, `alpha_by_id`, or `yaml_order`
   - Secondary grouping: nest timeframes within types or types within timeframes

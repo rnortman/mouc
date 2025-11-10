@@ -23,18 +23,30 @@ class GanttConfig(BaseModel):
 
 
 class OrganizationConfig(BaseModel):
-    """Configuration for markdown document organization."""
+    """Configuration for document organization."""
 
     primary: str = "by_type"  # "alpha_by_id", "yaml_order", "by_type", "by_timeframe"
     secondary: str | None = None  # "by_timeframe" or "by_type"
     entity_type_order: list[str] = ["capability", "user_story", "outcome"]
 
 
-class MarkdownConfig(BaseModel):
-    """Configuration for markdown document generation."""
+class DocumentConfig(BaseModel):
+    """Base configuration for document generation (shared by all backends)."""
 
     toc_sections: list[str] = ["timeline", "capabilities", "user_stories", "outcomes"]
     organization: OrganizationConfig = OrganizationConfig()
+
+
+class MarkdownConfig(DocumentConfig):
+    """Configuration for markdown document generation."""
+
+    pass
+
+
+class DocxConfig(DocumentConfig):
+    """Configuration for DOCX document generation."""
+
+    table_style: str = "Table Grid"  # Word built-in table style name
 
 
 class UnifiedConfig(BaseModel):
@@ -44,6 +56,7 @@ class UnifiedConfig(BaseModel):
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
     markdown: MarkdownConfig | None = None
+    docx: DocxConfig | None = None
 
 
 def load_unified_config(config_path: Path | str) -> UnifiedConfig:
@@ -102,11 +115,17 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     if "markdown" in data:
         markdown_config = MarkdownConfig.model_validate(data["markdown"])
 
+    # Build DocxConfig if docx section exists
+    docx_config = None
+    if "docx" in data:
+        docx_config = DocxConfig.model_validate(data["docx"])
+
     return UnifiedConfig(
         resources=resource_config,
         jira=jira_config,
         gantt=gantt_config,
         markdown=markdown_config,
+        docx=docx_config,
     )
 
 
