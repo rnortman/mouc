@@ -159,14 +159,14 @@ class DocxBackend:
 
         # Requires section
         if requires_refs:
-            self.document.add_heading("Requires", level=4)
+            self.document.add_heading("Requires", level=level + 1)
             for ref in requires_refs:
                 p = self.document.add_paragraph(style="List Bullet")
                 self._add_entity_reference(p, ref, entity.type)
 
         # Enables section
         if enables_refs:
-            self.document.add_heading("Enables", level=4)
+            self.document.add_heading("Enables", level=level + 1)
             for ref in enables_refs:
                 p = self.document.add_paragraph(style="List Bullet")
                 self._add_entity_reference(p, ref, entity.type)

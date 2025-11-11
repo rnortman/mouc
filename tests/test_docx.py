@@ -632,3 +632,133 @@ class TestDocxGenerator:
         assert timeframe_2024_q2 == "Heading 3", (
             f"2024-Q2 should be Heading 3, got {timeframe_2024_q2}"
         )
+
+    def test_enables_requires_heading_levels_single_level_organization(self) -> None:
+        """Test that Enables/Requires use Heading 4 in single-level organization."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+        cap2 = Entity(
+            type="capability", id="cap2", name="Cap 2", description="Desc", requires={"cap1"}
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Use single-level organization (by_type, no secondary)
+        config = DocxConfig(organization=OrganizationConfig(primary="by_type"))
+        docx_bytes = create_docx_generator(feature_map, config)
+        doc = Document(BytesIO(docx_bytes))
+
+        # In single-level organization:
+        # Heading 2: Capabilities (level 1 - primary section)
+        # Heading 3: Cap 1 (entity - should be Heading 3)
+        # Heading 4: Enables (should be Heading 4 - one level deeper than entity)
+        # Heading 3: Cap 2 (entity - should be Heading 3)
+        # Heading 4: Requires (should be Heading 4 - one level deeper than entity)
+
+        # Collect all headings with their levels and text
+        headings: list[tuple[str, str]] = []
+        for paragraph in doc.paragraphs:
+            style_name = paragraph.style.name
+            if style_name and style_name.startswith("Heading"):
+                headings.append((style_name, paragraph.text))
+
+        # Find the Enables and Requires headings
+        enables_heading: str | None = None
+        requires_heading: str | None = None
+        cap1_heading: str | None = None
+        cap2_heading: str | None = None
+
+        for style_name, text in headings:
+            if text == "Enables":
+                enables_heading = style_name
+            elif text == "Requires":
+                requires_heading = style_name
+            elif text == "Cap 1":
+                cap1_heading = style_name
+            elif text == "Cap 2":
+                cap2_heading = style_name
+
+        # Verify entity headings are Heading 3 in single-level organization
+        assert cap1_heading == "Heading 3", f"Cap 1 should be Heading 3, got {cap1_heading}"
+        assert cap2_heading == "Heading 3", f"Cap 2 should be Heading 3, got {cap2_heading}"
+
+        # Verify Enables and Requires are Heading 4 (one level deeper than entity)
+        assert enables_heading == "Heading 4", f"Enables should be Heading 4, got {enables_heading}"
+        assert requires_heading == "Heading 4", (
+            f"Requires should be Heading 4, got {requires_heading}"
+        )
+
+    def test_enables_requires_heading_levels_two_level_organization(self) -> None:
+        """Test that Enables/Requires use Heading 5 in two-level organization."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires={"cap1"},
+            meta={"timeframe": "2024-Q1"},
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Use two-level organization: by_type then by_timeframe
+        config = DocxConfig(
+            organization=OrganizationConfig(primary="by_type", secondary="by_timeframe")
+        )
+        docx_bytes = create_docx_generator(feature_map, config)
+        doc = Document(BytesIO(docx_bytes))
+
+        # In two-level organization:
+        # Heading 2: Capabilities (level 1 - primary section)
+        # Heading 3: 2024-Q1 (level 2 - secondary subsection)
+        # Heading 4: Cap 1 (entity - should be Heading 4)
+        # Heading 5: Enables (should be Heading 5 - one level deeper than entity)
+        # Heading 4: Cap 2 (entity - should be Heading 4)
+        # Heading 5: Requires (should be Heading 5 - one level deeper than entity)
+
+        # Collect all headings with their levels and text
+        headings: list[tuple[str, str]] = []
+        for paragraph in doc.paragraphs:
+            style_name = paragraph.style.name
+            if style_name and style_name.startswith("Heading"):
+                headings.append((style_name, paragraph.text))
+
+        # Find the Enables and Requires headings
+        enables_heading: str | None = None
+        requires_heading: str | None = None
+        cap1_heading: str | None = None
+        cap2_heading: str | None = None
+
+        for style_name, text in headings:
+            if text == "Enables":
+                enables_heading = style_name
+            elif text == "Requires":
+                requires_heading = style_name
+            elif text == "Cap 1":
+                cap1_heading = style_name
+            elif text == "Cap 2":
+                cap2_heading = style_name
+
+        # Verify entity headings are Heading 4 in two-level organization
+        assert cap1_heading == "Heading 4", f"Cap 1 should be Heading 4, got {cap1_heading}"
+        assert cap2_heading == "Heading 4", f"Cap 2 should be Heading 4, got {cap2_heading}"
+
+        # Verify Enables and Requires are Heading 5 (one level deeper than entity)
+        assert enables_heading == "Heading 5", f"Enables should be Heading 5, got {enables_heading}"
+        assert requires_heading == "Heading 5", (
+            f"Requires should be Heading 5, got {requires_heading}"
+        )

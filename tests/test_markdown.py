@@ -771,6 +771,122 @@ class TestMarkdownGenerator:
         assert story1_match is not None, "Story 1 heading not found"
         assert story1_match.group(1) == "####", f"Story 1 should be h4, got {story1_match.group(1)}"
 
+    def test_enables_requires_heading_levels_single_level_organization(self) -> None:
+        """Test that Enables/Requires use h4 (####) in single-level organization."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
+        cap2 = Entity(
+            type="capability", id="cap2", name="Cap 2", description="Desc", requires={"cap1"}
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Use single-level organization (by_type, no secondary)
+        config = MarkdownConfig(organization=OrganizationConfig(primary="by_type"))
+        markdown = create_generator(feature_map, config)
+
+        # In single-level organization:
+        # ## Capabilities (level 1 - primary section)
+        # ### Cap 1 (entity - should be h3)
+        # #### Enables (should be h4 - one level deeper than entity)
+        # ### Cap 2 (entity - should be h3)
+        # #### Requires (should be h4 - one level deeper than entity)
+
+        # Check entity headings are h3 (search entire document - headings should be unique)
+        cap1_match = re.search(r"^(#{1,6}) Cap 1$", markdown, re.MULTILINE)
+        assert cap1_match is not None, "Cap 1 heading not found"
+        assert cap1_match.group(1) == "###", f"Cap 1 should be h3, got {cap1_match.group(1)}"
+
+        cap2_match = re.search(r"^(#{1,6}) Cap 2$", markdown, re.MULTILINE)
+        assert cap2_match is not None, "Cap 2 heading not found"
+        assert cap2_match.group(1) == "###", f"Cap 2 should be h3, got {cap2_match.group(1)}"
+
+        # Check Enables and Requires are h4 (one level deeper than entity)
+        enables_match = re.search(r"^(#{1,6}) Enables$", markdown, re.MULTILINE)
+        assert enables_match is not None, "Enables heading not found"
+        assert enables_match.group(1) == "####", (
+            f"Enables should be h4, got {enables_match.group(1)}"
+        )
+
+        requires_match = re.search(r"^(#{1,6}) Requires$", markdown, re.MULTILINE)
+        assert requires_match is not None, "Requires heading not found"
+        assert requires_match.group(1) == "####", (
+            f"Requires should be h4, got {requires_match.group(1)}"
+        )
+
+    def test_enables_requires_heading_levels_two_level_organization(self) -> None:
+        """Test that Enables/Requires use h5 (#####) in two-level organization."""
+        metadata = FeatureMapMetadata()
+
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires={"cap1"},
+            meta={"timeframe": "2024-Q1"},
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Use two-level organization: by_type then by_timeframe
+        config = MarkdownConfig(
+            organization=OrganizationConfig(primary="by_type", secondary="by_timeframe")
+        )
+        markdown = create_generator(feature_map, config)
+
+        # In two-level organization:
+        # ## Capabilities (level 1 - primary section)
+        # ### 2024-Q1 (level 2 - secondary subsection)
+        # #### Cap 1 (entity - should be h4)
+        # ##### Enables (should be h5 - one level deeper than entity)
+        # #### Cap 2 (entity - should be h4)
+        # ##### Requires (should be h5 - one level deeper than entity)
+
+        # Find the Capabilities section in the BODY (after TOC)
+        toc_end = markdown.find("## Table of Contents")
+        toc_end = markdown.find("\n## ", toc_end + 1)
+
+        cap_start = markdown.find("## Capabilities", toc_end)
+        cap_end = markdown.find("\n## ", cap_start + len("## Capabilities"))
+        if cap_end == -1:
+            cap_end = len(markdown)
+        capabilities_section = markdown[cap_start:cap_end]
+
+        # Check entity headings are h4
+        cap1_match = re.search(r"^(#{1,6}) Cap 1$", capabilities_section, re.MULTILINE)
+        assert cap1_match is not None, "Cap 1 heading not found"
+        assert cap1_match.group(1) == "####", f"Cap 1 should be h4, got {cap1_match.group(1)}"
+
+        cap2_match = re.search(r"^(#{1,6}) Cap 2$", capabilities_section, re.MULTILINE)
+        assert cap2_match is not None, "Cap 2 heading not found"
+        assert cap2_match.group(1) == "####", f"Cap 2 should be h4, got {cap2_match.group(1)}"
+
+        # Check Enables and Requires are h5 (one level deeper than entity)
+        enables_match = re.search(r"^(#{1,6}) Enables$", capabilities_section, re.MULTILINE)
+        assert enables_match is not None, "Enables heading not found"
+        assert enables_match.group(1) == "#####", (
+            f"Enables should be h5, got {enables_match.group(1)}"
+        )
+
+        requires_match = re.search(r"^(#{1,6}) Requires$", capabilities_section, re.MULTILINE)
+        assert requires_match is not None, "Requires heading not found"
+        assert requires_match.group(1) == "#####", (
+            f"Requires should be h5, got {requires_match.group(1)}"
+        )
+
     def test_default_behavior_without_config(self, simple_feature_map: FeatureMap) -> None:
         """Test that default behavior includes all sections in standard order."""
         markdown = create_generator(simple_feature_map)

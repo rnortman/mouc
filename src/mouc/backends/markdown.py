@@ -112,9 +112,10 @@ class MarkdownBackend:
 
         self.lines.append(entity.description.strip())
 
-        # Requires section
+        # Requires section - use level + 1 for subsection heading
         if requires_refs:
-            self.lines.extend(["", "#### Requires", ""])
+            subsection_heading = "#" * (level + 1)
+            self.lines.extend(["", f"{subsection_heading} Requires", ""])
             for ref in requires_refs:
                 type_label = (
                     f" [{self._pretty_type(ref.entity_type)}]"
@@ -125,9 +126,10 @@ class MarkdownBackend:
                     f"- [{ref.entity_name}](#{ref.anchor_id}) (`{ref.entity_id}`){type_label}"
                 )
 
-        # Enables section
+        # Enables section - use level + 1 for subsection heading
         if enables_refs:
-            self.lines.extend(["", "#### Enables", ""])
+            subsection_heading = "#" * (level + 1)
+            self.lines.extend(["", f"{subsection_heading} Enables", ""])
             for ref in enables_refs:
                 type_label = (
                     f" [{self._pretty_type(ref.entity_type)}]"
