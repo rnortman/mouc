@@ -355,25 +355,30 @@ class DocumentGenerator:
             heading, content = item
             # Check if content is a list of entities or a list of subsections
             if content and isinstance(content[0], tuple):
-                # Has subsections - nested structure
+                # Has subsections - nested structure (two-level organization)
+                # Structure: h2 section -> h3 subsection -> h4 entity
                 nested_content = cast(list[tuple[str, list[Entity]]], content)
-                self.backend.add_section_header(heading, level=1)
+                self.backend.add_section_header(heading, level=1)  # h2 section
                 for subheading, entities in nested_content:
-                    self.backend.add_section_header(subheading, level=2)
+                    self.backend.add_section_header(subheading, level=2)  # h3 subsection
                     for entity in entities:
-                        self._render_entity(entity)
+                        # Entities under h3 subsection should be h4
+                        self._render_entity(entity, level=4)
             else:
-                # Direct list of entities
+                # Direct list of entities (single-level organization)
+                # Structure: h2 section -> h3 entity
                 entity_list = cast(list[Entity], content)
-                self.backend.add_section_header(heading, level=1)
+                self.backend.add_section_header(heading, level=1)  # h2 section
                 for entity in entity_list:
-                    self._render_entity(entity)
+                    # Entities directly under h2 section should be h3
+                    self._render_entity(entity, level=3)
 
-    def _render_entity(self, entity: Entity) -> None:
+    def _render_entity(self, entity: Entity, level: int) -> None:
         """Render a single entity using the backend.
 
         Args:
             entity: Entity to render
+            level: Direct heading level for the entity (3=h3, 4=h4, etc.)
         """
         # Get anchor for this entity
         anchor_id = self.anchor_registry[entity.id]
@@ -435,4 +440,5 @@ class DocumentGenerator:
             display_metadata=display_metadata,
             requires_refs=requires_refs,
             enables_refs=enables_refs,
+            level=level,
         )

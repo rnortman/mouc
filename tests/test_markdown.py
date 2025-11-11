@@ -1,6 +1,8 @@
 """Tests for markdown generation."""
 # pyright: reportPrivateUsage=false
 
+import re
+
 import pytest
 
 from mouc import styling
@@ -674,6 +676,90 @@ class TestMarkdownGenerator:
 
         # User stories should not be in TOC
         assert "- [User Stories]" not in toc_section
+
+    def test_two_level_organization_entity_heading_levels(self) -> None:
+        """Test that entities use h4 (####) headings in two-level organization."""
+        metadata = FeatureMapMetadata()
+
+        # Create capabilities with different timeframes
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            meta={"timeframe": "2024-Q2"},
+        )
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+
+        entities = [cap1, cap2, story1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
+
+        # Use two-level organization: by_type then by_timeframe
+        config = MarkdownConfig(
+            organization=OrganizationConfig(primary="by_type", secondary="by_timeframe")
+        )
+        markdown = create_generator(feature_map, config)
+
+        # In two-level organization:
+        # ## Capabilities (level 1 - primary section)
+        # ### 2024-Q1 (level 2 - secondary subsection)
+        # #### Cap 1 (level 3 - entity - should be h4)
+        # ### 2024-Q2 (level 2 - secondary subsection)
+        # #### Cap 2 (level 3 - entity - should be h4)
+
+        # Find the Capabilities section
+        cap_start = markdown.find("## Capabilities")
+        cap_end = markdown.find("## User Stories")
+        if cap_end == -1:
+            cap_end = markdown.find("## Table of Contents", cap_start + 1)
+        capabilities_section = markdown[cap_start:cap_end]
+
+        # Check structure in Capabilities section
+        assert "## Capabilities" in capabilities_section  # Primary section: h2
+        assert "### 2024-Q1" in capabilities_section  # Secondary subsection: h3
+        assert "### 2024-Q2" in capabilities_section  # Secondary subsection: h3
+
+        # Entities should be h4 in two-level organization
+        cap1_match = re.search(r"^(#{1,6}) Cap 1$", capabilities_section, re.MULTILINE)
+        assert cap1_match is not None, "Cap 1 heading not found"
+        assert cap1_match.group(1) == "####", f"Cap 1 should be h4, got {cap1_match.group(1)}"
+
+        cap2_match = re.search(r"^(#{1,6}) Cap 2$", capabilities_section, re.MULTILINE)
+        assert cap2_match is not None, "Cap 2 heading not found"
+        assert cap2_match.group(1) == "####", f"Cap 2 should be h4, got {cap2_match.group(1)}"
+
+        # Find the User Stories section
+        stories_start = markdown.find("## User Stories")
+        stories_end = markdown.find("## Outcomes")
+        if stories_end == -1:
+            stories_end = markdown.find("## Table of Contents", stories_start + 1)
+        stories_section = markdown[stories_start:stories_end]
+
+        # Check structure in User Stories section
+        assert "## User Stories" in stories_section  # Primary section: h2
+        assert "### 2024-Q1" in stories_section  # Secondary subsection: h3
+
+        # Entity should be h4 in two-level organization
+        story1_match = re.search(r"^(#{1,6}) Story 1$", stories_section, re.MULTILINE)
+        assert story1_match is not None, "Story 1 heading not found"
+        assert story1_match.group(1) == "####", f"Story 1 should be h4, got {story1_match.group(1)}"
 
     def test_default_behavior_without_config(self, simple_feature_map: FeatureMap) -> None:
         """Test that default behavior includes all sections in standard order."""

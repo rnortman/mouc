@@ -543,3 +543,92 @@ class TestDocxGenerator:
         # Check the hyperlink URLs
         assert "https://docs.google.com/document/d/abc123" in hyperlink_urls
         assert "https://example.com/doc" in hyperlink_urls
+
+    def test_two_level_organization_entity_heading_levels(self) -> None:
+        """Test that entities use Heading 4 in two-level organization."""
+        metadata = FeatureMapMetadata()
+
+        # Create capabilities with different timeframes
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            meta={"timeframe": "2024-Q2"},
+        )
+        story1 = Entity(
+            type="user_story",
+            id="story1",
+            name="Story 1",
+            description="Desc",
+            meta={"timeframe": "2024-Q1"},
+        )
+
+        entities = [cap1, cap2, story1]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(
+            metadata=metadata,
+            entities=entities,
+        )
+
+        # Use two-level organization: by_type then by_timeframe
+        config = DocxConfig(
+            organization=OrganizationConfig(primary="by_type", secondary="by_timeframe")
+        )
+        docx_bytes = create_docx_generator(feature_map, config)
+        doc = Document(BytesIO(docx_bytes))
+
+        # In two-level organization:
+        # Heading 2: Capabilities (level 1 - primary section)
+        # Heading 3: 2024-Q1 (level 2 - secondary subsection)
+        # Heading 4: Cap 1 (entity - should be Heading 4)
+        # Heading 3: 2024-Q2 (level 2 - secondary subsection)
+        # Heading 4: Cap 2 (entity - should be Heading 4)
+
+        # Collect all headings with their levels and text
+        headings: list[tuple[str, str]] = []
+        for paragraph in doc.paragraphs:
+            style_name = paragraph.style.name
+            if style_name and style_name.startswith("Heading"):
+                headings.append((style_name, paragraph.text))
+
+        # Find the entity headings
+        cap1_heading: str | None = None
+        cap2_heading: str | None = None
+        story1_heading: str | None = None
+
+        for style_name, text in headings:
+            if text == "Cap 1":
+                cap1_heading = style_name
+            elif text == "Cap 2":
+                cap2_heading = style_name
+            elif text == "Story 1":
+                story1_heading = style_name
+
+        # In two-level organization, entities should use Heading 4
+        assert cap1_heading == "Heading 4", f"Cap 1 should be Heading 4, got {cap1_heading}"
+        assert cap2_heading == "Heading 4", f"Cap 2 should be Heading 4, got {cap2_heading}"
+        assert story1_heading == "Heading 4", f"Story 1 should be Heading 4, got {story1_heading}"
+
+        # Verify the secondary subsection headings are Heading 3
+        timeframe_2024_q1: str | None = None
+        timeframe_2024_q2: str | None = None
+        for style_name, text in headings:
+            if text == "2024-Q1":
+                timeframe_2024_q1 = style_name
+            elif text == "2024-Q2":
+                timeframe_2024_q2 = style_name
+
+        assert timeframe_2024_q1 == "Heading 3", (
+            f"2024-Q1 should be Heading 3, got {timeframe_2024_q1}"
+        )
+        assert timeframe_2024_q2 == "Heading 3", (
+            f"2024-Q2 should be Heading 3, got {timeframe_2024_q2}"
+        )

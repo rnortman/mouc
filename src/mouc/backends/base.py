@@ -68,6 +68,7 @@ class DocumentBackend(Protocol):
         display_metadata: dict[str, Any],
         requires_refs: list[EntityReference],
         enables_refs: list[EntityReference],
+        level: int,
     ) -> None:
         """Render a complete entity with all its components.
 
@@ -78,6 +79,7 @@ class DocumentBackend(Protocol):
             display_metadata: Metadata dict after styling plugin processing
             requires_refs: References to required entities
             enables_refs: References to enabled entities
+            level: Semantic heading level (1=h1 title, 2=h2 section, 3=h3 entity/subsection, 4=h4 entity)
         """
         ...
 

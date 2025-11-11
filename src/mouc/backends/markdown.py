@@ -69,9 +69,16 @@ class MarkdownBackend:
         display_metadata: dict[str, Any],
         requires_refs: list[EntityReference],
         enables_refs: list[EntityReference],
+        level: int,
     ) -> None:
         """Render a complete entity in markdown format."""
-        self.lines.append(f"### {entity.name}")
+        # level directly represents the heading level: 1=h1, 2=h2, 3=h3, 4=h4, etc.
+        # In markdown, this corresponds to the number of # symbols
+        # Examples:
+        # level=3: h3 entity -> ###
+        # level=4: h4 entity -> ####
+        heading_prefix = "#" * level
+        self.lines.append(f"{heading_prefix} {entity.name}")
         self.lines.append("")
 
         # Build metadata table

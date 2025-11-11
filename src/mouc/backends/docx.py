@@ -105,13 +105,17 @@ class DocxBackend:
         display_metadata: dict[str, Any],
         requires_refs: list[EntityReference],
         enables_refs: list[EntityReference],
+        level: int,
     ) -> None:
         """Render a complete entity in DOCX format."""
         if not self.document:
             return
 
-        # Add entity name as heading
-        heading = self.document.add_heading(entity.name, level=3)
+        # level directly represents the heading level: 1=Heading 1, 2=Heading 2, 3=Heading 3, etc.
+        # Examples:
+        # level=3: Heading 3 entity
+        # level=4: Heading 4 entity
+        heading = self.document.add_heading(entity.name, level=level)
         self._add_bookmark(heading, anchor_id)
 
         # Build metadata table
