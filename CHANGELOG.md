@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.10] - 2025-11-11
+
 ### Added
 - **Critical Ratio scheduling**: Scheduler now prioritizes tasks by CR (slack/duration) instead of raw deadlines, correctly accounting for task duration
 - **Priority metadata field**: New `priority` field (0-100, default 50) controls task urgency independent of deadlines
