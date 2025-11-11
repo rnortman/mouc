@@ -65,7 +65,7 @@ gantt:
 
 # OPTIONAL: Markdown output settings
 markdown:
-  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  toc_sections: [timeline, entity_types]
   organization:
     primary: "by_type"
     entity_type_order: [capability, user_story, outcome]
@@ -73,7 +73,7 @@ markdown:
 # OPTIONAL: DOCX output settings
 docx:
   table_style: "Table Grid"
-  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  toc_sections: [timeline, entity_types]
   organization:
     primary: "by_type"
     entity_type_order: [capability, user_story, outcome]
@@ -237,15 +237,23 @@ Control the table of contents generation:
 
 ```yaml
 markdown:
-  toc_sections: [timeline, capabilities, user_stories, outcomes]  # Include timeline in ToC
+  toc_sections: [timeline, entity_types]
 ```
 
-**`toc_sections`** (optional, default: `["timeline", "capabilities", "user_stories", "outcomes"]`): Controls which sections appear in the table of contents.
+**`toc_sections`** (optional, default: `["timeline", "entity_types"]`): Specifies which sections appear in the table of contents.
 
-Valid values:
-- List including `timeline` - Shows timeline section and generates ToC based on body organization
-- Empty list `[]` - Suppresses ToC entirely
-- Note: The ToC automatically reflects the actual body organization (the `toc_sections` list is mainly used to control whether the timeline section is included)
+Valid section names:
+- `timeline` - Timeline view grouped by timeframe (if entities have timeframe metadata)
+- `entity_types` - All entity type sections (capabilities, user_stories, outcomes) in the order specified by `organization.entity_type_order`
+
+Examples:
+- `[timeline]` - TOC shows only timeline
+- `[entity_types]` - TOC shows only entity type sections
+- `[timeline, entity_types]` - TOC shows timeline followed by entity types
+- `[entity_types, timeline]` - TOC shows entity types followed by timeline
+- `[]` - No table of contents generated
+
+Note: `toc_sections` only controls the table of contents navigation. The document body always contains all entities as organized by the `organization` configuration.
 
 ### Organization Examples
 
@@ -348,7 +356,7 @@ The `docx` section inherits the same organization options as the `markdown` sect
 ```yaml
 docx:
   table_style: "Table Grid"
-  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  toc_sections: [timeline, entity_types]
   organization:
     primary: "by_type"
     secondary: null
@@ -520,7 +528,7 @@ default_resource: "*"
 # ============================================================================
 
 markdown:
-  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  toc_sections: [timeline, entity_types]
   organization:
     primary: "by_type"
     secondary: null
@@ -532,7 +540,7 @@ markdown:
 
 docx:
   table_style: "Table Grid"
-  toc_sections: [timeline, capabilities, user_stories, outcomes]
+  toc_sections: [timeline, entity_types]
   organization:
     primary: "by_type"
     secondary: null

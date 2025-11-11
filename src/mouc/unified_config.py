@@ -33,7 +33,7 @@ class OrganizationConfig(BaseModel):
 class DocumentConfig(BaseModel):
     """Base configuration for document generation (shared by all backends)."""
 
-    toc_sections: list[str] = ["timeline", "capabilities", "user_stories", "outcomes"]
+    toc_sections: list[str] = ["timeline", "entity_types"]
     organization: OrganizationConfig = OrganizationConfig()
 
 

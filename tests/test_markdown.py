@@ -97,13 +97,13 @@ class TestMarkdownGenerator:
         markdown = create_generator(simple_feature_map, config)
 
         assert "## Table of Contents" in markdown
-        assert "- [Capabilities](#capabilities)" in markdown
-        assert "  - [Cap 1](#cap-1)" in markdown
-        assert "  - [Cap 2](#cap-2)" in markdown
-        assert "- [User Stories](#user-stories)" in markdown
-        assert "  - [Story 1](#story-1)" in markdown
-        assert "- [Outcomes](#outcomes)" in markdown
-        assert "  - [Outcome 1](#outcome-1)" in markdown
+        assert "### Capabilities" in markdown
+        assert "- [Cap 1](#cap-1)" in markdown
+        assert "- [Cap 2](#cap-2)" in markdown
+        assert "### User Stories" in markdown
+        assert "- [Story 1](#story-1)" in markdown
+        assert "### Outcomes" in markdown
+        assert "- [Outcome 1](#outcome-1)" in markdown
 
     def test_generate_capabilities_section(self, simple_feature_map: FeatureMap) -> None:
         """Test capabilities section generation."""
@@ -283,16 +283,17 @@ class TestMarkdownGenerator:
 
         markdown = create_generator(feature_map)
 
-        # Check timeline section exists
-        assert "## Timeline" in markdown
+        # Check timeline section exists (inside TOC)
+        assert "### Timeline" in markdown
 
         # Check timeframes are in lexical order
-        assert markdown.find("### 2024-Q1") < markdown.find("### 2024-Q2")
+        assert markdown.find("#### 2024-Q1") < markdown.find("#### 2024-Q2")
 
-        # Check entities are grouped by timeframe
-        timeline_section = markdown[
-            markdown.find("## Timeline") : markdown.find("## Table of Contents")
-        ]
+        # Check entities are grouped by timeframe in timeline section
+        # Timeline is now inside the TOC between "### Timeline" and the first body section
+        toc_start = markdown.find("## Table of Contents")
+        body_start = markdown.find("## Capabilities", toc_start)
+        timeline_section = markdown[toc_start:body_start]
 
         # In 2024-Q1 section
         assert "[Cap 1](#cap-1) [Capability]" in timeline_section
@@ -302,7 +303,7 @@ class TestMarkdownGenerator:
         assert "[Cap 2](#cap-2) [Capability]" in timeline_section
 
         # Unscheduled section
-        assert "### Unscheduled" in timeline_section
+        assert "#### Unscheduled" in timeline_section
         assert "[Story 1](#story-1) [User Story]" in timeline_section
 
     def test_no_timeline_when_no_timeframes(self) -> None:
@@ -623,12 +624,12 @@ class TestMarkdownGenerator:
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
         # With timeline in sections
-        config_with_timeline = MarkdownConfig(toc_sections=["timeline", "capabilities"])
+        config_with_timeline = MarkdownConfig(toc_sections=["timeline", "entity_types"])
         markdown_with = create_generator(feature_map, config_with_timeline)
         assert "## Timeline" in markdown_with
 
         # Without timeline in sections
-        config_without_timeline = MarkdownConfig(toc_sections=["capabilities"])
+        config_without_timeline = MarkdownConfig(toc_sections=["entity_types"])
         markdown_without = create_generator(feature_map, config_without_timeline)
         assert "## Timeline" not in markdown_without
 
@@ -641,15 +642,16 @@ class TestMarkdownGenerator:
         )
         markdown = create_generator(simple_feature_map, config)
 
-        # Extract TOC section
+        # Extract TOC section (ends at first body section or warnings)
         toc_start = markdown.find("## Table of Contents")
-        toc_end = markdown.find("## ", toc_start + 1)
+        # TOC ends at warnings or first body section (both are ##)
+        toc_end = markdown.find("\n## ", toc_start + len("## Table of Contents"))
         toc_section = markdown[toc_start:toc_end]
 
-        # Find positions within TOC
-        stories_toc = toc_section.find("- [User Stories]")
-        outcomes_toc = toc_section.find("- [Outcomes]")
-        capabilities_toc = toc_section.find("- [Capabilities]")
+        # Find positions within TOC (now using section headings, not list items)
+        stories_toc = toc_section.find("### User Stories")
+        outcomes_toc = toc_section.find("### Outcomes")
+        capabilities_toc = toc_section.find("### Capabilities")
 
         # Verify order in TOC matches body organization
         assert stories_toc < outcomes_toc
@@ -665,17 +667,18 @@ class TestMarkdownGenerator:
         )
         markdown = create_generator(simple_feature_map, config)
 
-        # Extract TOC section
+        # Extract TOC section (ends at first body section or warnings)
         toc_start = markdown.find("## Table of Contents")
-        toc_end = markdown.find("## ", toc_start + 1)
+        # TOC ends at warnings or first body section (both are ##)
+        toc_end = markdown.find("\n## ", toc_start + len("## Table of Contents"))
         toc_section = markdown[toc_start:toc_end]
 
-        # Capabilities and outcomes should be in TOC
-        assert "- [Capabilities]" in toc_section
-        assert "- [Outcomes]" in toc_section
+        # Capabilities and outcomes should be in TOC (as section headings)
+        assert "### Capabilities" in toc_section
+        assert "### Outcomes" in toc_section
 
         # User stories should not be in TOC
-        assert "- [User Stories]" not in toc_section
+        assert "### User Stories" not in toc_section
 
     def test_two_level_organization_entity_heading_levels(self) -> None:
         """Test that entities use h4 (####) headings in two-level organization."""
@@ -724,14 +727,21 @@ class TestMarkdownGenerator:
         # ### 2024-Q2 (level 2 - secondary subsection)
         # #### Cap 2 (level 3 - entity - should be h4)
 
-        # Find the Capabilities section
-        cap_start = markdown.find("## Capabilities")
-        cap_end = markdown.find("## User Stories")
+        # Find the Capabilities section in the BODY (after TOC and warnings)
+        # Skip past TOC which now has "### Capabilities"
+        toc_end = markdown.find("## ⚠️ Timeline Warnings")
+        if toc_end == -1:
+            # No warnings, find first body section
+            toc_end = markdown.find("## Table of Contents")
+            toc_end = markdown.find("\n## ", toc_end + 1)
+
+        cap_start = markdown.find("## Capabilities", toc_end)
+        cap_end = markdown.find("## User Stories", cap_start)
         if cap_end == -1:
-            cap_end = markdown.find("## Table of Contents", cap_start + 1)
+            cap_end = len(markdown)
         capabilities_section = markdown[cap_start:cap_end]
 
-        # Check structure in Capabilities section
+        # Check structure in Capabilities section (BODY, not TOC)
         assert "## Capabilities" in capabilities_section  # Primary section: h2
         assert "### 2024-Q1" in capabilities_section  # Secondary subsection: h3
         assert "### 2024-Q2" in capabilities_section  # Secondary subsection: h3
@@ -778,8 +788,8 @@ class TestMarkdownGenerator:
         assert cap_pos < stories_pos
         assert stories_pos < outcomes_pos
 
-    def test_backward_dependencies_excluded_when_timeline_disabled(self) -> None:
-        """Test that backward dependency warnings don't appear when timeline is disabled."""
+    def test_backward_dependencies_always_shown(self) -> None:
+        """Test that backward dependency warnings always appear when present."""
         metadata = FeatureMapMetadata()
 
         cap1 = Entity(
@@ -802,12 +812,12 @@ class TestMarkdownGenerator:
         resolve_graph_edges(entities)
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        # With timeline disabled
-        config = MarkdownConfig(toc_sections=["capabilities"])
+        # With only entity types in TOC (no timeline)
+        config = MarkdownConfig(toc_sections=["entity_types"])
         markdown = create_generator(feature_map, config)
 
-        # No warning section should appear
-        assert "## ⚠️ Timeline Warnings" not in markdown
+        # Warning section should still appear because warnings always show
+        assert "## ⚠️ Timeline Warnings" in markdown
 
     def test_empty_sections_list(self) -> None:
         """Test that empty sections list produces minimal output."""

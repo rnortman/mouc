@@ -44,11 +44,7 @@ class DocumentGenerator:
         self.feature_map = feature_map
         self.backend = backend
         # Store TOC sections to generate (default to all if no config provided)
-        self.toc_sections = (
-            doc_config.toc_sections
-            if doc_config
-            else ["timeline", "capabilities", "user_stories", "outcomes"]
-        )
+        self.toc_sections = doc_config.toc_sections if doc_config else ["timeline", "entity_types"]
         # Store organization config (default to alpha_by_id if no config provided)
         self.organization = doc_config.organization if doc_config else OrganizationConfig()
         # Build anchor registry in first pass
@@ -68,15 +64,14 @@ class DocumentGenerator:
         # Add header
         self.backend.add_header(self.feature_map.metadata)
 
-        # Add timeline before TOC if included (maintains original ordering)
-        if "timeline" in self.toc_sections:
-            self._generate_timeline()
-            warnings = self._check_backward_dependencies()
-            self.backend.add_timeline_warnings(warnings)
-
         # Add TOC if enabled (skip if toc_sections is empty)
         if self.toc_sections:
             self._generate_toc()
+
+        # Check for backward dependencies and add warnings if any exist
+        warnings = self._check_backward_dependencies()
+        if warnings:
+            self.backend.add_timeline_warnings(warnings)
 
         # Generate body sections based on organization config
         self._generate_organized_sections()
@@ -180,41 +175,94 @@ class DocumentGenerator:
         return warnings
 
     def _generate_toc(self) -> None:
-        """Generate table of contents based on body organization."""
+        """Generate table of contents with sections specified in toc_sections."""
         self.backend.add_section_header("Table of Contents", level=1)
 
+        # Generate sections in the EXACT order specified in toc_sections
+        for section_name in self.toc_sections:
+            if section_name == "timeline":
+                self._generate_timeline_section()
+            elif section_name == "entity_types":
+                self._generate_entity_types_toc()
+
+    def _generate_entity_types_toc(self) -> None:
+        """Generate TOC entries for all entity type sections."""
         # Get organized structure
         organized = self._organize_entities()
 
         # Generate TOC entries based on actual body structure
         for item in organized:
             heading, content = item
-            section_anchor = self.backend.make_anchor("", heading)
+
+            # Add section header for this entity type
+            self.backend.add_section_header(heading, level=2)
 
             # Check if content has subsections (nested structure)
             if content and isinstance(content[0], tuple):
-                # Has subsections - add top-level link
+                # Has subsections
                 nested_content = cast(list[tuple[str, list[Entity]]], content)
-                self.backend.add_toc_entry(heading, section_anchor, level=0)
                 for subheading, entities in nested_content:
-                    subsection_anchor = self.backend.make_anchor("", subheading)
-                    self.backend.add_toc_entry(subheading, subsection_anchor, level=1)
+                    self.backend.add_section_header(subheading, level=3)
                     for entity in entities:
                         entity_anchor = self.anchor_registry[entity.id]
                         type_label = self.backend.format_type_label(entity)
                         self.backend.add_toc_entry(
-                            entity.name, entity_anchor, level=2, suffix=type_label
+                            entity.name, entity_anchor, level=0, suffix=type_label
                         )
             else:
                 # Direct list of entities
                 entity_list = cast(list[Entity], content)
-                self.backend.add_toc_entry(heading, section_anchor, level=0)
                 for entity in entity_list:
                     entity_anchor = self.anchor_registry[entity.id]
                     type_label = self.backend.format_type_label(entity)
                     self.backend.add_toc_entry(
-                        entity.name, entity_anchor, level=1, suffix=type_label
+                        entity.name, entity_anchor, level=0, suffix=type_label
                     )
+
+    def _generate_timeline_section(self) -> None:
+        """Generate timeline section grouped by timeframe."""
+        # Group entities by timeframe
+        timeframe_groups: dict[str, list[Entity]] = {}
+        unscheduled: list[Entity] = []
+
+        for entity in self.feature_map.entities:
+            timeframe = entity.meta.get("timeframe")
+            if timeframe:
+                if timeframe not in timeframe_groups:
+                    timeframe_groups[timeframe] = []
+                timeframe_groups[timeframe].append(entity)
+            else:
+                unscheduled.append(entity)
+
+        # If no entities have timeframes, don't generate the timeline section
+        if not timeframe_groups:
+            return
+
+        self.backend.add_section_header("Timeline", level=2)
+
+        # Sort timeframes lexically for consistent ordering
+        sorted_timeframes = sorted(timeframe_groups.keys())
+
+        # Generate timeline entries
+        for timeframe in sorted_timeframes:
+            self.backend.add_section_header(timeframe, level=3)
+
+            entities = sorted(timeframe_groups[timeframe], key=lambda e: (e.type, e.id))
+            for entity in entities:
+                anchor = self.anchor_registry[entity.id]
+                type_label = self.backend.format_type_label(entity)
+                # Add TOC-style entry linking to entity
+                self.backend.add_toc_entry(entity.name, anchor, level=0, suffix=type_label)
+
+        # Add unscheduled section if there are any
+        if unscheduled:
+            self.backend.add_section_header("Unscheduled", level=3)
+
+            entities = sorted(unscheduled, key=lambda e: (e.type, e.id))
+            for entity in entities:
+                anchor = self.anchor_registry[entity.id]
+                type_label = self.backend.format_type_label(entity)
+                self.backend.add_toc_entry(entity.name, anchor, level=0, suffix=type_label)
 
     def _get_sorted_entities(self, entities: list[Entity]) -> list[Entity]:
         """Sort entities based on the primary organization mode."""

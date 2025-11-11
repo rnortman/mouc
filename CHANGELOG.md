@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ToC suppression**: Set `markdown.toc_sections: []` to suppress table of contents
 
 ### Changed
+- **Breaking**: `toc_sections` values changed from `["timeline", "capabilities", "user_stories", "outcomes"]` to `["timeline", "entity_types"]`
 - **Breaking**: `markdown.sections` renamed to `markdown.toc_sections` for clarity
 - **Breaking**: Refactored markdown generation to use pluggable backend architecture for future format support (docx, html)
 - **Breaking**: Scheduler now uses CR-based prioritization; tasks with same deadline but different durations schedule differently
