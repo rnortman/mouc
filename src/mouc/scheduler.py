@@ -6,6 +6,8 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
 from mouc.resources import UNASSIGNED_RESOURCE
 
 if TYPE_CHECKING:
@@ -142,8 +144,7 @@ def parse_timeframe(  # noqa: PLR0911, PLR0912, PLR0915 - Timeframe parser handl
     return (None, None)
 
 
-@dataclass
-class SchedulingConfig:
+class SchedulingConfig(BaseModel):
     """Configuration for task prioritization."""
 
     strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted"
@@ -530,6 +531,7 @@ class SchedulingService:
         feature_map: "FeatureMap",
         current_date: date | None = None,
         resource_config: "ResourceConfig | None" = None,
+        config: SchedulingConfig | None = None,
     ):
         """Initialize scheduling service.
 
@@ -537,10 +539,12 @@ class SchedulingService:
             feature_map: Feature map to schedule
             current_date: Current date for scheduling (defaults to today)
             resource_config: Optional resource configuration
+            config: Optional scheduling configuration for prioritization strategy
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
         self.resource_config = resource_config
+        self.config = config
         self.validator = SchedulerInputValidator(resource_config)
 
     def schedule(self) -> SchedulingResult:
@@ -560,6 +564,7 @@ class SchedulingService:
             self.current_date,
             resource_config=self.resource_config,
             completed_task_ids=done_without_dates,
+            config=self.config,
         )
 
         try:

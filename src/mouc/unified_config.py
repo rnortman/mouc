@@ -14,6 +14,7 @@ from pydantic import BaseModel
 
 from .jira_config import JiraConfig
 from .resources import ResourceConfig
+from .scheduler import SchedulingConfig
 
 
 class GanttConfig(BaseModel):
@@ -55,6 +56,7 @@ class UnifiedConfig(BaseModel):
     resources: ResourceConfig
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
+    scheduler: SchedulingConfig | None = None
     markdown: MarkdownConfig | None = None
     docx: DocxConfig | None = None
 
@@ -115,6 +117,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     if "markdown" in data:
         markdown_config = MarkdownConfig.model_validate(data["markdown"])
 
+    # Build SchedulingConfig if scheduler section exists
+    scheduler_config = None
+    if "scheduler" in data:
+        scheduler_config = SchedulingConfig.model_validate(data["scheduler"])
+
     # Build DocxConfig if docx section exists
     docx_config = None
     if "docx" in data:
@@ -124,6 +131,7 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
         resources=resource_config,
         jira=jira_config,
         gantt=gantt_config,
+        scheduler=scheduler_config,
         markdown=markdown_config,
         docx=docx_config,
     )

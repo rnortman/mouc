@@ -21,7 +21,6 @@ from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
 from .models import FeatureMap
 from .parser import FeatureMapParser
-from .resources import ResourceConfig
 from .scheduler import SchedulingResult, SchedulingService
 from .unified_config import load_unified_config
 
@@ -214,8 +213,13 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
             # Get resource config from unified config if available
             resource_config = unified_config.resources if unified_config else None
 
+            # Get scheduler config from unified config if available
+            scheduler_config = unified_config.scheduler if unified_config else None
+
             # Run scheduling and populate annotations
-            service = SchedulingService(feature_map, parsed_current_date, resource_config)
+            service = SchedulingService(
+                feature_map, parsed_current_date, resource_config, scheduler_config
+            )
             service.populate_feature_map_annotations()
 
         # Generate the documentation
@@ -496,20 +500,6 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         raise typer.Exit(1) from None
 
 
-def _load_schedule_resource_config() -> tuple[Path | None, ResourceConfig | None]:
-    """Load resource config for schedule command.
-
-    Returns:
-        Tuple of (config_path, resource_config)
-    """
-    config_path = get_config_path() or Path("mouc_config.yaml")
-    if not config_path.exists():
-        return None, None
-
-    unified = load_unified_config(config_path)
-    return config_path, unified.resources
-
-
 def _annotate_feature_map(feature_map: FeatureMap, result: SchedulingResult, file: Path) -> None:
     """Write schedule annotations back to feature map YAML file."""
     for entity in feature_map.entities:
@@ -580,11 +570,19 @@ def schedule(
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
-        # Load resource config if available
-        _, resource_config = _load_schedule_resource_config()
+        # Load resource and scheduler config if available
+        config_path = get_config_path() or Path("mouc_config.yaml")
+        resource_config = None
+        scheduler_config = None
+        if config_path.exists():
+            unified = load_unified_config(config_path)
+            resource_config = unified.resources
+            scheduler_config = unified.scheduler
 
         # Run scheduling service
-        service = SchedulingService(feature_map, parsed_current_date, resource_config)
+        service = SchedulingService(
+            feature_map, parsed_current_date, resource_config, scheduler_config
+        )
         result = service.schedule()
 
         # Display or persist results

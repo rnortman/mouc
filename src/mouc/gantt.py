@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from .backends.base import AnchorFunction
 from .resources import UNASSIGNED_RESOURCE
-from .scheduler import ParallelScheduler, Task, parse_timeframe
+from .scheduler import ParallelScheduler, SchedulingConfig, Task, parse_timeframe
 from .scheduler import ScheduledTask as SchedulerTask
 from .styling import StylingContext, apply_task_styles, create_styling_context
 from .unified_config import load_unified_config
@@ -66,13 +66,15 @@ class GanttScheduler:
     algorithm is implemented in the scheduler module.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - Multiple optional config parameters needed (keyword-only)
         self,
         feature_map: FeatureMap,
+        *,
         start_date: date | None = None,
         current_date: date | None = None,
         resource_config: ResourceConfig | None = None,
         resource_config_path: Path | str | None = None,
+        scheduler_config: SchedulingConfig | None = None,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -84,6 +86,7 @@ class GanttScheduler:
                          If None, defaults to today
             resource_config: Optional pre-loaded resource configuration
             resource_config_path: Optional path to resources.yaml file
+            scheduler_config: Optional scheduling configuration for prioritization strategy
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
@@ -94,8 +97,11 @@ class GanttScheduler:
             with suppress(FileNotFoundError):
                 unified = load_unified_config(resource_config_path)
                 resource_config = unified.resources
+                if scheduler_config is None:
+                    scheduler_config = unified.scheduler
 
         self.resource_config = resource_config
+        self.scheduler_config = scheduler_config
 
         # Calculate start_date if not provided
         if start_date is None:
@@ -268,6 +274,7 @@ class GanttScheduler:
                 self.current_date,
                 resource_config=self.resource_config,
                 completed_task_ids=done_without_dates,
+                config=self.scheduler_config,
             )
             scheduled_tasks = scheduler.schedule()
 

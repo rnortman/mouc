@@ -9,6 +9,7 @@ Mouc uses a single unified configuration file (`mouc_config.yaml`) that contains
 - [File Structure](#file-structure)
 - [Resources Section](#resources-section)
   - [Task Priority](#task-priority)
+- [Scheduler Section](#scheduler-section)
 - [Markdown Section](#markdown-section)
 - [DOCX Section](#docx-section)
 - [Jira Section](#jira-section)
@@ -62,6 +63,13 @@ default_resource: "*"
 # OPTIONAL: Gantt chart settings
 gantt:
   markdown_base_url: "./feature_map.md"
+
+# OPTIONAL: Scheduler configuration
+scheduler:
+  strategy: "weighted"
+  cr_weight: 10.0
+  priority_weight: 1.0
+  default_cr: "median"
 
 # OPTIONAL: Markdown output settings
 markdown:
@@ -197,6 +205,61 @@ Lower score = more urgent. This gives CR 10× influence vs priority, meaning:
 - Very urgent deadlines (low CR) still dominate
 
 See [Scheduling Documentation](scheduling.md) for detailed CR and priority behavior.
+
+## Scheduler Section
+
+The `scheduler` section configures task prioritization strategies. This section is **optional** - defaults are used if not specified.
+
+```yaml
+scheduler:
+  strategy: "weighted"       # Prioritization strategy
+  cr_weight: 10.0           # Weight for critical ratio
+  priority_weight: 1.0      # Weight for priority
+  default_cr: "median"      # Default CR for non-deadline tasks
+```
+
+**`strategy`** (optional, default: `"weighted"`): How to prioritize tasks for scheduling.
+
+Valid values:
+- `"weighted"` - Combines CR and priority: `score = cr_weight×CR + priority_weight×(100-priority)` (lower = more urgent)
+- `"cr_first"` - Sort by Critical Ratio first, then priority as tiebreaker
+- `"priority_first"` - Sort by priority first, then CR as tiebreaker
+
+**`cr_weight`** (optional, default: `10.0`): Weight multiplier for critical ratio in weighted strategy.
+
+**`priority_weight`** (optional, default: `1.0`): Weight multiplier for priority in weighted strategy.
+
+**`default_cr`** (optional, default: `"median"`): Critical ratio to assign tasks without deadlines.
+
+Valid values:
+- `"median"` - Use median CR of deadline tasks (adaptive)
+- Numeric value (e.g., `5.0`) - Fixed CR for all non-deadline tasks
+
+**Strategy Examples:**
+
+```yaml
+# Deadline-focused (default): CR dominates, priority is tiebreaker
+scheduler:
+  strategy: "weighted"
+  cr_weight: 10.0
+  priority_weight: 1.0
+```
+
+```yaml
+# Balance deadlines and priorities equally
+scheduler:
+  strategy: "weighted"
+  cr_weight: 5.0
+  priority_weight: 5.0
+```
+
+```yaml
+# Priority-driven: high priority tasks scheduled first regardless of deadlines
+scheduler:
+  strategy: "priority_first"
+```
+
+See [Scheduling Documentation](scheduling.md) for detailed algorithm behavior.
 
 ## Markdown Section
 
@@ -522,6 +585,16 @@ groups:
     - charlie
 
 default_resource: "*"
+
+# ============================================================================
+# SCHEDULER (Optional)
+# ============================================================================
+
+scheduler:
+  strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
+  cr_weight: 10.0           # Weight for critical ratio
+  priority_weight: 1.0      # Weight for priority
+  default_cr: "median"      # "median" or numeric value
 
 # ============================================================================
 # MARKDOWN OUTPUT (Optional)

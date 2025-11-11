@@ -347,13 +347,23 @@ Tasks with no specified resources (or `resources: [unassigned]`) don't compete f
 
 ## Configuration
 
-Currently, the scheduler is hardcoded to use the **weighted strategy** with default weights:
+The scheduler supports configurable prioritization strategies via `mouc_config.yaml`:
+
+```yaml
+scheduler:
+  strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
+  cr_weight: 10.0           # Weight for critical ratio in weighted strategy
+  priority_weight: 1.0      # Weight for priority in weighted strategy
+  default_cr: "median"      # Default CR for tasks without deadlines ("median" | numeric value)
+```
+
+**Default values** (if not specified):
 - `strategy: "weighted"`
 - `cr_weight: 10.0`
 - `priority_weight: 1.0`
 - `default_cr: "median"`
 
-These parameters control how CR and Priority are combined to determine task urgency. In the future, these may be exposed via configuration files.
+These parameters control how CR and Priority are combined to determine task urgency.
 
 **Priority in YAML:**
 
