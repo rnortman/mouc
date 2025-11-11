@@ -837,7 +837,9 @@ class GanttScheduler:
 
         tags_str = ", ".join(tags) + ", " if tags else ""
         start_str = task.start_date.strftime("%Y-%m-%d")
-        duration_str = f"{int(task.duration_days)}d"
+        # Calculate duration from actual date range (accounts for DNS gaps)
+        calendar_duration = (task.end_date - task.start_date).days
+        duration_str = f"{calendar_duration}d"
 
         lines.append(f"    {label} :{tags_str}{task.entity_id}, {start_str}, {duration_str}")
 
