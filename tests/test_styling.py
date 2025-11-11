@@ -852,6 +852,7 @@ def test_style_metadata_with_schedule_annotations() -> None:
                     estimated_start=date(2025, 1, 1),
                     estimated_end=date(2025, 1, 5),
                     computed_deadline=None,
+                    computed_priority=None,
                     deadline_violated=False,
                     resource_assignments=[],
                     resources_were_computed=False,

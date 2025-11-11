@@ -192,6 +192,7 @@ class ScheduleAnnotations:
     estimated_start: date | None  # Computed start date from forward pass
     estimated_end: date | None  # Computed end date from forward pass
     computed_deadline: date | None  # Deadline from backward pass
+    computed_priority: int | None  # Effective priority from backward pass
     deadline_violated: bool  # True if estimated_end > computed_deadline
     resource_assignments: list[tuple[str, float]]  # Actual assignments used
     resources_were_computed: bool  # True if auto-assigned, False if manual
@@ -564,6 +565,7 @@ class SchedulingService:
         try:
             scheduled_tasks = scheduler.schedule()
             computed_deadlines = scheduler.get_computed_deadlines()
+            computed_priorities = scheduler.get_computed_priorities()
         except ValueError as e:
             # Scheduling failed
             return SchedulingResult(
@@ -593,25 +595,22 @@ class SchedulingService:
             if not scheduled:
                 continue
 
-            # Determine if it was fixed
             was_fixed = task.start_on is not None or task.end_on is not None
 
-            # Get computed deadline
             computed_deadline = computed_deadlines.get(entity_id)
+            computed_priority = computed_priorities.get(entity_id)
 
-            # Check deadline violation
             deadline_violated = False
             if computed_deadline and scheduled.end_date > computed_deadline:
                 deadline_violated = True
 
-            # Get resource assignments
             resource_assignments = list(task.resources)
 
-            # Create annotation
             annotations[entity_id] = ScheduleAnnotations(
                 estimated_start=scheduled.start_date,
                 estimated_end=scheduled.end_date,
                 computed_deadline=computed_deadline,
+                computed_priority=computed_priority,
                 deadline_violated=deadline_violated,
                 resource_assignments=resource_assignments,
                 resources_were_computed=resources_computed_map.get(entity_id, False),
@@ -680,6 +679,7 @@ class ParallelScheduler:
         self.completed_task_ids = completed_task_ids or set()
         self.config = config or SchedulingConfig()
         self._computed_deadlines: dict[str, date] = {}
+        self._computed_priorities: dict[str, int] = {}
 
     def schedule(self) -> list[ScheduledTask]:
         """Schedule all tasks using Parallel SGS algorithm.
@@ -694,7 +694,7 @@ class ParallelScheduler:
         # Phase 1: Topological sort (only remaining tasks)
         topo_order = self._topological_sort()
 
-        # Phase 2: Backward pass to calculate deadlines
+        # Phase 2: Backward pass to calculate deadlines and priorities
         latest_dates = self._calculate_latest_dates(topo_order)
         self._computed_deadlines = latest_dates.copy()
 
@@ -711,6 +711,14 @@ class ParallelScheduler:
             Dictionary mapping task_id to computed deadline
         """
         return self._computed_deadlines.copy()
+
+    def get_computed_priorities(self) -> dict[str, int]:
+        """Get computed priorities from backward pass.
+
+        Returns:
+            Dictionary mapping task_id to computed priority
+        """
+        return self._computed_priorities.copy()
 
     def _process_fixed_tasks(self) -> list[ScheduledTask]:
         """Process tasks with fixed dates (start_on/end_on).
@@ -796,8 +804,12 @@ class ParallelScheduler:
 
         return result
 
-    def _calculate_latest_dates(self, topo_order: list[str]) -> dict[str, date]:
+    def _calculate_latest_dates(  # noqa: PLR0912 - Handles both deadline and priority propagation
+        self, topo_order: list[str]
+    ) -> dict[str, date]:
         """Calculate latest acceptable finish date for each task via backward pass.
+
+        Also calculates effective priorities during the same pass.
 
         Args:
             topo_order: Topological ordering of tasks
@@ -812,18 +824,33 @@ class ParallelScheduler:
             if task.end_before:
                 latest[task_id] = task.end_before
 
-        # Propagate backwards through dependency graph
+        # Initialize priorities with base values
+        for task_id, task in self.tasks.items():
+            base_priority = 50
+            if task.meta:
+                priority_value = task.meta.get("priority", 50)
+                if isinstance(priority_value, (int, float)):
+                    base_priority = int(priority_value)
+            self._computed_priorities[task_id] = base_priority
+
+        # Propagate deadlines backwards through dependency graph
         for task_id in topo_order:
-            if task_id not in latest:
-                continue
+            has_deadline = task_id in latest
 
             task = self.tasks[task_id]
-            task_deadline = latest[task_id]
+            task_deadline = latest[task_id] if has_deadline else None
+            task_priority = self._computed_priorities[task_id]
 
-            # Propagate to dependencies
             for dep_id in task.dependencies:
                 # Skip dependencies that aren't in our task list (e.g., fixed tasks, done without dates)
                 if dep_id not in self.tasks or dep_id in self.completed_task_ids:
+                    continue
+
+                self._computed_priorities[dep_id] = max(
+                    self._computed_priorities[dep_id], task_priority
+                )
+
+                if task_deadline is None:
                     continue
 
                 # Dependency must finish before this task can start
@@ -898,12 +925,8 @@ class ParallelScheduler:
         """
         task = self.tasks[task_id]
 
-        # Get priority (default 50)
-        priority = 50
-        if task.meta:
-            priority_value = task.meta.get("priority", 50)
-            if isinstance(priority_value, (int, float)):
-                priority = int(priority_value)
+        # Get effective priority (default 50)
+        priority = self._computed_priorities.get(task_id, 50)
 
         # Compute critical ratio
         deadline = latest_dates.get(task_id)
@@ -983,7 +1006,9 @@ class ParallelScheduler:
         return (best_resource, best_start, best_completion)
 
     def _schedule_forward(  # noqa: PLR0912, PLR0915 - Scheduling algorithm requires complex dependency and resource management
-        self, latest_dates: dict[str, date], fixed_tasks: list[ScheduledTask]
+        self,
+        latest_dates: dict[str, date],
+        fixed_tasks: list[ScheduledTask],
     ) -> list[ScheduledTask]:
         """Schedule tasks using forward pass with Parallel SGS.
 

@@ -521,3 +521,222 @@ def test_invalid_strategy_raises_error():
         raise AssertionError("Should have raised ValueError")
     except ValueError as e:
         assert "Unknown scheduling strategy" in str(e)
+
+
+def test_priority_propagation_linear_chain():
+    """Test that priorities propagate backward through a linear dependency chain."""
+    # Setup: A (priority 90) → B (priority 40) → C (priority 40)
+    # A is high priority and depends on B, B depends on C
+    # Test: B and C should inherit priority 90 because they block A
+
+    task_a = Task(
+        id="task_a",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=["task_b"],
+        meta={"priority": 90},
+    )
+
+    task_b = Task(
+        id="task_b",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=["task_c"],
+        meta={"priority": 40},
+    )
+
+    task_c = Task(
+        id="task_c",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 40},
+    )
+
+    scheduler = ParallelScheduler([task_a, task_b, task_c], date(2025, 1, 1))
+    scheduler.schedule()
+
+    # Verify priorities propagated correctly
+    priorities = scheduler.get_computed_priorities()
+    assert priorities["task_a"] == 90  # Keeps own priority
+    assert priorities["task_b"] == 90  # Inherits from A
+    assert priorities["task_c"] == 90  # Inherits from B (which got it from A)
+
+
+def test_priority_propagation_diamond():
+    """Test that priorities propagate correctly through diamond dependencies."""
+    # Setup:    D (priority 95)
+    #          / \
+    #         B   C (priority 50)
+    #          \ /
+    #           A (priority 40)
+    # D is high priority and depends on B and C, which both depend on A
+    # Verify: B, C, and A all inherit 95 because they block D
+
+    task_a = Task(
+        id="task_a",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 40},
+    )
+
+    task_b = Task(
+        id="task_b",
+        duration_days=5.0,
+        resources=[("bob", 1.0)],
+        dependencies=["task_a"],
+        meta={"priority": 50},
+    )
+
+    task_c = Task(
+        id="task_c",
+        duration_days=5.0,
+        resources=[("charlie", 1.0)],
+        dependencies=["task_a"],
+        meta={"priority": 50},
+    )
+
+    task_d = Task(
+        id="task_d",
+        duration_days=5.0,
+        resources=[("dave", 1.0)],
+        dependencies=["task_b", "task_c"],
+        meta={"priority": 95},
+    )
+
+    scheduler = ParallelScheduler([task_a, task_b, task_c, task_d], date(2025, 1, 1))
+    scheduler.schedule()
+
+    priorities = scheduler.get_computed_priorities()
+    assert priorities["task_d"] == 95  # Keeps own priority
+    assert priorities["task_b"] == 95  # Inherits from D
+    assert priorities["task_c"] == 95  # Inherits from D
+    assert priorities["task_a"] == 95  # Inherits max from both B and C
+
+
+def test_priority_propagation_mixed_priorities():
+    """Test priority propagation with mixed explicit and default priorities."""
+    # Setup: A (priority 85) → B (priority 30) → C (default 50)
+    # A is high priority and depends on B, B depends on C
+    # Verify: B and C inherit priority 85 from A
+
+    task_a = Task(
+        id="task_a",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=["task_b"],
+        meta={"priority": 85},  # Highest priority
+    )
+
+    task_b = Task(
+        id="task_b",
+        duration_days=5.0,
+        resources=[("bob", 1.0)],
+        dependencies=["task_c"],
+        meta={"priority": 30},  # Lower explicit priority
+    )
+
+    task_c = Task(
+        id="task_c",
+        duration_days=5.0,
+        resources=[("charlie", 1.0)],
+        dependencies=[],
+        meta={},  # Default priority 50
+    )
+
+    scheduler = ParallelScheduler([task_a, task_b, task_c], date(2025, 1, 1))
+    scheduler.schedule()
+
+    priorities = scheduler.get_computed_priorities()
+    assert priorities["task_a"] == 85  # Keeps own priority
+    assert priorities["task_b"] == 85  # Inherits from A (overrides own priority of 30)
+    assert priorities["task_c"] == 85  # Inherits from B (overrides default of 50)
+
+
+def test_priority_propagation_no_lowering():
+    """Test that high-priority tasks don't get lowered by low-priority dependents."""
+    # Setup: task_high (priority 90) enables task_low (priority 30)
+    # task_competing (priority 80) competes with task_high
+    # task_high should keep its priority 90 and beat task_competing (80)
+    # Even though task_low has lower priority, it shouldn't lower task_high
+
+    task_high = Task(
+        id="task_high",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 90},
+    )
+
+    task_low = Task(
+        id="task_low",
+        duration_days=5.0,
+        resources=[("bob", 1.0)],
+        dependencies=["task_high"],
+        meta={"priority": 30},
+    )
+
+    task_competing = Task(
+        id="task_competing",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 80},
+    )
+
+    config = SchedulingConfig(strategy="priority_first")
+    scheduler = ParallelScheduler(
+        [task_high, task_low, task_competing], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule()
+
+    # task_high (90) should beat task_competing (80)
+    task_high_result = next(r for r in result if r.task_id == "task_high")
+    task_competing_result = next(r for r in result if r.task_id == "task_competing")
+
+    assert task_high_result.start_date < task_competing_result.start_date
+
+
+def test_priority_propagation_affects_scheduling():
+    """Test that propagated priorities actually affect scheduling order."""
+    # Setup: task_low (priority 40) enables task_dependent (priority 90)
+    # task_competing (priority 70) competes with task_low for same resource
+    # Without propagation: task_competing (70) beats task_low (40)
+    # With propagation: task_low inherits 90, beats task_competing (70)
+
+    task_low = Task(
+        id="task_low",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 40},
+    )
+
+    task_dependent = Task(
+        id="task_dependent",
+        duration_days=5.0,
+        resources=[("bob", 1.0)],  # Different resource so doesn't compete
+        dependencies=["task_low"],
+        meta={"priority": 90},  # Very high priority
+    )
+
+    task_competing = Task(
+        id="task_competing",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],  # Same resource as task_low
+        dependencies=[],
+        meta={"priority": 70},
+    )
+
+    config = SchedulingConfig(strategy="priority_first")
+    scheduler = ParallelScheduler(
+        [task_low, task_dependent, task_competing], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule()
+
+    # With propagation: task_low (inherits 90) should beat task_competing (70)
+    task_low_result = next(r for r in result if r.task_id == "task_low")
+    task_competing_result = next(r for r in result if r.task_id == "task_competing")
+
+    assert task_low_result.start_date < task_competing_result.start_date
