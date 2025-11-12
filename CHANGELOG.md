@@ -7,8 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.11] - 2025-11-12
+
+### Fixed
+- DNS period handling edge case
+
 ### Added
 - **Scheduling debug mode**: Use `-v 1/2/3` to view scheduling decisions at different detail levels
+- **Verbose logging overhaul**: Improved logging structure and consistency
 
 ## [0.1.10] - 2025-11-11
 
