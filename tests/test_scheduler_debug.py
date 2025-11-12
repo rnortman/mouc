@@ -2,8 +2,8 @@
 
 from datetime import date
 from io import StringIO
-from unittest.mock import patch
 
+from mouc.logger import reset_logger, setup_logger
 from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
 
 
@@ -17,10 +17,15 @@ def test_verbosity_0_silent():
         meta={"priority": 50},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1], date(2025, 1, 1), verbosity=0)
+    output_stream = StringIO()
+    setup_logger(0, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1], date(2025, 1, 1))
         scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should be silent - no output
     assert output == ""
@@ -44,10 +49,15 @@ def test_verbosity_1_shows_date_and_assignments():
         meta={"priority": 50},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), verbosity=1)
+    output_stream = StringIO()
+    setup_logger(1, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1))
         scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should show current date
     assert "Time: 2025-01-01" in output
@@ -79,10 +89,15 @@ def test_verbosity_2_shows_consideration_and_skipping():
         meta={"priority": 60},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), verbosity=2)
+    output_stream = StringIO()
+    setup_logger(2, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1))
         scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should show current date
     assert "Time: 2025-01-01" in output
@@ -115,10 +130,15 @@ def test_verbosity_3_shows_full_debug():
         meta={"priority": 60},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), verbosity=3)
+    output_stream = StringIO()
+    setup_logger(3, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1))
         scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should show time steps
     assert "Time: 2025-01-01" in output
@@ -145,10 +165,15 @@ def test_verbosity_3_shows_time_advancement():
         meta={"priority": 50},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1], date(2025, 1, 1), verbosity=3)
+    output_stream = StringIO()
+    setup_logger(3, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1], date(2025, 1, 1))
         scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should show time advancement
     assert "advancing time" in output or "Time: 2025-01-10" in output
@@ -176,10 +201,15 @@ def test_verbosity_with_cr_first_strategy():
         meta={"priority": 90},
     )
 
-    with patch("sys.stdout", new=StringIO()) as fake_out:
-        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), config=config, verbosity=3)
+    output_stream = StringIO()
+    setup_logger(3, stream=output_stream)
+
+    try:
+        scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), config=config)
         result = scheduler.schedule()
-        output = fake_out.getvalue()
+        output = output_stream.getvalue()
+    finally:
+        reset_logger()
 
     # Should show CR values
     assert "CR=" in output

@@ -7,17 +7,14 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-import typer
-
 from mouc.exceptions import MoucError
 from mouc.jira_client import JiraClient, JiraError, JiraIssueData
 from mouc.jira_config import ConflictResolution, JiraConfig
+from mouc.logger import changes_enabled, get_logger
 from mouc.models import Entity, FeatureMap, Link
 from mouc.unified_config import map_jira_user_to_resource
 
-# Constants for verbosity levels
-VERBOSITY_MEDIUM = 2  # Verbosity level for moderate output
-VERBOSITY_DEBUG = 3  # Verbosity level for debug output
+logger = get_logger()
 
 
 class JiraSyncError(MoucError):
@@ -55,7 +52,6 @@ class FieldExtractor:
         config: JiraConfig,
         client: JiraClient,
         resource_config: Any = None,
-        verbosity: int = 0,
     ):
         """Initialize field extractor.
 
@@ -63,12 +59,10 @@ class FieldExtractor:
             config: Jira configuration
             client: Jira client for resolving field names
             resource_config: Optional ResourceConfig for resource mapping
-            verbosity: Verbosity level for debug output
         """
         self.config = config
         self.client = client
         self.resource_config = resource_config
-        self.verbosity = verbosity
 
     def extract_start_date(self, issue_data: JiraIssueData) -> date | None:
         """Extract start_date from issue data.
@@ -81,31 +75,25 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.start_date
         if not mapping:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo("      [DEBUG] start_date: no mapping configured")
+            logger.debug("      start_date: no mapping configured")
             return None
 
         if mapping.explicit_field:
             value = self._get_date_field(issue_data, mapping.explicit_field)
             if value:
-                if self.verbosity >= VERBOSITY_DEBUG:
-                    typer.echo(
-                        f"      [DEBUG] start_date: from field '{mapping.explicit_field}' = {value}"
-                    )
+                logger.debug(f"      start_date: from field '{mapping.explicit_field}' = {value}")
                 return value
 
         if mapping.transition_to_status:
             transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
             if transition_date:
                 result = transition_date.date()
-                if self.verbosity >= VERBOSITY_DEBUG:
-                    typer.echo(
-                        f"      [DEBUG] start_date: from transition to '{mapping.transition_to_status}' = {result}"
-                    )
+                logger.debug(
+                    f"      start_date: from transition to '{mapping.transition_to_status}' = {result}"
+                )
                 return result
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            typer.echo("      [DEBUG] start_date: no value found")
+        logger.debug("      start_date: no value found")
         return None
 
     def extract_end_date(self, issue_data: JiraIssueData) -> date | None:
@@ -119,31 +107,25 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.end_date
         if not mapping:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo("      [DEBUG] end_date: no mapping configured")
+            logger.debug("      end_date: no mapping configured")
             return None
 
         if mapping.explicit_field:
             value = self._get_date_field(issue_data, mapping.explicit_field)
             if value:
-                if self.verbosity >= VERBOSITY_DEBUG:
-                    typer.echo(
-                        f"      [DEBUG] end_date: from field '{mapping.explicit_field}' = {value}"
-                    )
+                logger.debug(f"      end_date: from field '{mapping.explicit_field}' = {value}")
                 return value
 
         if mapping.transition_to_status:
             transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
             if transition_date:
                 result = transition_date.date()
-                if self.verbosity >= VERBOSITY_DEBUG:
-                    typer.echo(
-                        f"      [DEBUG] end_date: from transition to '{mapping.transition_to_status}' = {result}"
-                    )
+                logger.debug(
+                    f"      end_date: from transition to '{mapping.transition_to_status}' = {result}"
+                )
                 return result
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            typer.echo("      [DEBUG] end_date: no value found")
+        logger.debug("      end_date: no value found")
         return None
 
     def extract_effort(self, issue_data: JiraIssueData) -> str | None:
@@ -157,26 +139,20 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.effort
         if not mapping or not mapping.jira_field:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo("      [DEBUG] effort: no mapping configured")
+            logger.debug("      effort: no mapping configured")
             return None
 
         # Use the client to resolve the field name (e.g., "Story Points")
         value = self.client.get_custom_field_value(issue_data, mapping.jira_field)
         if value is None:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo(f"      [DEBUG] effort: field '{mapping.jira_field}' not found or null")
+            logger.debug(f"      effort: field '{mapping.jira_field}' not found or null")
             return None
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            typer.echo(f"      [DEBUG] effort: from field '{mapping.jira_field}' = {value}")
+        logger.debug(f"      effort: from field '{mapping.jira_field}' = {value}")
 
         if mapping.conversion:
-            result = self._convert_effort(value, mapping.conversion, mapping.unit)
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo(
-                    f"      [DEBUG] effort: converted using '{mapping.conversion}' → {result}"
-                )
+            result = self._convert_effort(value, mapping.conversion)
+            logger.debug(f"      effort: converted using '{mapping.conversion}' → {result}")
             return result
 
         if isinstance(value, str):
@@ -198,19 +174,15 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.status
         if not mapping or not mapping.status_map:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo("      [DEBUG] status: no mapping configured")
+            logger.debug("      status: no mapping configured")
             return None
 
         jira_status = issue_data.status
         result = mapping.status_map.get(jira_status)
-        if self.verbosity >= VERBOSITY_DEBUG:
-            if result:
-                typer.echo(f"      [DEBUG] status: Jira status '{jira_status}' → '{result}'")
-            else:
-                typer.echo(
-                    f"      [DEBUG] status: Jira status '{jira_status}' not in map, returning None"
-                )
+        if result:
+            logger.debug(f"      status: Jira status '{jira_status}' → '{result}'")
+        else:
+            logger.debug(f"      status: Jira status '{jira_status}' not in map, returning None")
         return result
 
     def extract_resources(self, issue_data: JiraIssueData) -> list[str] | None:
@@ -229,16 +201,14 @@ class FieldExtractor:
         """
         mapping = self.config.field_mappings.resources
         if not mapping:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo("      [DEBUG] resources: no mapping configured")
+            logger.debug("      resources: no mapping configured")
             return None
 
         # Use the new unified mapping logic
-        if self.verbosity >= VERBOSITY_DEBUG:
-            if issue_data.assignee_email:
-                typer.echo(f"      [DEBUG] resources: assignee = '{issue_data.assignee_email}'")
-            else:
-                typer.echo("      [DEBUG] resources: unassigned (will not update field)")
+        if issue_data.assignee_email:
+            logger.debug(f"      resources: assignee = '{issue_data.assignee_email}'")
+        else:
+            logger.debug("      resources: unassigned (will not update field)")
 
         result = map_jira_user_to_resource(
             issue_data.assignee_email,
@@ -246,11 +216,10 @@ class FieldExtractor:
             self.config,
         )
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            if result:
-                typer.echo(f"      [DEBUG] resources: mapped to {result}")
-            else:
-                typer.echo("      [DEBUG] resources: ignored/unassigned (will not update field)")
+        if result:
+            logger.debug(f"      resources: mapped to {result}")
+        else:
+            logger.debug("      resources: ignored/unassigned (will not update field)")
 
         return result
 
@@ -297,13 +266,12 @@ class FieldExtractor:
 
         return None
 
-    def _convert_effort(self, value: Any, conversion: str, unit: str | None) -> str | None:
+    def _convert_effort(self, value: Any, conversion: str) -> str | None:
         """Convert effort value using conversion rule.
 
         Args:
             value: Raw value from Jira
             conversion: Conversion rule (e.g., "1sp=1d", "2sp=1w")
-            unit: Unit of the Jira value
 
         Returns:
             Converted effort string in Mouc format
@@ -396,7 +364,6 @@ class JiraSynchronizer:
         config: JiraConfig,
         feature_map: FeatureMap,
         client: JiraClient,
-        verbosity: int = 0,
         resource_config: Any = None,
     ):
         """Initialize synchronizer.
@@ -405,14 +372,12 @@ class JiraSynchronizer:
             config: Jira configuration
             feature_map: Mouc feature map
             client: Jira API client
-            verbosity: Verbosity level (0=silent, 1=changes only, 2=all checks)
             resource_config: Optional ResourceConfig for resource mapping
         """
         self.config = config
         self.feature_map = feature_map
         self.client = client
-        self.extractor = FieldExtractor(config, client, resource_config, verbosity)
-        self.verbosity = verbosity
+        self.extractor = FieldExtractor(config, client, resource_config)
 
     def sync_all_entities(self) -> list[SyncResult]:
         """Sync all entities that have Jira links.
@@ -460,8 +425,7 @@ class JiraSynchronizer:
         Raises:
             JiraError: If issue fetch fails
         """
-        if self.verbosity >= VERBOSITY_MEDIUM:
-            typer.echo(f"Checking {entity_id} ({ticket_id})...")
+        logger.checks(f"Checking {entity_id} ({ticket_id})...")
 
         issue_data = self.client.fetch_issue(ticket_id)
 
@@ -518,20 +482,19 @@ class JiraSynchronizer:
             conflicts=conflicts,
         )
 
-        # Show changes at verbosity level 1+
-        if self.verbosity >= 1 and (updated_fields or conflicts):
+        if changes_enabled() and (updated_fields or conflicts):
             if updated_fields:
-                typer.echo(f"  {entity_id}:")
+                logger.changes(f"  {entity_id}:")
                 for field, new_value in updated_fields.items():
                     old_value = entity.meta.get(field)
                     if old_value is None:
-                        typer.echo(f"    {field}: (none) → {new_value}")
+                        logger.changes(f"    {field}: (none) → {new_value}")
                     else:
-                        typer.echo(f"    {field}: {old_value} → {new_value}")
+                        logger.changes(f"    {field}: {old_value} → {new_value}")
             if conflicts:
-                typer.echo(f"  {entity_id} (conflicts):")
+                logger.changes(f"  {entity_id} (conflicts):")
                 for conflict in conflicts:
-                    typer.echo(
+                    logger.changes(
                         f"    {conflict.field}: mouc={conflict.mouc_value} | jira={conflict.jira_value}"
                     )
 
@@ -573,8 +536,7 @@ class JiraSynchronizer:
 
         # Check if field is ignored entirely
         if field in jira_sync.ignore_fields:
-            if self.verbosity >= VERBOSITY_MEDIUM:
-                typer.echo(f"    [IGNORED] {field} (field is in ignore_fields)")
+            logger.checks(f"    [IGNORED] {field} (field is in ignore_fields)")
             return
 
         # Check if this specific value should be ignored
@@ -582,17 +544,13 @@ class JiraSynchronizer:
             ignored_values = jira_sync.ignore_values[field]
             for ignored_value in ignored_values:
                 if self._values_equal(jira_value, ignored_value):
-                    if self.verbosity >= VERBOSITY_MEDIUM:
-                        typer.echo(
-                            f"    [IGNORED] {field}={jira_value} (value is in ignore_values)"
-                        )
+                    logger.checks(f"    [IGNORED] {field}={jira_value} (value is in ignore_values)")
                     return
 
         # Validate the Jira value
         is_valid, error_msg = validate_field_value(field, jira_value, entity)
         if not is_valid:
-            if self.verbosity >= 1:
-                typer.echo(f"    [INVALID] {field}={jira_value}: {error_msg}")
+            logger.changes(f"    [INVALID] {field}={jira_value}: {error_msg}")
             # Create conflict for invalid data
             mouc_value = entity.meta.get(field)
             conflicts.append(
@@ -621,8 +579,7 @@ class JiraSynchronizer:
         # Check if user previously made a resolution choice for this field
         if field in jira_sync.resolution_choices:
             remembered_choice = jira_sync.resolution_choices[field]
-            if self.verbosity >= VERBOSITY_MEDIUM:
-                typer.echo(f"    [REMEMBERED] {field}: using previous choice '{remembered_choice}'")
+            logger.checks(f"    [REMEMBERED] {field}: using previous choice '{remembered_choice}'")
             if remembered_choice == "jira":
                 updated_fields[field] = jira_value
             elif remembered_choice == "mouc":

@@ -19,6 +19,7 @@ from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
+from .logger import setup_logger
 from .models import FeatureMap
 from .parser import FeatureMapParser
 from .scheduler import SchedulingResult, SchedulingService
@@ -31,12 +32,7 @@ app = typer.Typer(
 )
 
 
-# Backwards compatibility wrappers for global state access
-def get_verbosity() -> int:
-    """Get the current verbosity level."""
-    return context.get_verbosity()
-
-
+# Backwards compatibility wrapper for global state access
 def get_config_path() -> Path | None:
     """Get the global config path."""
     return context.get_config_path()
@@ -64,7 +60,7 @@ def main_callback(
     ] = None,
 ) -> None:
     """Global options for mouc commands."""
-    context.set_verbosity(verbose)
+    setup_logger(verbose)
     context.set_config_path(config)
 
 
@@ -222,7 +218,6 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
                 parsed_current_date,
                 resource_config,
                 scheduler_config,
-                verbosity=context.get_verbosity(),
             )
             service.populate_feature_map_annotations()
 
@@ -463,7 +458,6 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
             start_date=parsed_start_date,
             current_date=parsed_current_date,
             resource_config_path=resource_config_path,
-            verbosity=context.get_verbosity(),
         )
         result = scheduler.schedule()
 
@@ -590,7 +584,6 @@ def schedule(
             parsed_current_date,
             resource_config,
             scheduler_config,
-            verbosity=context.get_verbosity(),
         )
         result = service.schedule()
 

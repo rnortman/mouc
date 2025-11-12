@@ -6,10 +6,12 @@ from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
-import typer
 from pydantic import BaseModel
 
+from mouc.logger import debug_enabled, get_logger
 from mouc.resources import UNASSIGNED_RESOURCE
+
+logger = get_logger()
 
 if TYPE_CHECKING:
     from mouc.models import Entity, FeatureMap
@@ -19,12 +21,6 @@ if TYPE_CHECKING:
 MONTHS_PER_YEAR = 12  # Number of months in a year
 DECEMBER = 12  # Month number for December
 MAX_ISO_WEEK = 53  # Maximum ISO week number in a year
-
-# Verbosity level constants
-VERBOSITY_SILENT = 0  # No debug output
-VERBOSITY_BASIC = 1  # Show time steps and task assignments
-VERBOSITY_DETAILED = 2  # Show task consideration and skip reasons
-VERBOSITY_DEBUG = 3  # Show full algorithm details
 
 
 def parse_timeframe(  # noqa: PLR0911, PLR0912, PLR0915 - Timeframe parser handles multiple date formats and patterns
@@ -397,7 +393,6 @@ class ResourceSchedule:
         self,
         unavailable_periods: list[tuple[date, date]] | None = None,
         resource_name: str = "",
-        verbosity: int = 0,
     ) -> None:
         """Initialize with optional pre-defined unavailable periods.
 
@@ -405,11 +400,9 @@ class ResourceSchedule:
             unavailable_periods: Optional list of (start, end) tuples for periods when
                 the resource is unavailable (e.g., vacations, do-not-schedule periods)
             resource_name: Name of the resource (for verbose logging)
-            verbosity: Debug output level (0=silent, 1=basic, 2=detailed, 3=debug)
         """
         self.busy_periods: list[tuple[date, date]] = unavailable_periods or []
         self.resource_name = resource_name
-        self.verbosity = verbosity
 
     def add_busy_period(self, start: date, end: date) -> None:
         """Add a busy period and maintain sorted order.
@@ -475,9 +468,9 @@ class ResourceSchedule:
         return (None, None)
 
     def _log_debug(self, message: str) -> None:
-        """Log a debug message if verbosity is high enough."""
-        if self.verbosity >= VERBOSITY_DEBUG and self.resource_name:
-            typer.echo(f"            {message}")
+        """Log a debug message."""
+        if self.resource_name:
+            logger.debug(f"            {message}")
 
     def calculate_completion_time(self, start: date, duration_days: float) -> date:
         """Calculate when a task will actually complete, accounting for busy periods (including DNS gaps).
@@ -493,8 +486,8 @@ class ResourceSchedule:
         Returns:
             Date when the task would complete (exclusive end, matching scheduler convention)
         """
-        if self.verbosity >= VERBOSITY_DEBUG and self.resource_name:
-            typer.echo(
+        if self.resource_name:
+            logger.debug(
                 f"          Calculating completion time for {self.resource_name}: "
                 f"start={start}, duration={duration_days}d"
             )
@@ -580,7 +573,6 @@ class SchedulingService:
         current_date: date | None = None,
         resource_config: "ResourceConfig | None" = None,
         config: SchedulingConfig | None = None,
-        verbosity: int = 0,
     ):
         """Initialize scheduling service.
 
@@ -589,13 +581,11 @@ class SchedulingService:
             current_date: Current date for scheduling (defaults to today)
             resource_config: Optional resource configuration
             config: Optional scheduling configuration for prioritization strategy
-            verbosity: Debug output level (0=silent, 1=basic, 2=detailed, 3=debug)
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
         self.resource_config = resource_config
         self.config = config
-        self.verbosity = verbosity
         self.validator = SchedulerInputValidator(resource_config)
 
     def schedule(self) -> SchedulingResult:
@@ -616,7 +606,6 @@ class SchedulingService:
             resource_config=self.resource_config,
             completed_task_ids=done_without_dates,
             config=self.config,
-            verbosity=self.verbosity,
         )
 
         try:
@@ -721,7 +710,6 @@ class ParallelScheduler:
         resource_config: "ResourceConfig | None" = None,
         completed_task_ids: set[str] | None = None,
         config: SchedulingConfig | None = None,
-        verbosity: int = 0,
     ):
         """Initialize the scheduler.
 
@@ -731,14 +719,12 @@ class ParallelScheduler:
             resource_config: Optional resource configuration for auto-assignment
             completed_task_ids: Set of task IDs that are already completed (done without dates)
             config: Optional scheduling configuration for prioritization strategy
-            verbosity: Debug output level (0=silent, 1=basic, 2=detailed, 3=debug)
         """
         self.tasks = {task.id: task for task in tasks}
         self.current_date = current_date
         self.resource_config = resource_config
         self.completed_task_ids = completed_task_ids or set()
         self.config = config or SchedulingConfig()
-        self.verbosity = verbosity
         self._computed_deadlines: dict[str, date] = {}
         self._computed_priorities: dict[str, int] = {}
 
@@ -1013,23 +999,19 @@ class ParallelScheduler:
         if task.resource_spec and self.resource_config:
             # Auto-assignment: expand resource spec to candidate list
             candidates = self.resource_config.expand_resource_spec(task.resource_spec)
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo(
-                    f"      Finding best resource for task {task.id}: "
-                    f"spec={task.resource_spec}, candidates={candidates}"
-                )
+            logger.debug(
+                f"      Finding best resource for task {task.id}: "
+                f"spec={task.resource_spec}, candidates={candidates}"
+            )
             return candidates
         if task.resources:
             # Explicit assignment: use specified resources
             candidates = [r[0] for r in task.resources]
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo(
-                    f"      Finding best resource for task {task.id}: "
-                    f"explicit resources={candidates}"
-                )
+            logger.debug(
+                f"      Finding best resource for task {task.id}: explicit resources={candidates}"
+            )
             return candidates
-        if self.verbosity >= VERBOSITY_DEBUG:
-            typer.echo(f"      No candidate resources found for task {task.id}")
+        logger.debug(f"      No candidate resources found for task {task.id}")
         return []
 
     def _evaluate_resource_for_task(
@@ -1041,19 +1023,17 @@ class ParallelScheduler:
     ) -> tuple[date, date] | None:
         """Evaluate a single resource for a task, returning (available_at, completion) or None."""
         if resource_name not in resource_schedules:
-            if self.verbosity >= VERBOSITY_DEBUG:
-                typer.echo(f"        {resource_name}: not in schedules, skipping")
+            logger.debug(f"        {resource_name}: not in schedules, skipping")
             return None
 
         schedule = resource_schedules[resource_name]
         available_at = schedule.next_available_time(current_time)
         completion = schedule.calculate_completion_time(available_at, task.duration_days)
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            typer.echo(
-                f"        {resource_name}: available={available_at}, "
-                f"completion={completion} (duration={task.duration_days}d)"
-            )
+        logger.debug(
+            f"        {resource_name}: available={available_at}, "
+            f"completion={completion} (duration={task.duration_days}d)"
+        )
 
         return (available_at, completion)
 
@@ -1101,17 +1081,15 @@ class ParallelScheduler:
                 best_resource = resource_name
                 best_start = available_at
                 best_completion = completion
-                if self.verbosity >= VERBOSITY_DEBUG:
-                    typer.echo("          → New best resource")
+                logger.debug("          → New best resource")
 
-        if self.verbosity >= VERBOSITY_DEBUG:
-            if best_resource:
-                typer.echo(
-                    f"      Best resource for {task.id}: {best_resource} "
-                    f"(start={best_start}, completion={best_completion})"
-                )
-            else:
-                typer.echo(f"      No valid resource found for {task.id}")
+        if best_resource:
+            logger.debug(
+                f"      Best resource for {task.id}: {best_resource} "
+                f"(start={best_start}, completion={best_completion})"
+            )
+        else:
+            logger.debug(f"      No valid resource found for {task.id}")
 
         return (best_resource, best_start, best_completion)
 
@@ -1160,7 +1138,6 @@ class ParallelScheduler:
             resource_schedules[resource] = ResourceSchedule(
                 unavailable_periods=unavailable_periods,
                 resource_name=resource,
-                verbosity=self.verbosity,
             )
 
         # Mark fixed tasks as busy in resource schedules
@@ -1179,9 +1156,8 @@ class ParallelScheduler:
         while unscheduled and iteration < max_iterations:
             iteration += 1
 
-            # Print current date for all verbosity levels
-            if self.verbosity >= VERBOSITY_BASIC:
-                typer.echo(f"Time: {current_time}")
+            # Print current date
+            logger.changes(f"Time: {current_time}")
 
             # Find tasks eligible at current_time
             eligible: list[str] = []
@@ -1225,15 +1201,13 @@ class ParallelScheduler:
                 key=lambda tid: self._compute_sort_key(tid, current_time, latest_dates, default_cr)
             )
 
-            # Debug output for level 3: show detailed time step info
-            if self.verbosity >= VERBOSITY_DEBUG:
-                # Get available resources
+            if debug_enabled():
                 available_resources: list[str] = []
                 for resource_name, schedule in resource_schedules.items():
                     if schedule.next_available_time(current_time) == current_time:
                         available_resources.append(resource_name)
 
-                typer.echo(
+                logger.debug(
                     f"  === Eligible tasks: {len(eligible)}, "
                     f"Available resources: {', '.join(sorted(available_resources)) if available_resources else 'none'} ==="
                 )
@@ -1255,7 +1229,7 @@ class ParallelScheduler:
                     sort_key = self._compute_sort_key(
                         task_id, current_time, latest_dates, default_cr
                     )
-                    typer.echo(
+                    logger.debug(
                         f"    {task_id}: priority={priority}, CR={cr_str}, "
                         f"sort_key={sort_key}, duration={task.duration_days}d"
                     )
@@ -1265,17 +1239,16 @@ class ParallelScheduler:
             for task_id in eligible:
                 task = self.tasks[task_id]
 
-                # Level 2: Show task being considered
-                if self.verbosity >= VERBOSITY_DETAILED:
-                    priority = self._computed_priorities.get(task_id, 50)
-                    deadline = latest_dates.get(task_id)
-                    if deadline and deadline != date.max:
-                        slack = (deadline - current_time).days
-                        cr = slack / max(task.duration_days, 0.1)
-                        cr_str = f"{cr:.2f}"
-                    else:
-                        cr_str = f"{default_cr:.2f} (default)"
-                    typer.echo(f"  Considering task {task_id} (priority={priority}, CR={cr_str})")
+                # Show task being considered
+                priority = self._computed_priorities.get(task_id, 50)
+                deadline = latest_dates.get(task_id)
+                if deadline and deadline != date.max:
+                    slack = (deadline - current_time).days
+                    cr = slack / max(task.duration_days, 0.1)
+                    cr_str = f"{cr:.2f}"
+                else:
+                    cr_str = f"{default_cr:.2f} (default)"
+                logger.checks(f"  Considering task {task_id} (priority={priority}, CR={cr_str})")
 
                 # Check if this is auto-assignment or explicit multi-resource assignment
                 if task.resource_spec and self.resource_config:
@@ -1286,19 +1259,17 @@ class ParallelScheduler:
 
                     if best_resource is None or best_start is None or best_completion is None:
                         # No valid resource found for this task
-                        if self.verbosity >= VERBOSITY_DETAILED:
-                            typer.echo(f"    Skipping {task_id}: No valid resource found")
+                        logger.checks(f"    Skipping {task_id}: No valid resource found")
                         continue
 
                     # GREEDY WITH FORESIGHT: Only schedule if best resource is available NOW
                     if best_start != current_time:
                         # Best resource completes task fastest, but isn't available now
                         # Skip this task - will reconsider when resource becomes available
-                        if self.verbosity >= VERBOSITY_DETAILED:
-                            typer.echo(
-                                f"    Skipping {task_id}: Best resource {best_resource} "
-                                f"not available until {best_start}"
-                            )
+                        logger.checks(
+                            f"    Skipping {task_id}: Best resource {best_resource} "
+                            f"not available until {best_start}"
+                        )
                         continue
 
                     # Best resource is available now - assign and schedule!
@@ -1313,12 +1284,11 @@ class ParallelScheduler:
                     unscheduled.remove(task_id)
                     scheduled_any = True
 
-                    # Level 1+: Show task assignment
-                    if self.verbosity >= VERBOSITY_BASIC:
-                        typer.echo(
-                            f"  Scheduled task {task_id} on {best_resource} "
-                            f"from {current_time} to {end_date}"
-                        )
+                    # Show task assignment
+                    logger.changes(
+                        f"  Scheduled task {task_id} on {best_resource} "
+                        f"from {current_time} to {end_date}"
+                    )
 
                     result.append(
                         ScheduledTask(
@@ -1334,8 +1304,7 @@ class ParallelScheduler:
                     # EXPLICIT RESOURCE ASSIGNMENT: Check if all required resources are available at current_time
                     # Use DNS-aware completion time, but don't skip if resources aren't available (no greedy foresight)
                     if not task.resources:
-                        if self.verbosity >= VERBOSITY_DETAILED:
-                            typer.echo(f"    Skipping {task_id}: No resources specified")
+                        logger.checks(f"    Skipping {task_id}: No resources specified")
                         continue
 
                     # Check if all resources are available to START now (not if they can complete without interruption)
@@ -1357,11 +1326,10 @@ class ParallelScheduler:
 
                     if not all_available_now:
                         # Resources not available now, skip this task
-                        if self.verbosity >= VERBOSITY_DETAILED:
-                            typer.echo(
-                                f"    Skipping {task_id}: Resources not available: "
-                                f"{', '.join(unavailable_resources)}"
-                            )
+                        logger.checks(
+                            f"    Skipping {task_id}: Resources not available: "
+                            f"{', '.join(unavailable_resources)}"
+                        )
                         continue
 
                     # All resources available now - calculate DNS-aware completion time
@@ -1384,13 +1352,12 @@ class ParallelScheduler:
                     unscheduled.remove(task_id)
                     scheduled_any = True
 
-                    # Level 1+: Show task assignment
-                    if self.verbosity >= VERBOSITY_BASIC:
-                        resources_str = ", ".join([r for r, _ in task.resources])
-                        typer.echo(
-                            f"  Scheduled task {task_id} on {resources_str} "
-                            f"from {current_time} to {end_date}"
-                        )
+                    # Show task assignment
+                    resources_str = ", ".join([r for r, _ in task.resources])
+                    logger.changes(
+                        f"  Scheduled task {task_id} on {resources_str} "
+                        f"from {current_time} to {end_date}"
+                    )
 
                     result.append(
                         ScheduledTask(
@@ -1426,15 +1393,13 @@ class ParallelScheduler:
 
                 if next_events:
                     new_time = min(next_events)
-                    if self.verbosity >= VERBOSITY_DEBUG:
-                        typer.echo(
-                            f"  No tasks scheduled at {current_time}, advancing time to {new_time}"
-                        )
+                    logger.debug(
+                        f"  No tasks scheduled at {current_time}, advancing time to {new_time}"
+                    )
                     current_time = new_time
                 else:
                     # No more events - shouldn't happen with feasible tasks
-                    if self.verbosity >= VERBOSITY_DEBUG:
-                        typer.echo("  No more events, stopping")
+                    logger.debug("  No more events, stopping")
                     break
 
         if unscheduled:

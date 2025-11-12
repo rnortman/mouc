@@ -68,7 +68,7 @@ def test_extract_original_estimate(mock_issue_with_time_tracking: JiraIssueData)
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(mock_issue_with_time_tracking)
 
@@ -83,7 +83,7 @@ def test_extract_remaining_estimate(mock_issue_with_time_tracking: JiraIssueData
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(mock_issue_with_time_tracking)
 
@@ -98,7 +98,7 @@ def test_extract_time_spent(mock_issue_with_time_tracking: JiraIssueData) -> Non
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(mock_issue_with_time_tracking)
 
@@ -127,7 +127,7 @@ def test_no_conversion_needed_for_time_tracking() -> None:
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(issue_data)
 
@@ -152,7 +152,7 @@ def test_time_tracking_missing() -> None:
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(issue_data)
 
@@ -180,7 +180,7 @@ def test_time_tracking_empty() -> None:
     )
 
     client = MockJiraClient()
-    extractor = FieldExtractor(config, client, verbosity=0)  # type: ignore[arg-type]
+    extractor = FieldExtractor(config, client)  # type: ignore[arg-type]
 
     effort = extractor.extract_effort(issue_data)
 

@@ -18,16 +18,25 @@ from .jira_client import JiraAuthError, JiraClient, JiraError
 from .jira_interactive import InteractiveResolver
 from .jira_report import ReportGenerator
 from .jira_sync import FieldConflict, JiraSynchronizer
+from .logger import (
+    VERBOSITY_CHANGES,
+    changes_enabled,
+    checks_enabled,
+    debug_enabled,
+    get_logger,
+    is_silent,
+    setup_logger,
+)
 from .models import Entity, Link
 from .parser import FeatureMapParser
 from .unified_config import load_unified_config
+
+logger = get_logger()
 
 # Create Jira sub-app
 jira_app = typer.Typer(help="Jira integration commands")
 
 # Constants for display and formatting
-VERBOSITY_HIGH = 3  # Verbosity level for detailed output
-VERBOSITY_MEDIUM = 2  # Verbosity level for moderate output
 MAX_VALUE_DISPLAY_LENGTH = 100  # Maximum characters to display before truncating
 MAX_ENTITIES_TO_SHOW = 5  # Maximum entities to show in warning messages
 
@@ -122,9 +131,6 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
 ) -> None:
     """Fetch and display data for a single Jira ticket."""
     try:
-        # Get verbosity level
-        verbosity = context.get_verbosity()
-
         # Determine config path
         if config is None:
             global_config = context.get_config_path()
@@ -143,12 +149,12 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
         client = JiraClient(jira_config.jira.base_url)
 
         # Fetch issue
-        if verbosity == 0:
+        if is_silent():
             typer.echo(f"Fetching {ticket}...")
         issue_data = client.fetch_issue(ticket)
 
         # Display results based on verbosity
-        if verbosity >= VERBOSITY_HIGH:
+        if debug_enabled():
             # Level 3: Dump raw Jira API response
             typer.echo(f"\n{'=' * 60}")
             typer.echo(f"RAW JIRA API RESPONSE for {ticket}")
@@ -166,7 +172,7 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
             field_map = client.get_field_mappings()
             typer.echo(json.dumps(field_map, indent=2))
 
-        elif verbosity >= 1:
+        elif changes_enabled():
             # Level 1+: Show status transitions and parsed data
             typer.echo(f"\n{'=' * 60}")
             typer.echo(f"JIRA ISSUE: {issue_data.key}")
@@ -185,7 +191,7 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
                 typer.echo("\nNo status transitions found in changelog")
 
             # Show all fields at level 2+
-            if verbosity >= VERBOSITY_MEDIUM:
+            if checks_enabled():
                 typer.echo("\nAll Fields:")
                 for field_name, value in sorted(issue_data.fields.items()):
                     if value is not None:
@@ -348,12 +354,9 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
             typer.echo("Error: Cannot use both --apply and --dry-run", err=True)
             raise typer.Exit(1) from None
 
-        # Get verbosity level from global state
-        verbosity = context.get_verbosity()
-
         # Auto-enable verbosity for dry-run if not already set
-        if dry_run and verbosity == 0:
-            verbosity = 1
+        if dry_run and is_silent():
+            setup_logger(VERBOSITY_CHANGES)
 
         # Determine config path
         if config is None:
@@ -367,7 +370,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
                 raise typer.Exit(1) from None
 
         # Load config and feature map
-        if verbosity == 0:
+        if is_silent():
             typer.echo(f"Loading config from {config}...")
 
         # Load unified config to get both Jira and Resource configs
@@ -383,21 +386,21 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
             # Fall back to standalone jira config
             jira_config = _load_jira_config_from_path(config)
 
-        if verbosity == 0:
+        if is_silent():
             typer.echo(f"Loading feature map from {file}...")
         parser = FeatureMapParser()
         feature_map = parser.parse_file(file)
 
         # Create client and synchronizer
-        if verbosity == 0:
+        if is_silent():
             typer.echo(f"Connecting to Jira at {jira_config.jira.base_url}...")
         client = JiraClient(jira_config.jira.base_url)
         synchronizer = JiraSynchronizer(
-            jira_config, feature_map, client, verbosity=verbosity, resource_config=resource_config
+            jira_config, feature_map, client, resource_config=resource_config
         )
 
         # Sync all entities
-        if verbosity == 0:
+        if is_silent():
             typer.echo("Syncing entities with Jira...")
         results = synchronizer.sync_all_entities()
 
@@ -460,7 +463,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
                 raise typer.Exit(1) from None
 
         if apply and not dry_run:
-            if verbosity >= 1:
+            if changes_enabled():
                 typer.echo("\nApplying changes to feature map...")
 
             for result in results:
@@ -469,7 +472,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
                     if entity:
                         for field, value in result.updated_fields.items():
                             entity.meta[field] = value
-                        if verbosity >= 1:
+                        if changes_enabled():
                             typer.echo(
                                 f"  Updated {result.entity_id}: {', '.join(result.updated_fields.keys())}"
                             )
@@ -493,14 +496,14 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
                                         break
                                 break
                     entity.set_jira_sync_metadata(jira_sync)
-                    if verbosity >= 1:
+                    if changes_enabled():
                         typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
 
             write_feature_map(file, feature_map)
             typer.echo(f"\n✓ Changes written to {file}")
 
         elif dry_run:
-            if verbosity >= 1:
+            if changes_enabled():
                 typer.echo("\nDry run - no changes made. Changes that would be applied:")
                 for result in results:
                     if result.updated_fields:
