@@ -393,14 +393,23 @@ class SchedulerInputValidator:
 class ResourceSchedule:
     """Tracks busy periods for a resource using sorted intervals."""
 
-    def __init__(self, unavailable_periods: list[tuple[date, date]] | None = None) -> None:
+    def __init__(
+        self,
+        unavailable_periods: list[tuple[date, date]] | None = None,
+        resource_name: str = "",
+        verbosity: int = 0,
+    ) -> None:
         """Initialize with optional pre-defined unavailable periods.
 
         Args:
             unavailable_periods: Optional list of (start, end) tuples for periods when
                 the resource is unavailable (e.g., vacations, do-not-schedule periods)
+            resource_name: Name of the resource (for verbose logging)
+            verbosity: Debug output level (0=silent, 1=basic, 2=detailed, 3=debug)
         """
         self.busy_periods: list[tuple[date, date]] = unavailable_periods or []
+        self.resource_name = resource_name
+        self.verbosity = verbosity
 
     def add_busy_period(self, start: date, end: date) -> None:
         """Add a busy period and maintain sorted order.
@@ -457,6 +466,19 @@ class ResourceSchedule:
         # No busy periods cover or follow from_date
         return from_date
 
+    def _find_next_busy_period(self, current: date) -> tuple[date | None, date | None]:
+        """Find the next busy period that overlaps or starts at/after current date."""
+        for busy_start, busy_end in self.busy_periods:
+            # Check if current date is within this busy period or the period is ahead
+            if busy_end >= current:
+                return (busy_start, busy_end)
+        return (None, None)
+
+    def _log_debug(self, message: str) -> None:
+        """Log a debug message if verbosity is high enough."""
+        if self.verbosity >= VERBOSITY_DEBUG and self.resource_name:
+            typer.echo(f"            {message}")
+
     def calculate_completion_time(self, start: date, duration_days: float) -> date:
         """Calculate when a task will actually complete, accounting for busy periods (including DNS gaps).
 
@@ -471,7 +493,14 @@ class ResourceSchedule:
         Returns:
             Date when the task would complete (exclusive end, matching scheduler convention)
         """
+        if self.verbosity >= VERBOSITY_DEBUG and self.resource_name:
+            typer.echo(
+                f"          Calculating completion time for {self.resource_name}: "
+                f"start={start}, duration={duration_days}d"
+            )
+
         if duration_days == 0:
+            self._log_debug(f"Duration is 0, returning start date: {start}")
             return start
 
         work_remaining = duration_days
@@ -479,37 +508,49 @@ class ResourceSchedule:
 
         # Walk through schedule, working around busy periods
         while work_remaining > 0:
-            # Find next busy period that starts at or after current date
-            next_busy_start: date | None = None
-            next_busy_end: date | None = None
-
-            for busy_start, busy_end in self.busy_periods:
-                if busy_start >= current:
-                    next_busy_start = busy_start
-                    next_busy_end = busy_end
-                    break
+            next_busy_start, next_busy_end = self._find_next_busy_period(current)
 
             if next_busy_start is None:
                 # No more busy periods ahead, can complete remaining work
-                # Return exclusive end (start + duration, not start + duration - 1)
-                return current + timedelta(days=work_remaining)
+                completion = current + timedelta(days=work_remaining)
+                self._log_debug(
+                    f"No more busy periods, completing at {completion} (work_remaining={work_remaining}d)"
+                )
+                return completion
 
-            # At this point, next_busy_end must also be set (they're set together)
             assert next_busy_end is not None
+
+            # Check if current date is within the busy period
+            if next_busy_start <= current:
+                # We're inside a busy period, skip to the end
+                skip_to = next_busy_end + timedelta(days=1)
+                self._log_debug(
+                    f"Current date {current} is within busy period ({next_busy_start} to {next_busy_end}), skipping to {skip_to}"
+                )
+                current = skip_to
+                continue
 
             # Calculate work days available before next busy period
             work_days_available = (next_busy_start - current).days
 
             if work_days_available >= work_remaining:
                 # Can complete before next busy period
-                # Return exclusive end (start + duration, not start + duration - 1)
-                return current + timedelta(days=work_remaining)
+                completion = current + timedelta(days=work_remaining)
+                self._log_debug(
+                    f"Completing at {completion} before busy period ({next_busy_start} to {next_busy_end}), work_remaining={work_remaining}d"
+                )
+                return completion
 
             # Use up available work days, then skip busy period
+            skip_to = next_busy_end + timedelta(days=1)
+            self._log_debug(
+                f"Working {work_days_available}d before busy period ({next_busy_start} to {next_busy_end}), then skipping to {skip_to}"
+            )
             work_remaining -= work_days_available
-            current = next_busy_end + timedelta(days=1)
+            current = skip_to
 
         # All work consumed (edge case: work_remaining became exactly 0)
+        self._log_debug(f"Work consumed exactly, completing at {current}")
         return current
 
 
@@ -967,6 +1008,55 @@ class ParallelScheduler:
         msg = f"Unknown scheduling strategy: {self.config.strategy}"
         raise ValueError(msg)
 
+    def _get_candidate_resources(self, task: Task) -> list[str]:
+        """Get the list of candidate resources for a task."""
+        if task.resource_spec and self.resource_config:
+            # Auto-assignment: expand resource spec to candidate list
+            candidates = self.resource_config.expand_resource_spec(task.resource_spec)
+            if self.verbosity >= VERBOSITY_DEBUG:
+                typer.echo(
+                    f"      Finding best resource for task {task.id}: "
+                    f"spec={task.resource_spec}, candidates={candidates}"
+                )
+            return candidates
+        if task.resources:
+            # Explicit assignment: use specified resources
+            candidates = [r[0] for r in task.resources]
+            if self.verbosity >= VERBOSITY_DEBUG:
+                typer.echo(
+                    f"      Finding best resource for task {task.id}: "
+                    f"explicit resources={candidates}"
+                )
+            return candidates
+        if self.verbosity >= VERBOSITY_DEBUG:
+            typer.echo(f"      No candidate resources found for task {task.id}")
+        return []
+
+    def _evaluate_resource_for_task(
+        self,
+        resource_name: str,
+        task: Task,
+        current_time: date,
+        resource_schedules: dict[str, ResourceSchedule],
+    ) -> tuple[date, date] | None:
+        """Evaluate a single resource for a task, returning (available_at, completion) or None."""
+        if resource_name not in resource_schedules:
+            if self.verbosity >= VERBOSITY_DEBUG:
+                typer.echo(f"        {resource_name}: not in schedules, skipping")
+            return None
+
+        schedule = resource_schedules[resource_name]
+        available_at = schedule.next_available_time(current_time)
+        completion = schedule.calculate_completion_time(available_at, task.duration_days)
+
+        if self.verbosity >= VERBOSITY_DEBUG:
+            typer.echo(
+                f"        {resource_name}: available={available_at}, "
+                f"completion={completion} (duration={task.duration_days}d)"
+            )
+
+        return (available_at, completion)
+
     def _find_best_resource_for_task(
         self,
         task: Task,
@@ -994,34 +1084,34 @@ class ParallelScheduler:
         best_start: date | None = None
         best_completion: date | None = None
 
-        # Determine candidate resources
-        candidates: list[str] = []
-
-        if task.resource_spec and self.resource_config:
-            # Auto-assignment: expand resource spec to candidate list
-            candidates = self.resource_config.expand_resource_spec(task.resource_spec)
-        elif task.resources:
-            # Explicit assignment: use specified resources
-            candidates = [r[0] for r in task.resources]
+        candidates = self._get_candidate_resources(task)
 
         # Evaluate each candidate
         for resource_name in candidates:
-            if resource_name not in resource_schedules:
+            result = self._evaluate_resource_for_task(
+                resource_name, task, current_time, resource_schedules
+            )
+            if result is None:
                 continue
 
-            schedule = resource_schedules[resource_name]
-
-            # Find when this resource becomes available
-            available_at = schedule.next_available_time(current_time)
-
-            # Calculate when task would complete if started at available_at
-            completion = schedule.calculate_completion_time(available_at, task.duration_days)
+            available_at, completion = result
 
             # Track best option (earliest completion)
             if best_completion is None or completion < best_completion:
                 best_resource = resource_name
                 best_start = available_at
                 best_completion = completion
+                if self.verbosity >= VERBOSITY_DEBUG:
+                    typer.echo("          → New best resource")
+
+        if self.verbosity >= VERBOSITY_DEBUG:
+            if best_resource:
+                typer.echo(
+                    f"      Best resource for {task.id}: {best_resource} "
+                    f"(start={best_start}, completion={best_completion})"
+                )
+            else:
+                typer.echo(f"      No valid resource found for {task.id}")
 
         return (best_resource, best_start, best_completion)
 
@@ -1067,7 +1157,11 @@ class ParallelScheduler:
             unavailable_periods = []
             if self.resource_config:
                 unavailable_periods = self.resource_config.get_dns_periods(resource)
-            resource_schedules[resource] = ResourceSchedule(unavailable_periods=unavailable_periods)
+            resource_schedules[resource] = ResourceSchedule(
+                unavailable_periods=unavailable_periods,
+                resource_name=resource,
+                verbosity=self.verbosity,
+            )
 
         # Mark fixed tasks as busy in resource schedules
         for fixed_task in fixed_tasks:
