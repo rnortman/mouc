@@ -218,7 +218,11 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
 
             # Run scheduling and populate annotations
             service = SchedulingService(
-                feature_map, parsed_current_date, resource_config, scheduler_config
+                feature_map,
+                parsed_current_date,
+                resource_config,
+                scheduler_config,
+                verbosity=context.get_verbosity(),
             )
             service.populate_feature_map_annotations()
 
@@ -459,6 +463,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
             start_date=parsed_start_date,
             current_date=parsed_current_date,
             resource_config_path=resource_config_path,
+            verbosity=context.get_verbosity(),
         )
         result = scheduler.schedule()
 
@@ -581,7 +586,11 @@ def schedule(
 
         # Run scheduling service
         service = SchedulingService(
-            feature_map, parsed_current_date, resource_config, scheduler_config
+            feature_map,
+            parsed_current_date,
+            resource_config,
+            scheduler_config,
+            verbosity=context.get_verbosity(),
         )
         result = service.schedule()
 

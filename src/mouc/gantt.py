@@ -75,6 +75,7 @@ class GanttScheduler:
         resource_config: ResourceConfig | None = None,
         resource_config_path: Path | str | None = None,
         scheduler_config: SchedulingConfig | None = None,
+        verbosity: int = 0,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -87,6 +88,7 @@ class GanttScheduler:
             resource_config: Optional pre-loaded resource configuration
             resource_config_path: Optional path to resources.yaml file
             scheduler_config: Optional scheduling configuration for prioritization strategy
+            verbosity: Debug output level (0=silent, 1=basic, 2=detailed, 3=debug)
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
@@ -102,6 +104,7 @@ class GanttScheduler:
 
         self.resource_config = resource_config
         self.scheduler_config = scheduler_config
+        self.verbosity = verbosity
 
         # Calculate start_date if not provided
         if start_date is None:
@@ -275,6 +278,7 @@ class GanttScheduler:
                 resource_config=self.resource_config,
                 completed_task_ids=done_without_dates,
                 config=self.scheduler_config,
+                verbosity=self.verbosity,
             )
             scheduled_tasks = scheduler.schedule()
 

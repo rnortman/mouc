@@ -391,6 +391,74 @@ The scheduler accounts for DNS (Do Not Schedule) periods when making resource as
 
 This allows the scheduler to make globally better decisions (e.g., "start now with a short DNS interruption" vs "wait for a resource with a long delay") while maintaining the efficient greedy chronological processing of Parallel SGS.
 
+## Debug Mode
+
+The scheduler supports debug output at multiple verbosity levels using the `-v` CLI flag:
+
+```bash
+mouc gantt feature_map.yaml -v 1    # Basic output
+mouc gantt feature_map.yaml -v 2    # Detailed output
+mouc gantt feature_map.yaml -v 3    # Full debug trace
+```
+
+### Verbosity Levels
+
+**Level 0 (default)** - Silent
+- No scheduling debug output
+
+**Level 1 (`-v 1`)** - Basic
+- Shows current date at each scheduling time step
+- Shows task assignments with resource and date ranges
+- Example output:
+  ```
+  Time: 2025-01-01
+  Scheduled task task_A on alice from 2025-01-01 to 2025-01-21
+  Time: 2025-01-22
+  Scheduled task task_B on alice from 2025-01-22 to 2025-01-27
+  ```
+
+**Level 2 (`-v 2`)** - Detailed
+- All of Level 1, plus:
+- Shows each task being considered for scheduling
+- Shows priority and critical ratio for each task
+- Shows why tasks are skipped (resource conflicts, dependency issues)
+- Shows which resource is selected for each task
+- Example output:
+  ```
+  Time: 2025-01-01
+  Considering task task_A (priority=50, CR=1.50)
+  Selected alice for task_A (completes 2025-01-21)
+  Scheduled task task_A on alice from 2025-01-01 to 2025-01-21
+  Considering task task_B (priority=50, CR=6.00)
+  Skipping task_B: Best resource alice not available until 2025-01-22
+  ```
+
+**Level 3 (`-v 3`)** - Full Debug Trace
+- All of Level 2, plus:
+- Shows all eligible tasks at each time step in urgency sort order
+- Shows available resources at each time step
+- Shows sort keys used for prioritization
+- Shows time advancement decisions
+- Example output:
+  ```
+  Time: 2025-01-01
+  === Eligible tasks: 2, Available resources: alice ===
+    task_A: priority=50, CR=1.50, sort_key=(65.0, 'task_A'), duration=20.0d
+    task_B: priority=50, CR=6.00, sort_key=(110.0, 'task_B'), duration=5.0d
+  Considering task task_A (priority=50, CR=1.50)
+  Scheduled task task_A on alice from 2025-01-01 to 2025-01-21
+  Considering task task_B (priority=50, CR=6.00)
+  Skipping task_B: Best resource alice not available until 2025-01-22
+  No tasks scheduled at 2025-01-01, advancing time to 2025-01-22
+  ```
+
+### Use Cases
+
+- **Troubleshooting**: Understand why specific tasks are scheduled in a particular order
+- **Validation**: Verify that priorities and critical ratios are computed correctly
+- **Optimization**: Identify resource bottlenecks and scheduling inefficiencies
+- **Learning**: Understand how the scheduler makes decisions
+
 ## Benefits
 
 1. **No gaps**: The algorithm naturally fills available time slots
@@ -401,3 +469,4 @@ This allows the scheduler to make globally better decisions (e.g., "start now wi
 6. **Optimal**: Follows proven RCPSP scheduling approaches
 7. **Flexible**: Handles various constraints (dependencies, time windows, resources, priorities)
 8. **DNS-aware**: Accounts for DNS interruptions when choosing resources and calculating completion times
+9. **Debuggable**: Multiple verbosity levels help understand scheduling decisions

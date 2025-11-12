@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Scheduling debug mode**: Use `-v 1/2/3` to view scheduling decisions at different detail levels
+
 ## [0.1.10] - 2025-11-11
 
 ### Added
