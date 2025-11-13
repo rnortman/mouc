@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fixed task end dates now account for DNS periods when only start_date is specified
+
 ## [0.1.12] - 2025-11-13
 
 ### Fixed
