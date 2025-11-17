@@ -531,6 +531,7 @@ class GanttScheduler:
             "gantt",
             f"    title {title}",
             "    dateFormat YYYY-MM-DD",
+            "    topAxis true",
         ]
 
         if tick_interval:

@@ -897,6 +897,7 @@ class TestMermaidGeneration:
         assert mermaid.startswith("gantt")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
+        assert "topAxis true" in mermaid
         assert "section Capability" in mermaid
         assert "Database Setup (alice)" in mermaid
         assert "cap1" in mermaid
