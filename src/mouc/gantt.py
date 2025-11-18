@@ -505,19 +505,23 @@ class GanttScheduler:
 
     def _build_mermaid_frontmatter(self, compact: bool, theme_css: str) -> list[str]:
         """Build YAML frontmatter for Mermaid chart."""
-        if not (compact or theme_css):
-            return []
-
+        # Always include frontmatter for topAxis
         lines = ["---"]
         if compact:
             lines.append("displayMode: compact")
+
+        # Build config section for topAxis and/or themeCSS
+        lines.append("config:")
+        lines.append("    gantt:")
+        lines.append("        topAxis: true")
+
         if theme_css:
-            lines.append("config:")
             lines.append('    themeCSS: "')
             for css_line in theme_css.split("\n"):
                 if css_line.strip():
                     lines.append(f"        {css_line}  \\n")
             lines.append('    "')
+
         lines.append("---")
         return lines
 
@@ -531,7 +535,6 @@ class GanttScheduler:
             "gantt",
             f"    title {title}",
             "    dateFormat YYYY-MM-DD",
-            "    topAxis true",
         ]
 
         if tick_interval:

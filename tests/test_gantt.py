@@ -894,10 +894,12 @@ class TestMermaidGeneration:
         mermaid = scheduler.generate_mermaid(result)
 
         # Check basic structure
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
+        assert "config:" in mermaid
+        assert "gantt:" in mermaid
+        assert "topAxis: true" in mermaid
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
-        assert "topAxis true" in mermaid
         assert "section Capability" in mermaid
         assert "Database Setup (alice)" in mermaid
         assert "cap1" in mermaid
@@ -1326,7 +1328,7 @@ class TestMermaidGeneration:
         # Check that tickInterval is present
         assert "tickInterval 3month" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
@@ -1352,7 +1354,7 @@ class TestMermaidGeneration:
         # Check that axisFormat is present
         assert "axisFormat %b %Y" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
@@ -1379,7 +1381,7 @@ class TestMermaidGeneration:
         assert "tickInterval 1month" in mermaid
         assert "axisFormat %Y-%m" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
@@ -1406,7 +1408,7 @@ class TestMermaidGeneration:
         assert "tickInterval" not in mermaid
         assert "axisFormat" not in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
@@ -1430,7 +1432,9 @@ class TestMermaidGeneration:
         mermaid = scheduler.generate_mermaid(result, compact=True)
 
         # Check that compact mode YAML frontmatter is present
-        assert mermaid.startswith("---\ndisplayMode: compact\n---\ngantt")
+        assert mermaid.startswith("---")
+        assert "displayMode: compact" in mermaid
+        assert "topAxis: true" in mermaid
         # Verify basic structure is still intact
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
@@ -1455,10 +1459,10 @@ class TestMermaidGeneration:
         mermaid = scheduler.generate_mermaid(result, compact=False)
 
         # Check that compact mode is NOT present when not specified
-        assert not mermaid.startswith("---")
+        assert mermaid.startswith("---")
         assert "displayMode: compact" not in mermaid
+        assert "topAxis: true" in mermaid  # topAxis is always present now
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
         assert "title Project Schedule" in mermaid
         assert "dateFormat YYYY-MM-DD" in mermaid
 
@@ -1493,7 +1497,7 @@ class TestMermaidGeneration:
         assert "Q1 2025 : vert, q1_2025, 2025-01-01, 0d" in mermaid
         assert "Q2 2025 : vert, q2_2025, 2025-04-01, 0d" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
 
     def test_mermaid_with_halfyear_dividers(self, base_date: date) -> None:
@@ -1527,7 +1531,7 @@ class TestMermaidGeneration:
         assert "H1 2025 : vert, h1_2025, 2025-01-01, 0d" in mermaid
         assert "H2 2025 : vert, h2_2025, 2025-07-01, 0d" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
 
     def test_mermaid_with_year_dividers(self, base_date: date) -> None:
@@ -1561,7 +1565,7 @@ class TestMermaidGeneration:
         assert "2025 : vert, y2025, 2025-01-01, 0d" in mermaid
         assert "2026 : vert, y2026, 2026-01-01, 0d" in mermaid
         # Verify basic structure is still intact
-        assert mermaid.startswith("gantt")
+        assert mermaid.startswith("---")
         assert "title Project Schedule" in mermaid
 
 
