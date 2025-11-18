@@ -301,6 +301,10 @@ Control the table of contents generation:
 ```yaml
 markdown:
   toc_sections: [timeline, entity_types]
+  timeline:
+    infer_from_schedule: false
+    inferred_granularity: null
+    sort_unscheduled_by_completion: false
 ```
 
 **`toc_sections`** (optional, default: `["timeline", "entity_types"]`): Specifies which sections appear in the table of contents.
@@ -317,6 +321,63 @@ Examples:
 - `[]` - No table of contents generated
 
 Note: `toc_sections` only controls the table of contents navigation. The document body always contains all entities as organized by the `organization` configuration.
+
+### Timeline Configuration
+
+Control how the timeline section groups and sorts entities:
+
+```yaml
+markdown:
+  timeline:
+    infer_from_schedule: true
+    inferred_granularity: weekly
+    sort_unscheduled_by_completion: true
+```
+
+**`timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, infers timeframe from scheduler completion dates for entities without manual `timeframe` metadata.
+
+**`timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes.
+
+Valid values:
+- `weekly` - Group by ISO week (e.g., 2025w01, 2025w02)
+- `monthly` - Group by month (e.g., 2025-01, 2025-02)
+- `quarterly` - Group by quarter (e.g., 2025q1, 2025q2)
+- `half_year` - Group by half-year (e.g., 2025h1, 2025h2)
+- `yearly` - Group by year (e.g., 2025, 2026)
+
+**`timeline.sort_unscheduled_by_completion`** (optional, default: `false`): When enabled, sorts unscheduled entities by `estimated_end` date instead of entity type/ID. Requires `--schedule` flag to populate completion dates.
+
+**Behavior:**
+- Manual `timeframe` metadata always takes precedence over inferred timeframes
+- Inference only applies when `--schedule` flag is used with `mouc doc`
+- Configuration fails fast if `infer_from_schedule: true` without `inferred_granularity`
+- Entities without completion dates sort to end when `sort_unscheduled_by_completion` is enabled
+
+**Examples:**
+
+Group by inferred weekly timeframes:
+```yaml
+markdown:
+  timeline:
+    infer_from_schedule: true
+    inferred_granularity: weekly
+```
+
+Sort unscheduled items by completion date:
+```yaml
+markdown:
+  timeline:
+    sort_unscheduled_by_completion: true
+```
+
+Combined usage:
+```yaml
+markdown:
+  timeline:
+    infer_from_schedule: true
+    inferred_granularity: monthly
+    sort_unscheduled_by_completion: true
+```
 
 ### Organization Examples
 
@@ -424,9 +485,13 @@ docx:
     primary: "by_type"
     secondary: null
     entity_type_order: [capability, user_story, outcome]
+  timeline:
+    infer_from_schedule: false
+    inferred_granularity: null
+    sort_unscheduled_by_completion: false
 ```
 
-All organization options work identically to the markdown section (see [Document Organization](#document-organization) above).
+All organization and timeline options work identically to the markdown section (see [Document Organization](#document-organization) and [Timeline Configuration](#timeline-configuration) above).
 
 ### Link Rendering
 
@@ -606,6 +671,10 @@ markdown:
     primary: "by_type"
     secondary: null
     entity_type_order: [capability, user_story, outcome]
+  timeline:
+    infer_from_schedule: true
+    inferred_granularity: monthly
+    sort_unscheduled_by_completion: true
 
 # ============================================================================
 # DOCX OUTPUT (Optional)
@@ -618,6 +687,10 @@ docx:
     primary: "by_type"
     secondary: null
     entity_type_order: [capability, user_story, outcome]
+  timeline:
+    infer_from_schedule: true
+    inferred_granularity: monthly
+    sort_unscheduled_by_completion: true
 
 # ============================================================================
 # JIRA INTEGRATION (Optional)

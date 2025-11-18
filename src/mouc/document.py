@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+from datetime import date
 from typing import TYPE_CHECKING, Any, cast
 
 from mouc import styling
@@ -19,6 +20,33 @@ if TYPE_CHECKING:
 OrganizedSection = tuple[str, list[Entity]]
 NestedOrganizedSection = tuple[str, list[tuple[str, list[Entity]]]]
 OrganizedStructure = list[OrganizedSection] | list[NestedOrganizedSection]
+
+
+def infer_timeframe_from_date(dt: date, granularity: str) -> str:
+    """Convert a date to a timeframe string based on granularity.
+
+    Args:
+        dt: Date to convert
+        granularity: One of "weekly", "monthly", "quarterly", "half_year", "yearly"
+
+    Returns:
+        Timeframe string (e.g., "2025w01", "2025-02", "2025q1", "2025h1", "2025")
+    """
+    if granularity == "weekly":
+        iso_year, iso_week, _ = dt.isocalendar()
+        return f"{iso_year}w{iso_week:02d}"
+    if granularity == "monthly":
+        return f"{dt.year}-{dt.month:02d}"
+    if granularity == "quarterly":
+        quarter = (dt.month - 1) // 3 + 1
+        return f"{dt.year}q{quarter}"
+    if granularity == "half_year":
+        # July (month 7) onwards is H2, months 1-6 are H1
+        half = 1 if dt.month <= 6 else 2  # noqa: PLR2004
+        return f"{dt.year}h{half}"
+    if granularity == "yearly":
+        return str(dt.year)
+    raise ValueError(f"Invalid granularity: {granularity}")
 
 
 class DocumentGenerator:
@@ -47,6 +75,8 @@ class DocumentGenerator:
         self.toc_sections = doc_config.toc_sections if doc_config else ["timeline", "entity_types"]
         # Store organization config (default to alpha_by_id if no config provided)
         self.organization = doc_config.organization if doc_config else OrganizationConfig()
+        # Store timeline config if provided
+        self.timeline_config = doc_config.timeline if doc_config else None
         # Build anchor registry in first pass
         self.anchor_registry: dict[str, str] = {}
 
@@ -219,6 +249,36 @@ class DocumentGenerator:
                         entity.name, entity_anchor, level=0, suffix=type_label
                     )
 
+    def _get_entity_timeframe(self, entity: Entity) -> str | None:
+        """Get timeframe for entity, using manual value or inferred from schedule."""
+        # Manual timeframe takes precedence
+        timeframe = entity.meta.get("timeframe")
+
+        # If no manual timeframe and inference is enabled, infer from schedule
+        if not timeframe and self.timeline_config and self.timeline_config.infer_from_schedule:
+            schedule_annotations = entity.annotations.get("schedule")
+            if schedule_annotations and schedule_annotations.estimated_end:
+                timeframe = infer_timeframe_from_date(
+                    schedule_annotations.estimated_end,
+                    self.timeline_config.inferred_granularity,  # type: ignore[arg-type]
+                )
+
+        return timeframe
+
+    def _sort_unscheduled_entities(self, entities: list[Entity]) -> list[Entity]:
+        """Sort unscheduled entities by completion date or (type, id)."""
+        if self.timeline_config and self.timeline_config.sort_unscheduled_by_completion:
+
+            def sort_key(e: Entity) -> tuple[date, str, str]:
+                schedule = e.annotations.get("schedule")
+                end_date = schedule.estimated_end if schedule else None
+                # Use max date for None to sort to end
+                sort_date = end_date if end_date else date.max
+                return (sort_date, e.type, e.id)
+
+            return sorted(entities, key=sort_key)
+        return sorted(entities, key=lambda e: (e.type, e.id))
+
     def _generate_timeline_section(self) -> None:
         """Generate timeline section grouped by timeframe."""
         # Group entities by timeframe
@@ -226,7 +286,8 @@ class DocumentGenerator:
         unscheduled: list[Entity] = []
 
         for entity in self.feature_map.entities:
-            timeframe = entity.meta.get("timeframe")
+            timeframe = self._get_entity_timeframe(entity)
+
             if timeframe:
                 if timeframe not in timeframe_groups:
                     timeframe_groups[timeframe] = []
@@ -258,7 +319,8 @@ class DocumentGenerator:
         if unscheduled:
             self.backend.add_section_header("Unscheduled", level=3)
 
-            entities = sorted(unscheduled, key=lambda e: (e.type, e.id))
+            entities = self._sort_unscheduled_entities(unscheduled)
+
             for entity in entities:
                 anchor = self.anchor_registry[entity.id]
                 type_label = self.backend.format_type_label(entity)

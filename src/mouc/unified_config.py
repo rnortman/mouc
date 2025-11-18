@@ -23,6 +23,31 @@ class GanttConfig(BaseModel):
     markdown_base_url: str | None = None
 
 
+class TimelineConfig(BaseModel):
+    """Configuration for timeline section generation."""
+
+    infer_from_schedule: bool = False
+    inferred_granularity: str | None = (
+        None  # "weekly", "monthly", "quarterly", "half_year", "yearly"
+    )
+    sort_unscheduled_by_completion: bool = False
+
+    def model_post_init(self, __context: Any) -> None:
+        """Validate configuration after initialization."""
+        if self.infer_from_schedule and self.inferred_granularity is None:
+            raise ValueError(
+                "timeline.inferred_granularity must be specified when infer_from_schedule is True. "
+                "Valid values: weekly, monthly, quarterly, half_year, yearly"
+            )
+        if self.inferred_granularity is not None:
+            valid_granularities = {"weekly", "monthly", "quarterly", "half_year", "yearly"}
+            if self.inferred_granularity not in valid_granularities:
+                raise ValueError(
+                    f"Invalid timeline.inferred_granularity: '{self.inferred_granularity}'. "
+                    f"Valid values: {', '.join(sorted(valid_granularities))}"
+                )
+
+
 class OrganizationConfig(BaseModel):
     """Configuration for document organization."""
 
@@ -36,6 +61,7 @@ class DocumentConfig(BaseModel):
 
     toc_sections: list[str] = ["timeline", "entity_types"]
     organization: OrganizationConfig = OrganizationConfig()
+    timeline: TimelineConfig | None = None
 
 
 class MarkdownConfig(DocumentConfig):
@@ -115,7 +141,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     # Build MarkdownConfig if markdown section exists
     markdown_config = None
     if "markdown" in data:
-        markdown_config = MarkdownConfig.model_validate(data["markdown"])
+        markdown_data = data["markdown"]
+        # Extract timeline config if present in markdown section
+        if "timeline" in markdown_data:
+            TimelineConfig.model_validate(markdown_data["timeline"])  # Validate early
+        markdown_config = MarkdownConfig.model_validate(markdown_data)
 
     # Build SchedulingConfig if scheduler section exists
     scheduler_config = None
@@ -125,7 +155,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     # Build DocxConfig if docx section exists
     docx_config = None
     if "docx" in data:
-        docx_config = DocxConfig.model_validate(data["docx"])
+        docx_data = data["docx"]
+        # Extract timeline config if present in docx section
+        if "timeline" in docx_data:
+            TimelineConfig.model_validate(docx_data["timeline"])  # Validate early
+        docx_config = DocxConfig.model_validate(docx_data)
 
     return UnifiedConfig(
         resources=resource_config,

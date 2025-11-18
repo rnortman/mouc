@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
-import traceback
 from contextlib import suppress
 from datetime import date
 from pathlib import Path
@@ -88,46 +87,37 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
     ] = None,
 ) -> None:
     """Generate dependency graphs in DOT format."""
-    try:
-        # Validate arguments
-        if view == GraphView.CRITICAL_PATH and not target:
-            typer.echo("Error: Critical path view requires --target", err=True)
-            raise typer.Exit(1) from None
+    # Validate arguments
+    if view == GraphView.CRITICAL_PATH and not target:
+        typer.echo("Error: Critical path view requires --target", err=True)
+        raise typer.Exit(1)
 
-        if view == GraphView.FILTERED and not tags:
-            typer.echo("Error: Filtered view requires --tags", err=True)
-            raise typer.Exit(1) from None
+    if view == GraphView.FILTERED and not tags:
+        typer.echo("Error: Filtered view requires --tags", err=True)
+        raise typer.Exit(1)
 
-        if style_module and style_file:
-            typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
-            raise typer.Exit(1) from None
+    if style_module and style_file:
+        typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
+        raise typer.Exit(1)
 
-        # Load styling module if specified
-        if style_module or style_file:
-            _load_styling(style_module, style_file)
+    # Load styling module if specified
+    if style_module or style_file:
+        _load_styling(style_module, style_file)
 
-        # Parse the feature map
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+    # Parse the feature map
+    parser = FeatureMapParser()
+    feature_map = parser.parse_file(file)
 
-        # Generate the graph
-        generator = GraphGenerator(feature_map)
-        dot_output = generator.generate(view, target=target, tags=tags)
+    # Generate the graph
+    generator = GraphGenerator(feature_map)
+    dot_output = generator.generate(view, target=target, tags=tags)
 
-        # Output the result
-        if output:
-            output.write_text(dot_output, encoding="utf-8")
-            typer.echo(f"Graph written to {output}")
-        else:
-            typer.echo(dot_output)
-
-    except MoucError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        traceback.print_exc()
-        raise typer.Exit(1) from None
+    # Output the result
+    if output:
+        output.write_text(dot_output, encoding="utf-8")
+        typer.echo(f"Graph written to {output}")
+    else:
+        typer.echo(dot_output)
 
 
 @app.command()
@@ -165,96 +155,93 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     ] = None,
 ) -> None:
     """Generate documentation in Markdown or DOCX format."""
-    try:
-        # Validate format option
-        if format not in ("markdown", "docx"):
-            typer.echo(
-                f"Error: Invalid format '{format}'. Must be 'markdown' or 'docx'.",
-                err=True,
-            )
-            raise typer.Exit(1) from None
+    # Validate format option
+    if format not in ("markdown", "docx"):
+        typer.echo(
+            f"Error: Invalid format '{format}'. Must be 'markdown' or 'docx'.",
+            err=True,
+        )
+        raise typer.Exit(1)
 
-        if style_module and style_file:
-            typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
-            raise typer.Exit(1) from None
+    if style_module and style_file:
+        typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
+        raise typer.Exit(1)
 
-        # Load styling module if specified
-        if style_module or style_file:
-            _load_styling(style_module, style_file)
+    # Load styling module if specified
+    if style_module or style_file:
+        _load_styling(style_module, style_file)
 
-        # Parse the feature map
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+    # Parse the feature map
+    parser = FeatureMapParser()
+    feature_map = parser.parse_file(file)
 
-        # Load unified config if available
-        unified_config = None
-        config_path = get_config_path() or Path("mouc_config.yaml")
-        if config_path.exists():
-            unified_config = load_unified_config(config_path)
+    # Load unified config if available
+    unified_config = None
+    config_path = get_config_path()
+    if not config_path:
+        # Try feature map directory first, then current directory
+        feature_map_dir = Path(file).parent
+        config_path = feature_map_dir / "mouc_config.yaml"
+        if not config_path.exists():
+            config_path = Path("mouc_config.yaml")
+    if config_path.exists():
+        unified_config = load_unified_config(config_path)
 
-        # Optionally run scheduler to populate annotations
-        if schedule:
-            # Parse current date if provided
-            parsed_current_date: date | None = None
-            if current_date:
-                try:
-                    parsed_current_date = date.fromisoformat(current_date)
-                except ValueError:
-                    typer.echo(
-                        f"Error: Invalid date format '{current_date}'. Use YYYY-MM-DD",
-                        err=True,
-                    )
-                    raise typer.Exit(1) from None
+    # Optionally run scheduler to populate annotations
+    if schedule:
+        # Parse current date if provided
+        parsed_current_date: date | None = None
+        if current_date:
+            try:
+                parsed_current_date = date.fromisoformat(current_date)
+            except ValueError as e:
+                typer.echo(
+                    f"Error: Invalid date format '{current_date}'. Use YYYY-MM-DD",
+                    err=True,
+                )
+                raise typer.Exit(1) from e
 
-            # Get resource config from unified config if available
-            resource_config = unified_config.resources if unified_config else None
+        # Get resource config from unified config if available
+        resource_config = unified_config.resources if unified_config else None
 
-            # Get scheduler config from unified config if available
-            scheduler_config = unified_config.scheduler if unified_config else None
+        # Get scheduler config from unified config if available
+        scheduler_config = unified_config.scheduler if unified_config else None
 
-            # Run scheduling and populate annotations
-            service = SchedulingService(
-                feature_map,
-                parsed_current_date,
-                resource_config,
-                scheduler_config,
-            )
-            service.populate_feature_map_annotations()
+        # Run scheduling and populate annotations
+        service = SchedulingService(
+            feature_map,
+            parsed_current_date,
+            resource_config,
+            scheduler_config,
+        )
+        service.populate_feature_map_annotations()
 
-        # Generate the documentation
-        styling_context = styling.create_styling_context(feature_map, output_format=format)
+    # Generate the documentation
+    styling_context = styling.create_styling_context(feature_map, output_format=format)
 
-        # Select backend and config based on format
-        if format == "docx":
-            doc_config = unified_config.docx if unified_config else None
-            table_style = doc_config.table_style if doc_config else "Table Grid"
-            backend = DocxBackend(feature_map, styling_context, table_style)
+    # Select backend and config based on format
+    if format == "docx":
+        doc_config = unified_config.docx if unified_config else None
+        table_style = doc_config.table_style if doc_config else "Table Grid"
+        backend = DocxBackend(feature_map, styling_context, table_style)
+    else:
+        backend = MarkdownBackend(feature_map, styling_context)
+        doc_config = unified_config.markdown if unified_config else None
+
+    generator = DocumentGenerator(feature_map, backend, doc_config)
+    doc_output = generator.generate()
+
+    # Output the result
+    if output:
+        if isinstance(doc_output, bytes):
+            output.write_bytes(doc_output)
         else:
-            backend = MarkdownBackend(feature_map, styling_context)
-            doc_config = unified_config.markdown if unified_config else None
-
-        generator = DocumentGenerator(feature_map, backend, doc_config)
-        doc_output = generator.generate()
-
-        # Output the result
-        if output:
-            if isinstance(doc_output, bytes):
-                output.write_bytes(doc_output)
-            else:
-                output.write_text(doc_output, encoding="utf-8")
-            typer.echo(f"Documentation written to {output}")
-        elif isinstance(doc_output, bytes):
-            typer.echo(doc_output.decode("utf-8"))
-        else:
-            typer.echo(doc_output)
-
-    except MoucError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        traceback.print_exc()
-        raise typer.Exit(1) from None
+            output.write_text(doc_output, encoding="utf-8")
+        typer.echo(f"Documentation written to {output}")
+    elif isinstance(doc_output, bytes):
+        typer.echo(doc_output.decode("utf-8"))
+    else:
+        typer.echo(doc_output)
 
 
 def _validate_gantt_params(group_by: str, vertical_dividers: str | None) -> None:
@@ -427,76 +414,67 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
-    try:
-        if style_module and style_file:
-            typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
-            raise typer.Exit(1) from None
+    if style_module and style_file:
+        typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
+        raise typer.Exit(1)
 
-        # Load styling module if specified
-        if style_module or style_file:
-            _load_styling(style_module, style_file)
+    # Load styling module if specified
+    if style_module or style_file:
+        _load_styling(style_module, style_file)
 
-        # Validate parameters
-        _validate_gantt_params(group_by, vertical_dividers)
+    # Validate parameters
+    _validate_gantt_params(group_by, vertical_dividers)
 
-        # Parse dates
-        parsed_start_date = _parse_date_option(start_date, "start-date")
-        parsed_current_date = _parse_date_option(current_date, "current-date")
+    # Parse dates
+    parsed_start_date = _parse_date_option(start_date, "start-date")
+    parsed_current_date = _parse_date_option(current_date, "current-date")
 
-        # Parse the feature map
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+    # Parse the feature map
+    parser = FeatureMapParser()
+    feature_map = parser.parse_file(file)
 
-        # Resolve config path and load markdown URL
-        resource_config_path = _resolve_gantt_config_path(resources)
-        gantt_config_markdown_url = _load_gantt_markdown_url(resource_config_path)
-        final_markdown_url = markdown_base_url or gantt_config_markdown_url
+    # Resolve config path and load markdown URL
+    resource_config_path = _resolve_gantt_config_path(resources)
+    gantt_config_markdown_url = _load_gantt_markdown_url(resource_config_path)
+    final_markdown_url = markdown_base_url or gantt_config_markdown_url
 
-        # Schedule tasks
-        scheduler = GanttScheduler(
-            feature_map,
-            start_date=parsed_start_date,
-            current_date=parsed_current_date,
-            resource_config_path=resource_config_path,
-        )
-        result = scheduler.schedule()
+    # Schedule tasks
+    scheduler = GanttScheduler(
+        feature_map,
+        start_date=parsed_start_date,
+        current_date=parsed_current_date,
+        resource_config_path=resource_config_path,
+    )
+    result = scheduler.schedule()
 
-        # Create anchor function for markdown links if needed
-        anchor_fn = None
-        if final_markdown_url:
-            styling_context = styling.create_styling_context(feature_map, output_format="gantt")
-            backend = MarkdownBackend(feature_map, styling_context)
-            anchor_fn = backend.make_anchor
+    # Create anchor function for markdown links if needed
+    anchor_fn = None
+    if final_markdown_url:
+        styling_context = styling.create_styling_context(feature_map, output_format="gantt")
+        backend = MarkdownBackend(feature_map, styling_context)
+        anchor_fn = backend.make_anchor
 
-        # Generate Mermaid chart
-        mermaid_output = scheduler.generate_mermaid(
-            result,
-            title=title,
-            group_by=group_by,
-            tick_interval=tick_interval,
-            axis_format=axis_format,
-            vertical_dividers=vertical_dividers,
-            compact=compact,
-            markdown_base_url=final_markdown_url,
-            anchor_fn=anchor_fn,
-        )
+    # Generate Mermaid chart
+    mermaid_output = scheduler.generate_mermaid(
+        result,
+        title=title,
+        group_by=group_by,
+        tick_interval=tick_interval,
+        axis_format=axis_format,
+        vertical_dividers=vertical_dividers,
+        compact=compact,
+        markdown_base_url=final_markdown_url,
+        anchor_fn=anchor_fn,
+    )
 
-        # Output the result
-        _format_gantt_output(mermaid_output, output)
+    # Output the result
+    _format_gantt_output(mermaid_output, output)
 
-        # Show warnings if any
-        if result.warnings:
-            typer.echo("\nWarnings:", err=True)
-            for warning in result.warnings:
-                typer.echo(f"  - {warning}", err=True)
-
-    except MoucError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        traceback.print_exc()
-        raise typer.Exit(1) from None
+    # Show warnings if any
+    if result.warnings:
+        typer.echo("\nWarnings:", err=True)
+        for warning in result.warnings:
+            typer.echo(f"  - {warning}", err=True)
 
 
 def _annotate_feature_map(feature_map: FeatureMap, result: SchedulingResult, file: Path) -> None:
@@ -561,51 +539,42 @@ def schedule(
     ] = False,
 ) -> None:
     """Run scheduling algorithm and display or persist results."""
-    try:
-        # Parse current date if provided
-        parsed_current_date = _parse_date_option(current_date, "current-date")
+    # Parse current date if provided
+    parsed_current_date = _parse_date_option(current_date, "current-date")
 
-        # Parse the feature map
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+    # Parse the feature map
+    parser = FeatureMapParser()
+    feature_map = parser.parse_file(file)
 
-        # Load resource and scheduler config if available
-        config_path = get_config_path() or Path("mouc_config.yaml")
-        resource_config = None
-        scheduler_config = None
-        if config_path.exists():
-            unified = load_unified_config(config_path)
-            resource_config = unified.resources
-            scheduler_config = unified.scheduler
+    # Load resource and scheduler config if available
+    config_path = get_config_path() or Path("mouc_config.yaml")
+    resource_config = None
+    scheduler_config = None
+    if config_path.exists():
+        unified = load_unified_config(config_path)
+        resource_config = unified.resources
+        scheduler_config = unified.scheduler
 
-        # Run scheduling service
-        service = SchedulingService(
-            feature_map,
-            parsed_current_date,
-            resource_config,
-            scheduler_config,
-        )
-        result = service.schedule()
+    # Run scheduling service
+    service = SchedulingService(
+        feature_map,
+        parsed_current_date,
+        resource_config,
+        scheduler_config,
+    )
+    result = service.schedule()
 
-        # Display or persist results
-        if annotate_yaml:
-            _annotate_feature_map(feature_map, result, file)
-        else:
-            _display_schedule_results(feature_map, result)
+    # Display or persist results
+    if annotate_yaml:
+        _annotate_feature_map(feature_map, result, file)
+    else:
+        _display_schedule_results(feature_map, result)
 
-        # Display warnings
-        if result.warnings:
-            typer.echo("\nWarnings:", err=True)
-            for warning in result.warnings:
-                typer.echo(f"  - {warning}", err=True)
-
-    except MoucError as e:
-        typer.echo(f"Error: {e}", err=True)
-        raise typer.Exit(1) from None
-    except Exception as e:
-        typer.echo(f"Unexpected error: {e}", err=True)
-        traceback.print_exc()
-        raise typer.Exit(1) from None
+    # Display warnings
+    if result.warnings:
+        typer.echo("\nWarnings:", err=True)
+        for warning in result.warnings:
+            typer.echo(f"  - {warning}", err=True)
 
 
 @app.command()

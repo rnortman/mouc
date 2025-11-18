@@ -95,7 +95,8 @@ class TestGanttCommand:
         result = runner.invoke(app, ["gantt", "nonexistent.yaml"])
 
         assert result.exit_code == 1
-        assert "Error" in result.output
+        assert result.exception is not None
+        assert "File not found" in str(result.exception)
 
     def test_gantt_warnings_displayed(self, tmp_path: Path) -> None:
         """Test that deadline warnings are displayed."""

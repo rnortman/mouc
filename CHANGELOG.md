@@ -11,9 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Format-specific styling: Decorators support `formats` parameter to filter by output format
 - Gantt charts now display date axis at top via `topAxis: true`
 - Markdown formatting in entity descriptions: Bold, italic, links, inline code, lists, and code blocks now supported in both markdown and DOCX output
+- Timeline grouping: Infer timeframe from scheduler completion dates with configurable granularity (weekly, monthly, quarterly, half_year, yearly)
+- Timeline sorting: Sort unscheduled section by completion date instead of entity type/ID
 
 ### Changed
 - "Requires" and "Enables" sections now use bold text instead of headings for cleaner document hierarchy
+- CLI exception handling removed to show full backtraces
 
 ### Fixed
 - Fixed task end dates now account for DNS periods when only start_date is specified
