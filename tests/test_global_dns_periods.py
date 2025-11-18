@@ -183,12 +183,11 @@ def test_overlapping_dns_periods_partial_overlap():
     # DNS period: Jan 10-15 (6 days, from per-resource)
     # DNS period: Jan 13-20 (overlaps, extends to Jan 20)
     # Combined DNS: Jan 10-20 (merged)
-    # Work days: Jan 21-28 (8 days needed for 10 remaining days)
-    # 15 day task = 5 days (Jan 5-9) + 10 days (Jan 21-28 is 8 calendar days)
-    # Hmm, the scheduler uses 15 calendar days, so Jan 5 + 14 = Jan 19, but with DNS...
-    # Let's just trust the actual result: Jan 28
+    # Work days: Jan 21-30 (10 days needed for remaining 10 days)
+    # 15 day task = 5 days (Jan 5-9) + 10 days (Jan 21-30)
+    # End: Jan 31 (exclusive)
     assert scheduled_task.start_date == date(2025, 1, 5)
-    assert scheduled_task.end_date == date(2025, 1, 28)
+    assert scheduled_task.end_date == date(2025, 1, 31)
 
 
 def test_multiple_global_dns_periods():
@@ -366,10 +365,64 @@ def test_adjacent_dns_periods():
     # DNS period 1: Jan 10-15 (6 days)
     # DNS period 2: Jan 16-20 (5 days, adjacent)
     # Combined: Jan 10-20 (11 days blocked)
-    # Work days: Jan 21-31 (11 days, need 10 more inclusive)
-    # End: Jan 31 (15 days total inclusive)
-    # Wait - let me recalculate: 5 days Jan 5-9, then need 10 more = Jan 21-30
-    # Actually the scheduler doesn't combine adjacent periods automatically
-    # So Jan 5-9 (5 days) + Jan 21-25 (5 days) for 10 remaining = Jan 25
+    # Work days: Jan 21-30 (10 days needed for remaining 10 days)
+    # End: Jan 31 (exclusive, 15 days total)
     assert scheduled_task.start_date == date(2025, 1, 5)
-    assert scheduled_task.end_date == date(2025, 1, 25)
+    assert scheduled_task.end_date == date(2025, 1, 31)
+
+
+def test_per_resource_dns_before_global_dns():
+    """Test that per-resource DNS periods that START BEFORE global DNS periods are properly merged.
+
+    This is a regression test for a bug where DNS periods were not sorted after merging,
+    causing early per-resource DNS periods to be ignored if they were added after global periods.
+    """
+    # Setup: Alice has a long vacation starting BEFORE the global holidays
+    resource_config = ResourceConfig(
+        resources=[
+            ResourceDefinition(
+                name="alice",
+                dns_periods=[
+                    # Long vacation from Oct 2025 through Mar 2026
+                    DNSPeriod(start=date(2025, 10, 1), end=date(2026, 3, 30))
+                ],
+            ),
+        ]
+    )
+
+    # Global DNS periods (holidays) that occur AFTER the start of alice's vacation
+    global_dns_periods = [
+        DNSPeriod(start=date(2025, 11, 27), end=date(2025, 11, 28)),  # Thanksgiving
+        DNSPeriod(start=date(2025, 12, 24), end=date(2025, 12, 31)),  # Winter Break
+        DNSPeriod(start=date(2026, 1, 1), end=date(2026, 1, 1)),  # New Year
+    ]
+
+    # Task that tries to start during alice's vacation
+    task = Task(
+        id="task1",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2026, 5, 1),
+    )
+
+    # Try to start in November (during alice's vacation)
+    start_date = date(2025, 11, 18)
+    scheduler = ParallelScheduler(
+        [task],
+        start_date,
+        resource_config=resource_config,
+        global_dns_periods=global_dns_periods,
+    )
+    result = scheduler.schedule()
+
+    assert len(result) == 1
+    scheduled_task = result[0]
+
+    # Alice's vacation: Oct 1 2025 - Mar 30 2026
+    # Task should NOT start on Nov 18 (current date) - that's during vacation!
+    # Task should start on Mar 31 2026 (first day after vacation ends)
+    # Work days: Mar 31 - Apr 9 (10 days) = Apr 10 (exclusive end)
+    # End: Apr 10
+    assert scheduled_task.start_date == date(2026, 3, 31)
+    assert scheduled_task.end_date == date(2026, 4, 10)

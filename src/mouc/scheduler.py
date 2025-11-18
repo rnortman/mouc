@@ -401,7 +401,10 @@ class ResourceSchedule:
                 the resource is unavailable (e.g., vacations, do-not-schedule periods)
             resource_name: Name of the resource (for verbose logging)
         """
-        self.busy_periods: list[tuple[date, date]] = unavailable_periods or []
+        # Sort unavailable periods by start date to ensure proper iteration order
+        self.busy_periods: list[tuple[date, date]] = (
+            sorted(unavailable_periods, key=lambda x: x[0]) if unavailable_periods else []
+        )
         self.resource_name = resource_name
 
     def add_busy_period(self, start: date, end: date) -> None:
