@@ -123,7 +123,7 @@ class TestMarkdownGenerator:
 
         # Check dependencies
         assert "### Cap 2" in markdown
-        assert "#### Requires" in markdown
+        assert "**Requires**" in markdown
         assert "- [Cap 1](#cap-1) (`cap1`)" in markdown
 
     def test_generate_user_stories_section(self, simple_feature_map: FeatureMap) -> None:
@@ -135,7 +135,7 @@ class TestMarkdownGenerator:
         assert "## User Stories" in markdown
         assert "### Story 1" in markdown
         assert "| Requestor | team_alpha |" in markdown
-        assert "#### Requires" in markdown
+        assert "**Requires**" in markdown
         assert "- [Cap 2](#cap-2) (`cap2`)" in markdown
 
     def test_generate_outcomes_section(self, simple_feature_map: FeatureMap) -> None:
@@ -146,7 +146,7 @@ class TestMarkdownGenerator:
 
         assert "## Outcomes" in markdown
         assert "### Outcome 1" in markdown
-        assert "#### Requires" in markdown
+        assert "**Requires**" in markdown
         assert "- [Story 1](#story-1) (`story1`) [User Story]" in markdown
 
     def test_dependency_tracking(self) -> None:
@@ -179,7 +179,7 @@ class TestMarkdownGenerator:
 
         # Check that cap1 shows it's required by cap2 and cap3
         cap1_section = markdown[markdown.find("### Cap 1") : markdown.find("### Cap 2")]
-        assert "#### Enables" in cap1_section
+        assert "**Enables**" in cap1_section
         assert "- [Cap 2](#cap-2) (`cap2`)" in cap1_section
         assert "- [Cap 3](#cap-3) (`cap3`)" in cap1_section
 
@@ -772,7 +772,7 @@ class TestMarkdownGenerator:
         assert story1_match.group(1) == "####", f"Story 1 should be h4, got {story1_match.group(1)}"
 
     def test_enables_requires_heading_levels_single_level_organization(self) -> None:
-        """Test that Enables/Requires use h4 (####) in single-level organization."""
+        """Test that Enables/Requires use bold text in single-level organization."""
         metadata = FeatureMapMetadata()
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
@@ -791,9 +791,9 @@ class TestMarkdownGenerator:
         # In single-level organization:
         # ## Capabilities (level 1 - primary section)
         # ### Cap 1 (entity - should be h3)
-        # #### Enables (should be h4 - one level deeper than entity)
+        # **Enables** (bold text, not a heading)
         # ### Cap 2 (entity - should be h3)
-        # #### Requires (should be h4 - one level deeper than entity)
+        # **Requires** (bold text, not a heading)
 
         # Check entity headings are h3 (search entire document - headings should be unique)
         cap1_match = re.search(r"^(#{1,6}) Cap 1$", markdown, re.MULTILINE)
@@ -804,21 +804,12 @@ class TestMarkdownGenerator:
         assert cap2_match is not None, "Cap 2 heading not found"
         assert cap2_match.group(1) == "###", f"Cap 2 should be h3, got {cap2_match.group(1)}"
 
-        # Check Enables and Requires are h4 (one level deeper than entity)
-        enables_match = re.search(r"^(#{1,6}) Enables$", markdown, re.MULTILINE)
-        assert enables_match is not None, "Enables heading not found"
-        assert enables_match.group(1) == "####", (
-            f"Enables should be h4, got {enables_match.group(1)}"
-        )
-
-        requires_match = re.search(r"^(#{1,6}) Requires$", markdown, re.MULTILINE)
-        assert requires_match is not None, "Requires heading not found"
-        assert requires_match.group(1) == "####", (
-            f"Requires should be h4, got {requires_match.group(1)}"
-        )
+        # Check Enables and Requires are bold text (not headings)
+        assert "**Enables**" in markdown, "Enables bold text not found"
+        assert "**Requires**" in markdown, "Requires bold text not found"
 
     def test_enables_requires_heading_levels_two_level_organization(self) -> None:
-        """Test that Enables/Requires use h5 (#####) in two-level organization."""
+        """Test that Enables/Requires use bold text in two-level organization."""
         metadata = FeatureMapMetadata()
 
         cap1 = Entity(
@@ -851,9 +842,9 @@ class TestMarkdownGenerator:
         # ## Capabilities (level 1 - primary section)
         # ### 2024-Q1 (level 2 - secondary subsection)
         # #### Cap 1 (entity - should be h4)
-        # ##### Enables (should be h5 - one level deeper than entity)
+        # **Enables** (bold text, not a heading)
         # #### Cap 2 (entity - should be h4)
-        # ##### Requires (should be h5 - one level deeper than entity)
+        # **Requires** (bold text, not a heading)
 
         # Find the Capabilities section in the BODY (after TOC)
         toc_end = markdown.find("## Table of Contents")
@@ -874,18 +865,9 @@ class TestMarkdownGenerator:
         assert cap2_match is not None, "Cap 2 heading not found"
         assert cap2_match.group(1) == "####", f"Cap 2 should be h4, got {cap2_match.group(1)}"
 
-        # Check Enables and Requires are h5 (one level deeper than entity)
-        enables_match = re.search(r"^(#{1,6}) Enables$", capabilities_section, re.MULTILINE)
-        assert enables_match is not None, "Enables heading not found"
-        assert enables_match.group(1) == "#####", (
-            f"Enables should be h5, got {enables_match.group(1)}"
-        )
-
-        requires_match = re.search(r"^(#{1,6}) Requires$", capabilities_section, re.MULTILINE)
-        assert requires_match is not None, "Requires heading not found"
-        assert requires_match.group(1) == "#####", (
-            f"Requires should be h5, got {requires_match.group(1)}"
-        )
+        # Check Enables and Requires are bold text (not headings)
+        assert "**Enables**" in capabilities_section, "Enables bold text not found"
+        assert "**Requires**" in capabilities_section, "Requires bold text not found"
 
     def test_default_behavior_without_config(self, simple_feature_map: FeatureMap) -> None:
         """Test that default behavior includes all sections in standard order."""

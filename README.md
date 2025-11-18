@@ -41,7 +41,11 @@ entities:
     name: Inter-Process Message Bus
     description: |
       High-performance message passing system for services.
-      Provides reliable, ordered message delivery.
+
+      **Key Features:**
+      - Reliable, ordered message delivery
+      - Supports both `pub/sub` and *point-to-point* patterns
+      - See [design doc](https://docs.google.com/document/d/abc) for details
     enables: [service_communication]  # This unblocks the service communication story
     links:
       - jira:INFRA-123
@@ -91,6 +95,8 @@ mouc doc --output docs.md          # Markdown to file
 mouc doc --format docx --output docs.docx  # Microsoft Word format
 mouc feature_map.yaml doc          # Specify input file
 ```
+
+Entity descriptions support markdown formatting (bold, italic, links, lists, code blocks) which is preserved in both markdown and DOCX output.
 
 ### Gantt Chart Scheduling
 
@@ -170,9 +176,11 @@ entities:
     description: |
       High-performance thread-safe queue using atomic operations.
 
-      Performance targets:
+      **Performance targets:**
       - 10M ops/sec single producer/consumer
       - Sub-microsecond latency at p99
+
+      Uses *lock-free algorithms* with `std::atomic` for thread safety.
     requires: []  # List of entity IDs this depends on
     links:
       - design:[DD-123](https://docs.google.com/document/d/abc123)
@@ -220,7 +228,10 @@ entities:
 **Required fields** for all entities:
 - `type`: Entity type (`capability`, `user_story`, or `outcome`)
 - `name`: Human-readable name
-- `description`: Can be single line or multi-paragraph markdown
+- `description`: Entity description with markdown formatting support
+  - **Inline formatting**: `**bold**`, `*italic*`, `` `code` ``, `[links](url)`
+  - **Block elements**: Lists (ordered/unordered, nested), code blocks (`` ``` ``)
+  - Formatting is preserved in both markdown and DOCX output
 
 **Optional fields** for all entities:
 - `requires`: List of entity IDs this depends on (what must be completed before this)

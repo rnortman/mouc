@@ -634,7 +634,7 @@ class TestDocxGenerator:
         )
 
     def test_enables_requires_heading_levels_single_level_organization(self) -> None:
-        """Test that Enables/Requires use Heading 4 in single-level organization."""
+        """Test that Enables/Requires use bold text in single-level organization."""
         metadata = FeatureMapMetadata()
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
@@ -654,9 +654,9 @@ class TestDocxGenerator:
         # In single-level organization:
         # Heading 2: Capabilities (level 1 - primary section)
         # Heading 3: Cap 1 (entity - should be Heading 3)
-        # Heading 4: Enables (should be Heading 4 - one level deeper than entity)
+        # Paragraph: **Enables** (bold text, not a heading)
         # Heading 3: Cap 2 (entity - should be Heading 3)
-        # Heading 4: Requires (should be Heading 4 - one level deeper than entity)
+        # Paragraph: **Requires** (bold text, not a heading)
 
         # Collect all headings with their levels and text
         headings: list[tuple[str, str]] = []
@@ -665,18 +665,12 @@ class TestDocxGenerator:
             if style_name and style_name.startswith("Heading"):
                 headings.append((style_name, paragraph.text))
 
-        # Find the Enables and Requires headings
-        enables_heading: str | None = None
-        requires_heading: str | None = None
+        # Find the entity headings
         cap1_heading: str | None = None
         cap2_heading: str | None = None
 
         for style_name, text in headings:
-            if text == "Enables":
-                enables_heading = style_name
-            elif text == "Requires":
-                requires_heading = style_name
-            elif text == "Cap 1":
+            if text == "Cap 1":
                 cap1_heading = style_name
             elif text == "Cap 2":
                 cap2_heading = style_name
@@ -685,14 +679,21 @@ class TestDocxGenerator:
         assert cap1_heading == "Heading 3", f"Cap 1 should be Heading 3, got {cap1_heading}"
         assert cap2_heading == "Heading 3", f"Cap 2 should be Heading 3, got {cap2_heading}"
 
-        # Verify Enables and Requires are Heading 4 (one level deeper than entity)
-        assert enables_heading == "Heading 4", f"Enables should be Heading 4, got {enables_heading}"
-        assert requires_heading == "Heading 4", (
-            f"Requires should be Heading 4, got {requires_heading}"
-        )
+        # Verify Enables and Requires appear as bold text in paragraphs (not headings)
+        enables_found = False
+        requires_found = False
+        for paragraph in doc.paragraphs:
+            for run in paragraph.runs:
+                if run.bold and "Enables" in run.text:
+                    enables_found = True
+                if run.bold and "Requires" in run.text:
+                    requires_found = True
+
+        assert enables_found, "Enables bold text not found"
+        assert requires_found, "Requires bold text not found"
 
     def test_enables_requires_heading_levels_two_level_organization(self) -> None:
-        """Test that Enables/Requires use Heading 5 in two-level organization."""
+        """Test that Enables/Requires use bold text in two-level organization."""
         metadata = FeatureMapMetadata()
 
         cap1 = Entity(
@@ -726,9 +727,9 @@ class TestDocxGenerator:
         # Heading 2: Capabilities (level 1 - primary section)
         # Heading 3: 2024-Q1 (level 2 - secondary subsection)
         # Heading 4: Cap 1 (entity - should be Heading 4)
-        # Heading 5: Enables (should be Heading 5 - one level deeper than entity)
+        # Paragraph: **Enables** (bold text, not a heading)
         # Heading 4: Cap 2 (entity - should be Heading 4)
-        # Heading 5: Requires (should be Heading 5 - one level deeper than entity)
+        # Paragraph: **Requires** (bold text, not a heading)
 
         # Collect all headings with their levels and text
         headings: list[tuple[str, str]] = []
@@ -737,18 +738,12 @@ class TestDocxGenerator:
             if style_name and style_name.startswith("Heading"):
                 headings.append((style_name, paragraph.text))
 
-        # Find the Enables and Requires headings
-        enables_heading: str | None = None
-        requires_heading: str | None = None
+        # Find the entity headings
         cap1_heading: str | None = None
         cap2_heading: str | None = None
 
         for style_name, text in headings:
-            if text == "Enables":
-                enables_heading = style_name
-            elif text == "Requires":
-                requires_heading = style_name
-            elif text == "Cap 1":
+            if text == "Cap 1":
                 cap1_heading = style_name
             elif text == "Cap 2":
                 cap2_heading = style_name
@@ -757,8 +752,15 @@ class TestDocxGenerator:
         assert cap1_heading == "Heading 4", f"Cap 1 should be Heading 4, got {cap1_heading}"
         assert cap2_heading == "Heading 4", f"Cap 2 should be Heading 4, got {cap2_heading}"
 
-        # Verify Enables and Requires are Heading 5 (one level deeper than entity)
-        assert enables_heading == "Heading 5", f"Enables should be Heading 5, got {enables_heading}"
-        assert requires_heading == "Heading 5", (
-            f"Requires should be Heading 5, got {requires_heading}"
-        )
+        # Verify Enables and Requires appear as bold text in paragraphs (not headings)
+        enables_found = False
+        requires_found = False
+        for paragraph in doc.paragraphs:
+            for run in paragraph.runs:
+                if run.bold and "Enables" in run.text:
+                    enables_found = True
+                if run.bold and "Requires" in run.text:
+                    requires_found = True
+
+        assert enables_found, "Enables bold text not found"
+        assert requires_found, "Requires bold text not found"

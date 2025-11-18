@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Format-specific styling: Decorators support `formats` parameter to filter by output format
 - Gantt charts now display date axis at top via `topAxis: true`
+- Markdown formatting in entity descriptions: Bold, italic, links, inline code, lists, and code blocks now supported in both markdown and DOCX output
+
+### Changed
+- "Requires" and "Enables" sections now use bold text instead of headings for cleaner document hierarchy
 
 ### Fixed
 - Fixed task end dates now account for DNS periods when only start_date is specified

@@ -9,14 +9,29 @@ from typing import TYPE_CHECKING, Any
 from docx import Document
 from docx.oxml import OxmlElement
 from docx.oxml.ns import qn
+from docx.shared import Pt, RGBColor
 
 from mouc import styling
+from mouc.backends import text_formatter
 from mouc.backends.base import EntityReference
+from mouc.backends.text_formatter import (
+    BlockElement,
+    CodeBlock,
+    InlineBold,
+    InlineCode,
+    InlineElement,
+    InlineItalic,
+    InlineLink,
+    InlineText,
+    List,
+    ListItem,
+    Paragraph,
+)
 from mouc.models import Link
 
 if TYPE_CHECKING:
     from docx.document import Document as DocumentType
-    from docx.text.paragraph import Paragraph
+    from docx.text.paragraph import Paragraph as DocxParagraph
 
     from mouc.models import Entity, FeatureMap, FeatureMapMetadata
     from mouc.styling import StylingContext
@@ -154,19 +169,19 @@ class DocxBackend:
             # Add hyperlink to cell
             self._add_link_to_cell(row.cells[1], link)
 
-        # Add description
-        self.document.add_paragraph(entity.description.strip())
+        # Add description (with markdown support)
+        self._render_markdown_content(entity.description.strip())
 
         # Requires section
         if requires_refs:
-            self.document.add_heading("Requires", level=level + 1)
+            self._render_markdown_content("**Requires**")
             for ref in requires_refs:
                 p = self.document.add_paragraph(style="List Bullet")
                 self._add_entity_reference(p, ref, entity.type)
 
         # Enables section
         if enables_refs:
-            self.document.add_heading("Enables", level=level + 1)
+            self._render_markdown_content("**Enables**")
             for ref in enables_refs:
                 p = self.document.add_paragraph(style="List Bullet")
                 self._add_entity_reference(p, ref, entity.type)
@@ -210,6 +225,218 @@ class DocxBackend:
 
         for warning in warnings:
             self.document.add_paragraph(warning, style="List Bullet")
+
+    def _render_markdown_content(self, text: str) -> None:
+        """Render markdown-formatted text as DOCX elements.
+
+        Args:
+            text: Markdown-formatted text to render
+        """
+        if not self.document:
+            return
+
+        # Parse markdown into structured blocks
+        blocks = text_formatter.parse_markdown(text)
+
+        # Render each block
+        for block in blocks:
+            self._render_block(block)
+
+    def _render_block(self, block: BlockElement) -> None:
+        """Render a single block element.
+
+        Args:
+            block: Block element to render
+        """
+        if isinstance(block, Paragraph):
+            self._render_paragraph(block)
+        elif isinstance(block, CodeBlock):
+            self._render_code_block(block)
+        elif isinstance(block, List):
+            self._render_list(block)
+        elif isinstance(block, ListItem):  # type: ignore[reportUnnecessaryIsInstance]
+            # List items are rendered by their parent List
+            for child in block.children:
+                self._render_block(child)
+
+    def _render_paragraph(self, para: Paragraph) -> None:
+        """Render a paragraph with inline formatting.
+
+        Args:
+            para: Paragraph element to render
+        """
+        if not self.document:
+            return
+
+        p = self.document.add_paragraph()
+        for inline in para.children:
+            self._render_inline_content(p, inline)
+
+    def _render_inline_content(self, paragraph: DocxParagraph, inline: InlineElement) -> None:  # type: ignore[name-defined]
+        """Render inline content (text, bold, italic, links, code) within a paragraph.
+
+        Args:
+            paragraph: DOCX paragraph to add content to
+            inline: Inline element to render
+        """
+        if isinstance(inline, InlineText):
+            paragraph.add_run(inline.text)
+        elif isinstance(inline, InlineBold):
+            for child in inline.children:
+                if isinstance(child, InlineText):
+                    run = paragraph.add_run(child.text)
+                    run.bold = True
+                else:
+                    # Nested formatting - render child then apply bold
+                    self._render_inline_with_format(paragraph, child, bold=True)
+        elif isinstance(inline, InlineItalic):
+            for child in inline.children:
+                if isinstance(child, InlineText):
+                    run = paragraph.add_run(child.text)
+                    run.italic = True
+                else:
+                    # Nested formatting - render child then apply italic
+                    self._render_inline_with_format(paragraph, child, italic=True)
+        elif isinstance(inline, InlineCode):
+            run = paragraph.add_run(inline.text)
+            run.font.name = "Courier New"
+            run.font.size = Pt(10)
+            # Light gray background
+            run.font.color.rgb = RGBColor(0, 0, 0)
+        elif isinstance(inline, InlineLink):  # type: ignore[reportUnnecessaryIsInstance]
+            # Get text from children
+            link_text = self._extract_text_from_inlines(inline.children)
+            # Create hyperlink
+            self._add_external_hyperlink(paragraph, inline.url, link_text)
+
+    def _render_inline_with_format(
+        self,
+        paragraph: DocxParagraph,  # type: ignore[name-defined]
+        inline: InlineElement,
+        bold: bool = False,
+        italic: bool = False,
+    ) -> None:
+        """Render inline content with specific formatting applied.
+
+        Args:
+            paragraph: DOCX paragraph to add content to
+            inline: Inline element to render
+            bold: Whether to apply bold formatting
+            italic: Whether to apply italic formatting
+        """
+        if isinstance(inline, InlineText):
+            run = paragraph.add_run(inline.text)
+            if bold:
+                run.bold = True
+            if italic:
+                run.italic = True
+        elif isinstance(inline, InlineBold):
+            for child in inline.children:
+                self._render_inline_with_format(paragraph, child, bold=True, italic=italic)
+        elif isinstance(inline, InlineItalic):
+            for child in inline.children:
+                self._render_inline_with_format(paragraph, child, bold=bold, italic=True)
+        elif isinstance(inline, InlineCode):
+            run = paragraph.add_run(inline.text)
+            run.font.name = "Courier New"
+            run.font.size = Pt(10)
+            if bold:
+                run.bold = True
+            if italic:
+                run.italic = True
+        elif isinstance(inline, InlineLink):  # type: ignore[reportUnnecessaryIsInstance]
+            link_text = self._extract_text_from_inlines(inline.children)
+            # External hyperlinks don't support bold/italic easily - just create the link
+            self._add_external_hyperlink(paragraph, inline.url, link_text)
+
+    def _extract_text_from_inlines(self, inlines: list[InlineElement]) -> str:
+        """Extract plain text from a list of inline elements.
+
+        Args:
+            inlines: List of inline elements
+
+        Returns:
+            Concatenated plain text
+        """
+        text_parts: list[str] = []
+        for inline in inlines:
+            if isinstance(inline, (InlineText, InlineCode)):
+                text_parts.append(inline.text)
+            elif isinstance(inline, (InlineBold, InlineItalic, InlineLink)):  # type: ignore[reportUnnecessaryIsInstance]
+                text_parts.append(self._extract_text_from_inlines(inline.children))
+        return "".join(text_parts)
+
+    def _render_list(self, lst: List, base_level: int = 0) -> None:  # noqa: PLR0912
+        """Render a list (ordered or unordered) with proper styling.
+
+        Args:
+            lst: List element to render
+            base_level: Base indentation level (0 for top-level, 1 for nested, etc.)
+        """
+        if not self.document:
+            return
+
+        style_name = "List Number" if lst.ordered else "List Bullet"
+
+        # Add level suffix for nested lists
+        if base_level > 0:
+            # Word styles: "List Bullet 2", "List Bullet 3", etc.
+            style_name = f"{style_name} {base_level + 1}"
+
+        for item in lst.items:
+            # Each list item can contain paragraphs, code blocks, or nested lists
+            if len(item.children) == 1 and isinstance(item.children[0], Paragraph):
+                # Simple case: single paragraph in list item
+                para = item.children[0]
+                try:
+                    p = self.document.add_paragraph(style=style_name)
+                except KeyError:
+                    # Style doesn't exist, fall back to base style
+                    base_style = "List Number" if lst.ordered else "List Bullet"
+                    p = self.document.add_paragraph(style=base_style)
+
+                for inline in para.children:
+                    self._render_inline_content(p, inline)
+            else:
+                # Complex case: multiple blocks in list item
+                # Render first paragraph with list style, rest as normal blocks
+                first_rendered = False
+                for child in item.children:
+                    if isinstance(child, Paragraph) and not first_rendered:
+                        try:
+                            p = self.document.add_paragraph(style=style_name)
+                        except KeyError:
+                            base_style = "List Number" if lst.ordered else "List Bullet"
+                            p = self.document.add_paragraph(style=base_style)
+
+                        for inline in child.children:
+                            self._render_inline_content(p, inline)
+                        first_rendered = True
+                    elif isinstance(child, List):
+                        # Nested list
+                        self._render_list(child, base_level + 1)
+                    else:
+                        self._render_block(child)
+
+    def _render_code_block(self, code: CodeBlock) -> None:
+        """Render a code block with monospace font.
+
+        Args:
+            code: Code block element to render
+        """
+        if not self.document:
+            return
+
+        # Add paragraph with monospace font
+        p = self.document.add_paragraph()
+        run = p.add_run(code.code)
+        run.font.name = "Courier New"
+        run.font.size = Pt(10)
+
+        # Add light gray background shading
+        shading_elm = OxmlElement("w:shd")
+        shading_elm.set(qn("w:fill"), "F0F0F0")  # Light gray
+        p._element.get_or_add_pPr().append(shading_elm)  # noqa: SLF001
 
     def finalize(self) -> bytes:
         """Finalize and return the DOCX document."""
@@ -329,7 +556,7 @@ class DocxBackend:
         # Truncate to 40 chars
         return bookmark[:40].strip("_")
 
-    def _add_bookmark(self, paragraph: Paragraph, bookmark_name: str) -> None:
+    def _add_bookmark(self, paragraph: DocxParagraph, bookmark_name: str) -> None:  # type: ignore[name-defined]
         """Add a bookmark to a paragraph for cross-referencing."""
         # Create bookmark start element
         bookmark_start = OxmlElement("w:bookmarkStart")
@@ -346,7 +573,7 @@ class DocxBackend:
 
         self.bookmarks[bookmark_name] = bookmark_name
 
-    def _add_hyperlink(self, paragraph: Paragraph, bookmark_name: str, text: str) -> None:
+    def _add_hyperlink(self, paragraph: DocxParagraph, bookmark_name: str, text: str) -> None:  # type: ignore[name-defined]
         """Add an internal hyperlink to a bookmark."""
         # Create hyperlink element
         hyperlink = OxmlElement("w:hyperlink")
@@ -376,7 +603,10 @@ class DocxBackend:
         paragraph._p.append(hyperlink)  # noqa: SLF001
 
     def _add_entity_reference(
-        self, paragraph: Paragraph, ref: EntityReference, current_entity_type: str
+        self,
+        paragraph: DocxParagraph,
+        ref: EntityReference,
+        current_entity_type: str,  # type: ignore[name-defined]
     ) -> None:
         """Add an entity reference with hyperlink to a paragraph."""
         # Add hyperlink to entity
@@ -402,7 +632,7 @@ class DocxBackend:
             # Just add the label as plain text
             p.add_run(link.label)
 
-    def _add_external_hyperlink(self, paragraph: Paragraph, url: str, text: str) -> None:
+    def _add_external_hyperlink(self, paragraph: DocxParagraph, url: str, text: str) -> None:  # type: ignore[name-defined]
         """Add an external hyperlink to a paragraph.
 
         Creates a proper Word hyperlink with blue underlined text.
