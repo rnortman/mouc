@@ -301,10 +301,18 @@ Control the table of contents generation:
 ```yaml
 markdown:
   toc_sections: [timeline, entity_types]
-  timeline:
+  toc_timeline:
     infer_from_schedule: false
     inferred_granularity: null
     sort_unscheduled_by_completion: false
+  organization:
+    primary: by_type
+    secondary: null
+    entity_type_order: [capability, user_story, outcome]
+    separate_confirmed_inferred: false
+    timeline:
+      infer_from_schedule: false
+      inferred_granularity: null
 ```
 
 **`toc_sections`** (optional, default: `["timeline", "entity_types"]`): Specifies which sections appear in the table of contents.
@@ -324,28 +332,51 @@ Note: `toc_sections` only controls the table of contents navigation. The documen
 
 ### Timeline Configuration
 
-Control how the timeline section groups and sorts entities:
+Mouc provides two independent timeline configurations:
+- **ToC Timeline** (`toc_timeline`) - Controls timeline ToC section behavior
+- **Body Timeline** (`organization.timeline`) - Controls body organization by timeframe
+
+Both configurations use the same options and must be explicitly enabled.
+
+#### ToC Timeline Configuration
+
+Controls how the timeline ToC section groups and sorts entities:
 
 ```yaml
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: weekly
     sort_unscheduled_by_completion: true
 ```
 
-**`timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, infers timeframe from scheduler completion dates for entities without manual `timeframe` metadata.
+**`toc_timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, infers timeframe from scheduler completion dates for entities without manual `timeframe` metadata.
 
-**`timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes.
+**`toc_timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes. Valid values: `weekly`, `monthly`, `quarterly`, `half_year`, `yearly`.
 
-Valid values:
-- `weekly` - Group by ISO week (e.g., 2025w01, 2025w02)
-- `monthly` - Group by month (e.g., 2025-01, 2025-02)
-- `quarterly` - Group by quarter (e.g., 2025q1, 2025q2)
-- `half_year` - Group by half-year (e.g., 2025h1, 2025h2)
-- `yearly` - Group by year (e.g., 2025, 2026)
+**`toc_timeline.sort_unscheduled_by_completion`** (optional, default: `false`): When enabled, sorts unscheduled entities by `estimated_end` date instead of entity type/ID.
 
-**`timeline.sort_unscheduled_by_completion`** (optional, default: `false`): When enabled, sorts unscheduled entities by `estimated_end` date instead of entity type/ID. Requires `--schedule` flag to populate completion dates.
+#### Body Timeline Configuration
+
+Controls timeframe inference for body organization (when using `primary: by_timeframe` or `secondary: by_timeframe`):
+
+```yaml
+markdown:
+  organization:
+    primary: by_timeframe
+    separate_confirmed_inferred: true
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly
+```
+
+**`organization.timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, uses inferred timeframes from scheduler completion dates in addition to manual `timeframe` metadata.
+
+**`organization.timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes. Valid values: `weekly`, `monthly`, `quarterly`, `half_year`, `yearly`.
+
+**`organization.separate_confirmed_inferred`** (optional, default: `false`): When enabled with timeframe-based organization, creates separate subsections for confirmed (manual) vs inferred (auto-scheduled) timeframes.
+
+**Timeframe Precedence**: Manual `timeframe` metadata always takes precedence over inferred timeframes from scheduler.
 
 **Behavior:**
 - Manual `timeframe` metadata always takes precedence over inferred timeframes
@@ -355,28 +386,36 @@ Valid values:
 
 **Examples:**
 
-Group by inferred weekly timeframes:
+ToC timeline with weekly inference:
 ```yaml
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: weekly
 ```
 
-Sort unscheduled items by completion date:
+Body organization with confirmed/inferred separation:
 ```yaml
 markdown:
-  timeline:
-    sort_unscheduled_by_completion: true
+  organization:
+    primary: by_timeframe
+    separate_confirmed_inferred: true
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly
 ```
 
-Combined usage:
+Using both independently:
 ```yaml
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
-    inferred_granularity: monthly
-    sort_unscheduled_by_completion: true
+    inferred_granularity: weekly  # ToC uses weekly grouping
+  organization:
+    primary: by_timeframe
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly  # Body uses quarterly grouping
 ```
 
 ### Organization Examples

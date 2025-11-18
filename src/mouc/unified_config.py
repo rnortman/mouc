@@ -54,6 +54,8 @@ class OrganizationConfig(BaseModel):
     primary: str = "by_type"  # "alpha_by_id", "yaml_order", "by_type", "by_timeframe"
     secondary: str | None = None  # "by_timeframe" or "by_type"
     entity_type_order: list[str] = ["capability", "user_story", "outcome"]
+    separate_confirmed_inferred: bool = False  # Separate manual vs inferred timeframes
+    timeline: TimelineConfig | None = None  # Timeline inference config for body organization
 
 
 class DocumentConfig(BaseModel):
@@ -61,7 +63,7 @@ class DocumentConfig(BaseModel):
 
     toc_sections: list[str] = ["timeline", "entity_types"]
     organization: OrganizationConfig = OrganizationConfig()
-    timeline: TimelineConfig | None = None
+    toc_timeline: TimelineConfig | None = None  # Timeline config for ToC timeline section
 
 
 class MarkdownConfig(DocumentConfig):
@@ -142,9 +144,13 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     markdown_config = None
     if "markdown" in data:
         markdown_data = data["markdown"]
-        # Extract timeline config if present in markdown section
-        if "timeline" in markdown_data:
-            TimelineConfig.model_validate(markdown_data["timeline"])  # Validate early
+        # Extract and validate timeline configs if present
+        if "toc_timeline" in markdown_data:
+            TimelineConfig.model_validate(markdown_data["toc_timeline"])  # Validate early
+        if "organization" in markdown_data and "timeline" in markdown_data["organization"]:
+            TimelineConfig.model_validate(
+                markdown_data["organization"]["timeline"]
+            )  # Validate early
         markdown_config = MarkdownConfig.model_validate(markdown_data)
 
     # Build SchedulingConfig if scheduler section exists
@@ -156,9 +162,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
     docx_config = None
     if "docx" in data:
         docx_data = data["docx"]
-        # Extract timeline config if present in docx section
-        if "timeline" in docx_data:
-            TimelineConfig.model_validate(docx_data["timeline"])  # Validate early
+        # Extract and validate timeline configs if present
+        if "toc_timeline" in docx_data:
+            TimelineConfig.model_validate(docx_data["toc_timeline"])  # Validate early
+        if "organization" in docx_data and "timeline" in docx_data["organization"]:
+            TimelineConfig.model_validate(docx_data["organization"]["timeline"])  # Validate early
         docx_config = DocxConfig.model_validate(docx_data)
 
     return UnifiedConfig(

@@ -179,7 +179,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: weekly
 """)
@@ -220,7 +220,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: monthly
 """)
@@ -261,7 +261,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: quarterly
 """)
@@ -303,7 +303,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: weekly
 """)
@@ -345,7 +345,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
 """)
 
@@ -398,7 +398,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     sort_unscheduled_by_completion: true
 """)
 
@@ -442,7 +442,7 @@ capabilities:
     capacity: 1.0
 
 markdown:
-  timeline:
+  toc_timeline:
     infer_from_schedule: true
     inferred_granularity: daily
 """)
@@ -462,3 +462,185 @@ markdown:
         # Error message is in output (stdout or stderr combined by default runner)
         output = result.stdout + str(result.exception) if result.exception else result.stdout
         assert "Invalid" in output and "granularity" in output
+
+    def test_body_organization_infer_timeframes(self, tmp_path: Path) -> None:
+        """Test body organization uses inferred timeframes."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("""metadata:
+  version: '1.0'
+
+capabilities:
+  task-1:
+    name: Task One
+    description: First task
+    meta:
+      effort: 5d
+      resources: [alice]
+  task-2:
+    name: Task Two
+    description: Second task
+    depends_on: [task-1]
+    meta:
+      effort: 5d
+      resources: [alice]
+      timeframe: 2025q1
+""")
+
+        config_file = tmp_path / "mouc_config.yaml"
+        config_file.write_text("""resources:
+  - name: alice
+    capacity: 1.0
+
+markdown:
+  organization:
+    primary: by_timeframe
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly
+""")
+
+        result = runner.invoke(
+            app,
+            [
+                "doc",
+                str(test_file),
+                "--schedule",
+                "--current-date",
+                "2025-01-06",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Both tasks should appear under 2025q1 heading in body
+        assert "## 2025q1" in result.stdout
+        # Manual timeframe (task-2) and inferred timeframe (task-1) both under 2025q1
+        assert "### Task One" in result.stdout
+        assert "### Task Two" in result.stdout
+
+    def test_body_organization_separate_confirmed_inferred(self, tmp_path: Path) -> None:
+        """Test body organization separates confirmed from inferred timeframes."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("""metadata:
+  version: '1.0'
+
+capabilities:
+  task-1:
+    name: Task One
+    description: Inferred task
+    meta:
+      effort: 5d
+      resources: [alice]
+  task-2:
+    name: Task Two
+    description: Manual task
+    depends_on: [task-1]
+    meta:
+      effort: 5d
+      resources: [alice]
+      timeframe: 2025q1
+""")
+
+        config_file = tmp_path / "mouc_config.yaml"
+        config_file.write_text("""resources:
+  - name: alice
+    capacity: 1.0
+
+markdown:
+  toc_sections: []
+  organization:
+    primary: by_timeframe
+    separate_confirmed_inferred: true
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly
+""")
+
+        result = runner.invoke(
+            app,
+            [
+                "doc",
+                str(test_file),
+                "--schedule",
+                "--current-date",
+                "2025-01-06",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Should have separate sections for confirmed and inferred
+        assert "## 2025q1 (confirmed)" in result.stdout
+        assert "## 2025q1 (inferred)" in result.stdout
+        # Task Two should be under confirmed, Task One under inferred
+        output_lines = result.stdout.split("\n")
+        confirmed_idx = next(
+            i for i, line in enumerate(output_lines) if "## 2025q1 (confirmed)" in line
+        )
+        inferred_idx = next(
+            i for i, line in enumerate(output_lines) if "## 2025q1 (inferred)" in line
+        )
+        task_one_idx = next(i for i, line in enumerate(output_lines) if "### Task One" in line)
+        task_two_idx = next(i for i, line in enumerate(output_lines) if "### Task Two" in line)
+        # Task Two (manual) should come before Task One (inferred) in the output
+        assert task_two_idx < task_one_idx
+        assert confirmed_idx < task_two_idx < inferred_idx < task_one_idx
+
+    def test_body_organization_with_type_secondary_and_confirmed_inferred(
+        self, tmp_path: Path
+    ) -> None:
+        """Test 3-level nesting: timeframe -> confirmed/inferred -> type."""
+        test_file = tmp_path / "test.yaml"
+        test_file.write_text("""metadata:
+  version: '1.0'
+
+capabilities:
+  cap-1:
+    name: Capability One
+    description: Inferred capability
+    meta:
+      effort: 5d
+      resources: [alice]
+
+user_stories:
+  us-1:
+    name: User Story One
+    description: Manual user story
+    requires: [cap-1]
+    meta:
+      timeframe: 2025q1
+""")
+
+        config_file = tmp_path / "mouc_config.yaml"
+        config_file.write_text("""resources:
+  - name: alice
+    capacity: 1.0
+
+markdown:
+  toc_sections: []
+  organization:
+    primary: by_timeframe
+    secondary: by_type
+    separate_confirmed_inferred: true
+    timeline:
+      infer_from_schedule: true
+      inferred_granularity: quarterly
+""")
+
+        result = runner.invoke(
+            app,
+            [
+                "doc",
+                str(test_file),
+                "--schedule",
+                "--current-date",
+                "2025-01-06",
+            ],
+        )
+
+        assert result.exit_code == 0
+        # Should have 2-level nesting with flattened confirmed/inferred sections
+        assert "## 2025q1 (confirmed)" in result.stdout  # h2 - timeframe + source
+        assert "## 2025q1 (inferred)" in result.stdout  # h2 - timeframe + source
+        assert "### Capabilities" in result.stdout  # h3 - type under inferred
+        assert "### User Stories" in result.stdout  # h3 - type under confirmed
+        assert "#### Capability One" in result.stdout  # h4 - entity
+        assert "#### User Story One" in result.stdout  # h4 - entity

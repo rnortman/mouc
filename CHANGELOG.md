@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Markdown formatting in entity descriptions: Bold, italic, links, inline code, lists, and code blocks now supported in both markdown and DOCX output
 - Timeline grouping: Infer timeframe from scheduler completion dates with configurable granularity (weekly, monthly, quarterly, half_year, yearly)
 - Timeline sorting: Sort unscheduled section by completion date instead of entity type/ID
+- Body organization: Use inferred timeframes in document body (not just ToC)
+- Confirmed/inferred separation: Separate manual timeframes from auto-scheduled timeframes in output
 
 ### Changed
 - "Requires" and "Enables" sections now use bold text instead of headings for cleaner document hierarchy
