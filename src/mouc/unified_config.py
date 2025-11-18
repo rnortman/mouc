@@ -31,6 +31,7 @@ class TimelineConfig(BaseModel):
         None  # "weekly", "monthly", "quarterly", "half_year", "yearly"
     )
     sort_unscheduled_by_completion: bool = False
+    separate_confirmed_inferred: bool = False  # Separate manual vs inferred timeframes
 
     def model_post_init(self, __context: Any) -> None:
         """Validate configuration after initialization."""
@@ -54,7 +55,6 @@ class OrganizationConfig(BaseModel):
     primary: str = "by_type"  # "alpha_by_id", "yaml_order", "by_type", "by_timeframe"
     secondary: str | None = None  # "by_timeframe" or "by_type"
     entity_type_order: list[str] = ["capability", "user_story", "outcome"]
-    separate_confirmed_inferred: bool = False  # Separate manual vs inferred timeframes
     timeline: TimelineConfig | None = None  # Timeline inference config for body organization
 
 

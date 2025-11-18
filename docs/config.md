@@ -374,7 +374,9 @@ markdown:
 
 **`organization.timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes. Valid values: `weekly`, `monthly`, `quarterly`, `half_year`, `yearly`.
 
-**`organization.separate_confirmed_inferred`** (optional, default: `false`): When enabled with timeframe-based organization, creates separate subsections for confirmed (manual) vs inferred (auto-scheduled) timeframes.
+**`organization.timeline.separate_confirmed_inferred`** (optional, default: `false`): When enabled, creates separate sections for confirmed (manual) vs inferred (auto-scheduled) timeframes at the same heading level.
+
+**`toc_timeline.separate_confirmed_inferred`** (optional, default: `false`): When enabled in ToC timeline section, creates separate sections for confirmed vs inferred timeframes.
 
 **Timeframe Precedence**: Manual `timeframe` metadata always takes precedence over inferred timeframes from scheduler.
 
@@ -399,10 +401,10 @@ Body organization with confirmed/inferred separation:
 markdown:
   organization:
     primary: by_timeframe
-    separate_confirmed_inferred: true
     timeline:
       infer_from_schedule: true
       inferred_granularity: quarterly
+      separate_confirmed_inferred: true
 ```
 
 Using both independently:

@@ -298,47 +298,50 @@ class DocumentGenerator:
 
     def _generate_timeline_section(self) -> None:
         """Generate timeline section grouped by timeframe."""
-        # Group entities by timeframe
-        timeframe_groups: dict[str, list[Entity]] = {}
-        unscheduled: list[Entity] = []
+        all_entities = self.feature_map.entities
 
-        for entity in self.feature_map.entities:
-            timeframe, _ = self._get_entity_timeframe(entity, self.toc_timeline_config)
+        # Group entities by timeframe (with confirmed/inferred separation if configured)
+        timeframe_groups = self._group_entities_by_timeframe(all_entities, self.toc_timeline_config)
 
-            if timeframe:
-                if timeframe not in timeframe_groups:
-                    timeframe_groups[timeframe] = []
-                timeframe_groups[timeframe].append(entity)
-            else:
-                unscheduled.append(entity)
+        # Separate scheduled from unscheduled
+        scheduled_groups = {k: v for k, v in timeframe_groups.items() if k != "Unscheduled"}
+        unscheduled = timeframe_groups.get("Unscheduled")
 
         # If no entities have timeframes, don't generate the timeline section
-        if not timeframe_groups:
+        if not scheduled_groups:
             return
 
         self.backend.add_section_header("Timeline", level=2)
 
-        # Sort timeframes lexically for consistent ordering
-        sorted_timeframes = sorted(timeframe_groups.keys())
+        # Build sections using helper (handles confirmed/inferred flattening)
+        sections = self._build_timeframe_subsections(scheduled_groups, self.toc_timeline_config)
 
-        # Generate timeline entries
-        for timeframe in sorted_timeframes:
-            self.backend.add_section_header(timeframe, level=3)
-
-            entities = sorted(timeframe_groups[timeframe], key=lambda e: (e.type, e.id))
-            for entity in entities:
+        # Generate timeline entries for each section
+        for section_name, entities in sections:
+            self.backend.add_section_header(section_name, level=3)
+            sorted_entities = sorted(entities, key=lambda e: (e.type, e.id))
+            for entity in sorted_entities:
                 anchor = self.anchor_registry[entity.id]
                 type_label = self.backend.format_type_label(entity)
-                # Add TOC-style entry linking to entity
                 self.backend.add_toc_entry(entity.name, anchor, level=0, suffix=type_label)
 
         # Add unscheduled section if there are any
         if unscheduled:
             self.backend.add_section_header("Unscheduled", level=3)
+            # Unscheduled is either list[Entity] or dict[str, list[Entity]]
+            if isinstance(unscheduled, dict):
+                # Has confirmed/inferred separation
+                uns_dict = cast(dict[str, list[Entity]], unscheduled)
+                all_unscheduled: list[Entity] = uns_dict.get("confirmed", []) + uns_dict.get(
+                    "inferred", []
+                )
+            else:
+                all_unscheduled = cast(list[Entity], unscheduled)
 
-            entities = self._sort_unscheduled_entities(unscheduled, self.toc_timeline_config)
-
-            for entity in entities:
+            sorted_entities = self._sort_unscheduled_entities(
+                all_unscheduled, self.toc_timeline_config
+            )
+            for entity in sorted_entities:
                 anchor = self.anchor_registry[entity.id]
                 type_label = self.backend.format_type_label(entity)
                 self.backend.add_toc_entry(entity.name, anchor, level=0, suffix=type_label)
@@ -377,7 +380,7 @@ class DocumentGenerator:
             If separate_confirmed_inferred is True:
                 Dict of {timeframe: {"confirmed": [entities], "inferred": [entities]}}
         """
-        separate = self.organization.separate_confirmed_inferred
+        separate = timeline_config.separate_confirmed_inferred if timeline_config else False
 
         if separate:
             # Nested structure: timeframe -> source -> entities
@@ -412,19 +415,20 @@ class DocumentGenerator:
         return type_names.get(entity_type, entity_type.title())
 
     def _build_timeframe_subsections(
-        self, timeframe_groups: dict[str, Any]
+        self, timeframe_groups: dict[str, Any], timeline_config: Any = None
     ) -> list[tuple[str, list[Entity]]]:
         """Build subsections from timeframe groups, handling confirmed/inferred separation.
 
         Args:
             timeframe_groups: Output from _group_entities_by_timeframe()
+            timeline_config: TimelineConfig to check for separate_confirmed_inferred flag
 
         Returns:
             List of (heading, entities) where heading includes source if separate_confirmed_inferred
         """
         sorted_timeframes = sorted(timeframe_groups.keys())
 
-        if self.organization.separate_confirmed_inferred:
+        if timeline_config and timeline_config.separate_confirmed_inferred:
             # Flatten to single level: confirmed and inferred sections at same level
             result: list[tuple[str, list[Entity]]] = []
             for tf in sorted_timeframes:
@@ -466,7 +470,9 @@ class DocumentGenerator:
                 timeframe_groups = self._group_entities_by_timeframe(
                     sorted_entities, self.body_timeline_config
                 )
-                subsections = self._build_timeframe_subsections(timeframe_groups)
+                subsections = self._build_timeframe_subsections(
+                    timeframe_groups, self.body_timeline_config
+                )
                 return cast(OrganizedStructure, [("Entities", subsections)])
             if self.organization.secondary == "by_type":
                 # Group by type within the flat list
@@ -495,7 +501,9 @@ class DocumentGenerator:
                     timeframe_groups = self._group_entities_by_timeframe(
                         type_entities, self.body_timeline_config
                     )
-                    subsections = self._build_timeframe_subsections(timeframe_groups)
+                    subsections = self._build_timeframe_subsections(
+                        timeframe_groups, self.body_timeline_config
+                    )
                     result_list.append((self._get_type_display_name(entity_type), subsections))
                 return cast(OrganizedStructure, result_list)
             # No secondary grouping, just sorted by ID within each type
@@ -515,7 +523,10 @@ class DocumentGenerator:
             if self.organization.secondary == "by_type":
                 # Primary: timeframe sections, Secondary: type subsections
                 # With separate_confirmed_inferred, flatten confirmed/inferred to same level
-                if self.organization.separate_confirmed_inferred:
+                if (
+                    self.body_timeline_config
+                    and self.body_timeline_config.separate_confirmed_inferred
+                ):
                     result_flat_sources: list[NestedOrganizedSection] = []
                     sorted_timeframes = sorted(timeframe_groups.keys())
                     for timeframe in sorted_timeframes:
@@ -556,7 +567,7 @@ class DocumentGenerator:
                 return result_nested
 
             # No secondary grouping - use helper which handles confirmed/inferred flattening
-            return self._build_timeframe_subsections(timeframe_groups)
+            return self._build_timeframe_subsections(timeframe_groups, self.body_timeline_config)
 
         # Default fallback
         return [("Entities", sorted(all_entities, key=lambda e: e.id))]

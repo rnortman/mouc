@@ -549,10 +549,10 @@ markdown:
   toc_sections: []
   organization:
     primary: by_timeframe
-    separate_confirmed_inferred: true
     timeline:
       infer_from_schedule: true
       inferred_granularity: quarterly
+      separate_confirmed_inferred: true
 """)
 
         result = runner.invoke(
@@ -619,10 +619,10 @@ markdown:
   organization:
     primary: by_timeframe
     secondary: by_type
-    separate_confirmed_inferred: true
     timeline:
       infer_from_schedule: true
       inferred_granularity: quarterly
+      separate_confirmed_inferred: true
 """)
 
         result = runner.invoke(
