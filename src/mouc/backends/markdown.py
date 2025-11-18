@@ -83,9 +83,8 @@ class MarkdownBackend:
 
         # Build metadata table
         table_rows: list[str] = []
-        table_rows.append(f"| ID | `{entity.id}` |")
 
-        # Add all metadata fields
+        # Add all metadata fields (including id which is now in display_metadata)
         for key, value in sorted(display_metadata.items()):
             # Format the key nicely
             pretty_key = key.replace("_", " ").title()
@@ -95,6 +94,9 @@ class MarkdownBackend:
                 formatted_value = ", ".join(str(item) for item in value)  # type: ignore[arg-type]
             else:
                 formatted_value = str(value)
+            # ID field gets special formatting with backticks
+            if key == "id":
+                formatted_value = f"`{formatted_value}`"
             table_rows.append(f"| {pretty_key} | {formatted_value} |")
 
         if entity.tags:

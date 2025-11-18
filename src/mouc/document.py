@@ -609,8 +609,11 @@ class DocumentGenerator:
 
         # Apply styling to get type label and metadata
         styled_type_label = self.backend.format_type_label(entity)
+        # Create a copy of entity.meta and add the ID field before styling
+        base_metadata = entity.meta.copy()
+        base_metadata["id"] = entity.id
         display_metadata: dict[str, Any] = styling.apply_metadata_styles(
-            entity, self.backend.styling_context, entity.meta
+            entity, self.backend.styling_context, base_metadata
         )
 
         # Build requires references

@@ -114,7 +114,7 @@ class TestMarkdownGenerator:
         assert "## Capabilities" in markdown
         assert "### Cap 1" in markdown
         assert "Description of capability 1." in markdown
-        assert "| ID | `cap1` |" in markdown
+        assert "| Id | `cap1` |" in markdown
         assert "| Tags | `infra` |" in markdown
 
         # Check links formatting - the Link parser treats markdown links as plain links

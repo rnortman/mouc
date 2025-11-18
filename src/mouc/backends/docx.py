@@ -137,12 +137,7 @@ class DocxBackend:
         table = self.document.add_table(rows=0, cols=2)
         table.style = self.table_style
 
-        # Add ID row
-        row = table.add_row()
-        row.cells[0].text = "ID"
-        row.cells[1].text = entity.id
-
-        # Add all metadata fields
+        # Add all metadata fields (including id which is now in display_metadata)
         for key, value in sorted(display_metadata.items()):
             row = table.add_row()
             # Format the key nicely

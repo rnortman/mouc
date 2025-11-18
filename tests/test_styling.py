@@ -1244,3 +1244,54 @@ def test_document_generator_passes_format_to_metadata_stylers() -> None:
     assert "should_be_present" in output
     assert "Docx Only Field" not in output
     assert "should_not_be_present" not in output
+
+
+def test_id_field_in_metadata_can_be_styled() -> None:
+    """Test that ID field is included in metadata and can be removed by stylers."""
+    styling.clear_registrations()
+
+    # Test without any stylers - ID should be present
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test description",
+            meta={"field1": "value1"},
+        )
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Generate without stylers
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend)
+    output = generator.generate()
+    assert isinstance(output, str)
+
+    # ID should be present by default
+    assert "| Id | `cap1` |" in output
+
+    # Now test with a styler that removes the ID field
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def remove_id_field(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result.pop("id", None)
+        return result
+
+    # Generate with styler that removes ID
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend)
+    output = generator.generate()
+    assert isinstance(output, str)
+
+    # ID should not be present after styler removes it
+    assert "| Id | `cap1` |" not in output
+    assert (
+        "cap1" not in output or "Test Capability" in output
+    )  # cap1 shouldn't appear except in heading
