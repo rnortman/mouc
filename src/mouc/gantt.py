@@ -26,7 +26,7 @@ from .unified_config import load_unified_config
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
-    from .resources import ResourceConfig
+    from .resources import DNSPeriod, ResourceConfig
 
 # Constants for date calculations
 OCTOBER = 10  # Month number for October, used for quarterly rollover
@@ -81,6 +81,7 @@ class GanttScheduler:
         resource_config: ResourceConfig | None = None,
         resource_config_path: Path | str | None = None,
         scheduler_config: SchedulingConfig | None = None,
+        global_dns_periods: list[DNSPeriod] | None = None,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -93,6 +94,7 @@ class GanttScheduler:
             resource_config: Optional pre-loaded resource configuration
             resource_config_path: Optional path to resources.yaml file
             scheduler_config: Optional scheduling configuration for prioritization strategy
+            global_dns_periods: Optional global DNS periods that apply to all resources
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
@@ -105,9 +107,12 @@ class GanttScheduler:
                 resource_config = unified.resources
                 if scheduler_config is None:
                     scheduler_config = unified.scheduler
+                if global_dns_periods is None:
+                    global_dns_periods = unified.global_dns_periods
 
         self.resource_config = resource_config
         self.scheduler_config = scheduler_config
+        self.global_dns_periods = global_dns_periods or []
 
         # Calculate start_date if not provided
         if start_date is None:
@@ -283,6 +288,7 @@ class GanttScheduler:
                 resource_config=self.resource_config,
                 completed_task_ids=done_without_dates,
                 config=self.scheduler_config,
+                global_dns_periods=self.global_dns_periods,
             )
             scheduled_tasks = scheduler.schedule()
 
@@ -359,8 +365,10 @@ class GanttScheduler:
         # Calculate DNS-aware completion time for each resource
         max_end = start
         for resource_name, _ in resources:
-            # Get DNS periods for this resource
-            dns_periods = self.resource_config.get_dns_periods(resource_name)
+            # Get DNS periods for this resource (including global DNS periods)
+            dns_periods = self.resource_config.get_dns_periods(
+                resource_name, self.global_dns_periods
+            )
 
             # Create a ResourceSchedule to calculate completion time
             resource_schedule = ResourceSchedule(

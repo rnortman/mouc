@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Global DNS periods: Company-wide DNS periods that apply to all resources (e.g., holidays, offsites)
 - Format-specific styling: Decorators support `formats` parameter to filter by output format
 - Gantt charts now display date axis at top via `topAxis: true`
 - Markdown formatting in entity descriptions: Bold, italic, links, inline code, lists, and code blocks now supported in both markdown and DOCX output

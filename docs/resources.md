@@ -213,7 +213,9 @@ DNS periods block resource assignment during specific time ranges. Use them for:
 - Scheduled maintenance windows
 - Cross-team commitments
 
-Example:
+### Per-Resource DNS Periods
+
+Define DNS periods for individual resources:
 
 ```yaml
 resources:
@@ -225,10 +227,30 @@ resources:
         end: 2025-07-14
 ```
 
-Tasks that need alice will:
-1. Skip alice if scheduled during DNS periods
+### Global DNS Periods
+
+Define company-wide DNS periods that apply to all resources:
+
+```yaml
+global_dns_periods:
+  - start: 2025-12-24  # Company holiday break
+    end: 2025-12-31
+  - start: 2025-07-04  # Independence Day
+    end: 2025-07-04
+
+resources:
+  - name: alice
+    dns_periods:
+      - start: 2025-08-01  # Personal vacation
+        end: 2025-08-14
+```
+
+Global DNS periods are merged with per-resource DNS periods. In the example above, alice will be unavailable during both the company holiday break (global) and her personal vacation (per-resource).
+
+Tasks that need a resource during DNS periods will:
+1. Skip that resource if scheduled during DNS periods
 2. Try the next resource in the preference list
-3. Wait if alice is the only option
+3. Wait if the resource is the only option
 
 ## Resource Groups
 

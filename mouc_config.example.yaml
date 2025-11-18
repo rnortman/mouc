@@ -1,6 +1,13 @@
 # Example unified Mouc configuration file
 # This file combines resources and Jira integration settings
 
+# Global DNS periods (apply to all resources)
+global_dns_periods:
+  - start: 2025-12-24  # Company holiday break
+    end: 2025-12-31
+  - start: 2025-07-04  # Independence Day
+    end: 2025-07-04
+
 # Resource definitions
 resources:
   - name: alice

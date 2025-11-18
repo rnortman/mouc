@@ -207,12 +207,16 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         # Get scheduler config from unified config if available
         scheduler_config = unified_config.scheduler if unified_config else None
 
+        # Get global DNS periods from unified config if available
+        global_dns_periods = unified_config.global_dns_periods if unified_config else None
+
         # Run scheduling and populate annotations
         service = SchedulingService(
             feature_map,
             parsed_current_date,
             resource_config,
             scheduler_config,
+            global_dns_periods,
         )
         service.populate_feature_map_annotations()
 
@@ -550,10 +554,12 @@ def schedule(
     config_path = get_config_path() or Path("mouc_config.yaml")
     resource_config = None
     scheduler_config = None
+    global_dns_periods = None
     if config_path.exists():
         unified = load_unified_config(config_path)
         resource_config = unified.resources
         scheduler_config = unified.scheduler
+        global_dns_periods = unified.global_dns_periods
 
     # Run scheduling service
     service = SchedulingService(
@@ -561,6 +567,7 @@ def schedule(
         parsed_current_date,
         resource_config,
         scheduler_config,
+        global_dns_periods,
     )
     result = service.schedule()
 

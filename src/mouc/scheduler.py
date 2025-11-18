@@ -15,7 +15,7 @@ logger = get_logger()
 
 if TYPE_CHECKING:
     from mouc.models import Entity, FeatureMap
-    from mouc.resources import ResourceConfig
+    from mouc.resources import DNSPeriod, ResourceConfig
 
 # Constants for date calculations
 MONTHS_PER_YEAR = 12  # Number of months in a year
@@ -573,6 +573,7 @@ class SchedulingService:
         current_date: date | None = None,
         resource_config: "ResourceConfig | None" = None,
         config: SchedulingConfig | None = None,
+        global_dns_periods: "list[DNSPeriod] | None" = None,
     ):
         """Initialize scheduling service.
 
@@ -581,11 +582,13 @@ class SchedulingService:
             current_date: Current date for scheduling (defaults to today)
             resource_config: Optional resource configuration
             config: Optional scheduling configuration for prioritization strategy
+            global_dns_periods: Optional global DNS periods that apply to all resources
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
         self.resource_config = resource_config
         self.config = config
+        self.global_dns_periods = global_dns_periods or []
         self.validator = SchedulerInputValidator(resource_config)
 
     def schedule(self) -> SchedulingResult:
@@ -606,6 +609,7 @@ class SchedulingService:
             resource_config=self.resource_config,
             completed_task_ids=done_without_dates,
             config=self.config,
+            global_dns_periods=self.global_dns_periods,
         )
 
         try:
@@ -710,6 +714,7 @@ class ParallelScheduler:
         resource_config: "ResourceConfig | None" = None,
         completed_task_ids: set[str] | None = None,
         config: SchedulingConfig | None = None,
+        global_dns_periods: "list[DNSPeriod] | None" = None,
     ):
         """Initialize the scheduler.
 
@@ -719,12 +724,14 @@ class ParallelScheduler:
             resource_config: Optional resource configuration for auto-assignment
             completed_task_ids: Set of task IDs that are already completed (done without dates)
             config: Optional scheduling configuration for prioritization strategy
+            global_dns_periods: Optional global DNS periods that apply to all resources
         """
         self.tasks = {task.id: task for task in tasks}
         self.current_date = current_date
         self.resource_config = resource_config
         self.completed_task_ids = completed_task_ids or set()
         self.config = config or SchedulingConfig()
+        self.global_dns_periods = global_dns_periods or []
         self._computed_deadlines: dict[str, date] = {}
         self._computed_priorities: dict[str, int] = {}
 
@@ -1134,7 +1141,9 @@ class ParallelScheduler:
         for resource in all_resources:
             unavailable_periods = []
             if self.resource_config:
-                unavailable_periods = self.resource_config.get_dns_periods(resource)
+                unavailable_periods = self.resource_config.get_dns_periods(
+                    resource, self.global_dns_periods
+                )
             resource_schedules[resource] = ResourceSchedule(
                 unavailable_periods=unavailable_periods,
                 resource_name=resource,

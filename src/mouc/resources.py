@@ -68,12 +68,34 @@ class ResourceConfig(BaseModel):
         """Get ordered list of resource names (defines preference for wildcards)."""
         return [r.name for r in self.resources]
 
-    def get_dns_periods(self, resource_name: str) -> list[tuple[date, date]]:
-        """Get DNS periods for a resource as list of (start, end) tuples."""
+    def get_dns_periods(
+        self, resource_name: str, global_dns_periods: list[DNSPeriod] | None = None
+    ) -> list[tuple[date, date]]:
+        """Get DNS periods for a resource as list of (start, end) tuples.
+
+        Merges global DNS periods (company-wide holidays/events) with resource-specific
+        DNS periods (individual vacations).
+
+        Args:
+            resource_name: Name of the resource
+            global_dns_periods: Optional list of global DNS periods that apply to all resources
+
+        Returns:
+            Combined list of (start, end) tuples for all DNS periods
+        """
+        # Start with global DNS periods
+        periods: list[tuple[date, date]] = []
+        if global_dns_periods:
+            periods.extend([(p.start, p.end) for p in global_dns_periods])
+
+        # Add resource-specific DNS periods
         for resource in self.resources:
             if resource.name == resource_name:
-                return [(period.start, period.end) for period in resource.dns_periods]
-        return []
+                periods.extend([(period.start, period.end) for period in resource.dns_periods])
+                return periods
+
+        # Resource not found, return just global periods
+        return periods
 
     def expand_group(self, group_name: str) -> list[str]:
         """Expand a group alias to its member list (preserves order)."""

@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .jira_config import JiraConfig
-from .resources import ResourceConfig
+from .resources import DNSPeriod, ResourceConfig
 from .scheduler import SchedulingConfig
 
 
@@ -82,6 +82,7 @@ class UnifiedConfig(BaseModel):
     """Unified configuration containing resources and optional Jira settings."""
 
     resources: ResourceConfig
+    global_dns_periods: list[DNSPeriod] = Field(default_factory=list[DNSPeriod])
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
     scheduler: SchedulingConfig | None = None
@@ -89,7 +90,7 @@ class UnifiedConfig(BaseModel):
     docx: DocxConfig | None = None
 
 
-def load_unified_config(config_path: Path | str) -> UnifiedConfig:
+def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0912
     """Load unified configuration from YAML file.
 
     Args:
@@ -124,6 +125,13 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
         "default_resource": data.get("default_resource"),
     }
     resource_config = ResourceConfig.model_validate(resource_data)
+
+    # Parse global DNS periods if present
+    global_dns_periods: list[DNSPeriod] = []
+    if "global_dns_periods" in data:
+        global_dns_periods = [
+            DNSPeriod.model_validate(period) for period in data["global_dns_periods"]
+        ]
 
     # Build JiraConfig if jira section exists
     jira_config = None
@@ -171,6 +179,7 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:
 
     return UnifiedConfig(
         resources=resource_config,
+        global_dns_periods=global_dns_periods,
         jira=jira_config,
         gantt=gantt_config,
         scheduler=scheduler_config,
