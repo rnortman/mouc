@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - "Requires" and "Enables" sections now use bold text instead of headings for cleaner document hierarchy
 - CLI exception handling removed to show full backtraces
-- Entity ID field now included in metadata, styleable via `@style_metadata` decorators
+- Entity ID, tags, and links now included in metadata, styleable via `@style_metadata` decorators
 
 ### Fixed
 - Fixed task end dates now account for DNS periods when only start_date is specified

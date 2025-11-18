@@ -137,32 +137,32 @@ class DocxBackend:
         table = self.document.add_table(rows=0, cols=2)
         table.style = self.table_style
 
-        # Add all metadata fields (including id which is now in display_metadata)
+        # Add all metadata fields (including id, tags, links which are now in display_metadata)
         for key, value in sorted(display_metadata.items()):
-            row = table.add_row()
-            # Format the key nicely
-            pretty_key = key.replace("_", " ").title()
-            row.cells[0].text = pretty_key
-            # Format the value based on type
-            if isinstance(value, list):
-                formatted_value = ", ".join(str(item) for item in value)  # type: ignore[arg-type]
+            # Special handling for certain fields
+            if key == "tags" and isinstance(value, list):
+                # Tags are rendered as comma-separated plain text
+                row = table.add_row()
+                row.cells[0].text = key.replace("_", " ").title()
+                row.cells[1].text = ", ".join(value)  # type: ignore[arg-type]
+            elif key == "links" and isinstance(value, list):
+                # Links get special hyperlink formatting via _format_links
+                link_rows = self._format_links(value)  # type: ignore[arg-type]
+                for label, link in link_rows:
+                    row = table.add_row()
+                    row.cells[0].text = label
+                    # Add hyperlink to cell
+                    self._add_link_to_cell(row.cells[1], link)
             else:
-                formatted_value = str(value)
-            row.cells[1].text = formatted_value
-
-        # Add tags
-        if entity.tags:
-            row = table.add_row()
-            row.cells[0].text = "Tags"
-            row.cells[1].text = ", ".join(entity.tags)
-
-        # Add links
-        link_rows = self._format_links(entity.links)
-        for label, link in link_rows:
-            row = table.add_row()
-            row.cells[0].text = label
-            # Add hyperlink to cell
-            self._add_link_to_cell(row.cells[1], link)
+                # Regular metadata field
+                row = table.add_row()
+                pretty_key = key.replace("_", " ").title()
+                row.cells[0].text = pretty_key
+                if isinstance(value, list):
+                    formatted_value = ", ".join(str(item) for item in value)  # type: ignore[arg-type]
+                else:
+                    formatted_value = str(value)
+                row.cells[1].text = formatted_value
 
         # Add description (with markdown support)
         self._render_markdown_content(entity.description.strip())

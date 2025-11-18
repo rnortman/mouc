@@ -84,28 +84,31 @@ class MarkdownBackend:
         # Build metadata table
         table_rows: list[str] = []
 
-        # Add all metadata fields (including id which is now in display_metadata)
+        # Add all metadata fields (including id, tags, links which are now in display_metadata)
         for key, value in sorted(display_metadata.items()):
             # Format the key nicely
             pretty_key = key.replace("_", " ").title()
-            # Format the value based on type
-            if isinstance(value, list):
-                # Metadata values can be any type, str() safely converts all types for display
-                formatted_value = ", ".join(str(item) for item in value)  # type: ignore[arg-type]
+
+            # Special handling for certain fields
+            if key == "tags" and isinstance(value, list):
+                # Tags get backtick formatting
+                formatted_value = ", ".join(f"`{tag}`" for tag in value)  # type: ignore[union-attr]
+                table_rows.append(f"| {pretty_key} | {formatted_value} |")
+            elif key == "links" and isinstance(value, list):
+                # Links get special link formatting via _format_links
+                link_rows = self._format_links(value)  # type: ignore[arg-type]
+                table_rows.extend(link_rows)
             else:
-                formatted_value = str(value)
-            # ID field gets special formatting with backticks
-            if key == "id":
-                formatted_value = f"`{formatted_value}`"
-            table_rows.append(f"| {pretty_key} | {formatted_value} |")
-
-        if entity.tags:
-            tags = ", ".join(f"`{tag}`" for tag in entity.tags)
-            table_rows.append(f"| Tags | {tags} |")
-
-        # Add links
-        link_rows = self._format_links(entity.links)
-        table_rows.extend(link_rows)
+                # Regular metadata field
+                if isinstance(value, list):
+                    # Metadata values can be any type, str() safely converts all types for display
+                    formatted_value = ", ".join(str(item) for item in value)  # type: ignore[arg-type]
+                else:
+                    formatted_value = str(value)
+                # ID field gets special formatting with backticks
+                if key == "id":
+                    formatted_value = f"`{formatted_value}`"
+                table_rows.append(f"| {pretty_key} | {formatted_value} |")
 
         if table_rows:
             self.lines.extend(["| | |", "|-|-|"])

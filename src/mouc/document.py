@@ -609,9 +609,13 @@ class DocumentGenerator:
 
         # Apply styling to get type label and metadata
         styled_type_label = self.backend.format_type_label(entity)
-        # Create a copy of entity.meta and add the ID field before styling
+        # Create a copy of entity.meta and add entity fields before styling
         base_metadata = entity.meta.copy()
         base_metadata["id"] = entity.id
+        if entity.tags:
+            base_metadata["tags"] = entity.tags
+        if entity.links:
+            base_metadata["links"] = entity.links
         display_metadata: dict[str, Any] = styling.apply_metadata_styles(
             entity, self.backend.styling_context, base_metadata
         )

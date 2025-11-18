@@ -1295,3 +1295,61 @@ def test_id_field_in_metadata_can_be_styled() -> None:
     assert (
         "cap1" not in output or "Test Capability" in output
     )  # cap1 shouldn't appear except in heading
+
+
+def test_tags_and_links_in_metadata_can_be_styled() -> None:
+    """Test that tags and links are included in metadata and can be removed by stylers."""
+    styling.clear_registrations()
+
+    # Test without any stylers - tags and links should be present
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test description",
+            tags=["infra", "priority"],
+            links=["jira:PROJ-123", "https://example.com"],
+        )
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Generate without stylers
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend)
+    output = generator.generate()
+    assert isinstance(output, str)
+
+    # Tags and links should be present by default
+    assert "| Tags | `infra`, `priority` |" in output
+    assert "| Jira | `PROJ-123` |" in output
+    assert "| Link | [example.com](https://example.com) |" in output
+
+    # Now test with a styler that removes tags and links
+    styling.clear_registrations()
+
+    @styling.style_metadata()
+    def remove_tags_and_links(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result.pop("tags", None)
+        result.pop("links", None)
+        return result
+
+    # Generate with styler that removes tags and links
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend)
+    output = generator.generate()
+    assert isinstance(output, str)
+
+    # Tags and links should not be present after styler removes them
+    assert "| Tags |" not in output
+    assert "infra" not in output
+    assert "priority" not in output
+    assert "| Jira |" not in output
+    assert "PROJ-123" not in output
+    assert "| Link |" not in output
+    assert "https://example.com" not in output
