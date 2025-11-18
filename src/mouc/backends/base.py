@@ -1,10 +1,15 @@
 """Base abstractions for document generation backends."""
 
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 from mouc.models import Entity, FeatureMapMetadata, Link
+
+if TYPE_CHECKING:
+    from mouc.styling import StylingContext
 
 
 @dataclass
@@ -25,7 +30,7 @@ class SectionStructure:
     level: int  # 1=top-level, 2=nested, etc.
     anchor_id: str | None = None
     entities: list[Entity] | None = None
-    subsections: list["SectionStructure"] | None = None
+    subsections: list[SectionStructure] | None = None
 
 
 AnchorFunction = Callable[[str, str], str]
@@ -39,6 +44,8 @@ class DocumentBackend(Protocol):
     format (markdown, docx, html, etc.). The DocumentGenerator orchestrates
     content organization and delegates format-specific rendering to the backend.
     """
+
+    styling_context: StylingContext
 
     def create_document(self) -> None:
         """Initialize a new document."""

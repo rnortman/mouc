@@ -7,6 +7,8 @@ from __future__ import annotations
 from datetime import date
 
 from mouc import styling
+from mouc.backends.markdown import MarkdownBackend
+from mouc.document import DocumentGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.scheduler import ScheduleAnnotations
 
@@ -1187,3 +1189,58 @@ def test_format_filter_with_context_check() -> None:
     result_docx = styling.apply_metadata_styles(entities[0], ctx_docx, entities[0].meta)
     assert result_docx["jira"] == "PROJ-123"
     assert "link" not in result_docx
+
+
+def test_document_generator_passes_format_to_metadata_stylers() -> None:
+    """Test that DocumentGenerator passes output format when applying metadata styles.
+
+    This is an integration test to ensure format filtering works end-to-end,
+    not just when calling apply_metadata_styles directly.
+    """
+    styling.clear_registrations()
+
+    # Register format-specific metadata stylers
+    @styling.style_metadata(formats=["markdown"])
+    def markdown_only_metadata(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["markdown_only_field"] = "should_be_present"
+        return result
+
+    @styling.style_metadata(formats=["docx"])
+    def docx_only_metadata(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["docx_only_field"] = "should_not_be_present"
+        return result
+
+    # Create test entity
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test Capability",
+            description="Test description",
+            meta={"original_field": "original_value"},
+        )
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Create markdown backend and document generator
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    generator = DocumentGenerator(feature_map, backend)
+
+    # Generate document
+    output = generator.generate()
+    assert isinstance(output, str)
+
+    # The output should contain the markdown-only field but not the docx-only field
+    # This tests that the format was properly passed through to metadata stylers
+    # Note: Markdown backend converts metadata keys to title case
+    assert "Markdown Only Field" in output
+    assert "should_be_present" in output
+    assert "Docx Only Field" not in output
+    assert "should_not_be_present" not in output

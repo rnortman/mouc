@@ -946,6 +946,7 @@ __all__ = [
     "style_edge",
     "style_label",
     "style_task",
+    "style_metadata",
     # Protocols
     "Entity",
     "Link",
@@ -963,5 +964,6 @@ __all__ = [
     "apply_edge_styles",
     "apply_label_styles",
     "apply_task_styles",
+    "apply_metadata_styles",
     "clear_registrations",
 ]
