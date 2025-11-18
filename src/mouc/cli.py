@@ -222,7 +222,7 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
             service.populate_feature_map_annotations()
 
         # Generate the documentation
-        styling_context = styling.create_styling_context(feature_map)
+        styling_context = styling.create_styling_context(feature_map, output_format=format)
 
         # Select backend and config based on format
         if format == "docx":
@@ -464,7 +464,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         # Create anchor function for markdown links if needed
         anchor_fn = None
         if final_markdown_url:
-            styling_context = styling.create_styling_context(feature_map)
+            styling_context = styling.create_styling_context(feature_map, output_format="gantt")
             backend = MarkdownBackend(feature_map, styling_context)
             anchor_fn = backend.make_anchor
 

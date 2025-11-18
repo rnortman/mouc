@@ -141,6 +141,60 @@ def special_highlighting(entity, context):
     return {}
 ```
 
+### Format Filtering
+
+Style functions can be restricted to specific output formats using the `formats` parameter. This allows you to apply different styling based on whether you're generating graphs, markdown, docx, or gantt charts:
+
+```python
+@style_metadata(formats=['docx'])
+def filter_docx_metadata(entity, context, metadata):
+    """Remove verbose fields from docx output."""
+    result = metadata.copy()
+    result.pop('internal_notes', None)
+    return result
+
+@style_metadata(formats=['markdown'])
+def enhance_markdown_metadata(entity, context, metadata):
+    """Add formatted links for markdown output."""
+    result = metadata.copy()
+    if 'jira' in metadata:
+        result['Link'] = f"[{metadata['jira']}](https://jira.example.com/{metadata['jira']})"
+    return result
+
+@style_label(formats=['markdown', 'docx'])
+def custom_label_for_docs(entity, context):
+    """Custom labels only for documentation, not graphs."""
+    return f"[{entity.type.title()}]"
+```
+
+**Available format identifiers:**
+- `'markdown'` - Markdown documentation output
+- `'docx'` - Word document output
+- `'graph'` - Graph visualizations
+- `'gantt'` - Gantt chart output
+
+**Format detection in context:**
+
+You can also check the current format within a styler using `context.output_format`:
+
+```python
+@style_metadata(formats=['markdown', 'docx'])
+def conditional_metadata(entity, context, metadata):
+    """Apply different logic based on format."""
+    result = metadata.copy()
+
+    if context.output_format == 'markdown':
+        # Markdown-specific formatting
+        result['Link'] = f"[{metadata.get('jira')}](https://...)"
+    elif context.output_format == 'docx':
+        # DOCX keeps it simple - hyperlinks handled by backend
+        result['Jira'] = metadata.get('jira')
+
+    return result
+```
+
+This approach combines declarative filtering (via `formats` parameter) with imperative logic (via `context.output_format`) for maximum flexibility.
+
 ### Edge Styling
 
 Edge styling functions control how relationships appear:
@@ -332,6 +386,22 @@ roots = context.get_root_entities()
 # Collect all unique values for a metadata key
 timeframes = context.collect_metadata_values('timeframe')
 # Returns: ['Q1 2025', 'Q2 2025', 'Q3 2025']
+```
+
+#### Output Format
+
+```python
+# Get the current output format being generated
+format = context.output_format
+# Returns: 'markdown', 'docx', 'graph', 'gantt', or None
+
+# Use in conditional logic
+if context.output_format == 'markdown':
+    # Markdown-specific styling
+    pass
+elif context.output_format == 'docx':
+    # DOCX-specific styling
+    pass
 ```
 
 ### Entity Properties

@@ -28,7 +28,7 @@ class GraphGenerator:
         """Initialize with a feature map."""
         self.feature_map = feature_map
         # Create styling context
-        self.styling_context = styling.create_styling_context(feature_map)
+        self.styling_context = styling.create_styling_context(feature_map, output_format="graph")
 
     def generate(
         self,

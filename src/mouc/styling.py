@@ -145,6 +145,14 @@ class StylingContext(Protocol):
         """
         ...
 
+    @property
+    def output_format(self) -> str | None:
+        """Output format being generated ('markdown', 'docx', 'gantt', etc.).
+
+        Returns None if format is not specified or not applicable.
+        """
+        ...
+
 
 # ============================================================================
 # Return Type Definitions
@@ -235,11 +243,11 @@ MetadataStylerFunc = Callable[[Entity, StylingContext, dict[str, Any]], dict[str
 # Internal Registry
 # ============================================================================
 
-_node_stylers: list[tuple[int, NodeStylerFunc]] = []
-_edge_stylers: list[tuple[int, EdgeStylerFunc]] = []
-_label_stylers: list[tuple[int, LabelStylerFunc]] = []
-_task_stylers: list[tuple[int, TaskStylerFunc]] = []
-_metadata_stylers: list[tuple[int, MetadataStylerFunc]] = []
+_node_stylers: list[tuple[int, list[str] | None, NodeStylerFunc]] = []
+_edge_stylers: list[tuple[int, list[str] | None, EdgeStylerFunc]] = []
+_label_stylers: list[tuple[int, list[str] | None, LabelStylerFunc]] = []
+_task_stylers: list[tuple[int, list[str] | None, TaskStylerFunc]] = []
+_metadata_stylers: list[tuple[int, list[str] | None, MetadataStylerFunc]] = []
 
 
 # ============================================================================
@@ -252,11 +260,16 @@ def style_node(func: NodeStylerFunc) -> NodeStylerFunc: ...
 
 
 @overload
-def style_node(*, priority: int = 10) -> Callable[[NodeStylerFunc], NodeStylerFunc]: ...
+def style_node(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[NodeStylerFunc], NodeStylerFunc]: ...
 
 
 def style_node(
-    func: NodeStylerFunc | None = None, *, priority: int = 10
+    func: NodeStylerFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
 ) -> NodeStylerFunc | Callable[[NodeStylerFunc], NodeStylerFunc]:
     """Register a node styling function.
 
@@ -268,18 +281,22 @@ def style_node(
 
     Signature: (entity: Entity, context: StylingContext) -> NodeStyle
 
+    Args:
+        priority: Execution priority (lower numbers first)
+        formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
+
     Examples:
         @style_node
         def my_styler(entity, context):
             return {'fill_color': '#ff0000'}
 
-        @style_node(priority=20)
-        def high_priority_styler(entity, context):
+        @style_node(priority=20, formats=['graph'])
+        def graph_only_styler(entity, context):
             return {'border_color': '#00ff00'}
     """
 
     def decorator(f: NodeStylerFunc) -> NodeStylerFunc:
-        _node_stylers.append((priority, f))
+        _node_stylers.append((priority, formats, f))
         return f
 
     if func is None:
@@ -294,11 +311,16 @@ def style_edge(func: EdgeStylerFunc) -> EdgeStylerFunc: ...
 
 
 @overload
-def style_edge(*, priority: int = 10) -> Callable[[EdgeStylerFunc], EdgeStylerFunc]: ...
+def style_edge(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[EdgeStylerFunc], EdgeStylerFunc]: ...
 
 
 def style_edge(
-    func: EdgeStylerFunc | None = None, *, priority: int = 10
+    func: EdgeStylerFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
 ) -> EdgeStylerFunc | Callable[[EdgeStylerFunc], EdgeStylerFunc]:
     """Register an edge styling function.
 
@@ -306,6 +328,10 @@ def style_edge(
     a dict of graphviz edge attributes to apply.
 
     Signature: (from_id: str, to_id: str, edge_type: str, context: StylingContext) -> EdgeStyle
+
+    Args:
+        priority: Execution priority (lower numbers first)
+        formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
 
     Edge types:
         - 'requires': entity depends on another
@@ -318,7 +344,7 @@ def style_edge(
     """
 
     def decorator(f: EdgeStylerFunc) -> EdgeStylerFunc:
-        _edge_stylers.append((priority, f))
+        _edge_stylers.append((priority, formats, f))
         return f
 
     if func is None:
@@ -333,11 +359,16 @@ def style_label(func: LabelStylerFunc) -> LabelStylerFunc: ...
 
 
 @overload
-def style_label(*, priority: int = 10) -> Callable[[LabelStylerFunc], LabelStylerFunc]: ...
+def style_label(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[LabelStylerFunc], LabelStylerFunc]: ...
 
 
 def style_label(
-    func: LabelStylerFunc | None = None, *, priority: int = 10
+    func: LabelStylerFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
 ) -> LabelStylerFunc | Callable[[LabelStylerFunc], LabelStylerFunc]:
     """Register a markdown label styling function.
 
@@ -351,6 +382,10 @@ def style_label(
 
     Signature: (entity: Entity, context: StylingContext) -> str | None
 
+    Args:
+        priority: Execution priority (lower numbers first)
+        formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
+
     Example:
         @style_label
         def show_milestones(entity, context):
@@ -362,7 +397,7 @@ def style_label(
     """
 
     def decorator(f: LabelStylerFunc) -> LabelStylerFunc:
-        _label_stylers.append((priority, f))
+        _label_stylers.append((priority, formats, f))
         return f
 
     if func is None:
@@ -377,11 +412,16 @@ def style_task(func: TaskStylerFunc) -> TaskStylerFunc: ...
 
 
 @overload
-def style_task(*, priority: int = 10) -> Callable[[TaskStylerFunc], TaskStylerFunc]: ...
+def style_task(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[TaskStylerFunc], TaskStylerFunc]: ...
 
 
 def style_task(
-    func: TaskStylerFunc | None = None, *, priority: int = 10
+    func: TaskStylerFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
 ) -> TaskStylerFunc | Callable[[TaskStylerFunc], TaskStylerFunc]:
     """Register a gantt task styling function.
 
@@ -392,6 +432,10 @@ def style_task(
     Later functions override earlier ones for conflicting attributes.
 
     Signature: (entity: Entity, context: StylingContext) -> TaskStyle
+
+    Args:
+        priority: Execution priority (lower numbers first)
+        formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
 
     Mermaid supports the following task tags:
         - 'done': Marks completed tasks (green)
@@ -421,7 +465,7 @@ def style_task(
     """
 
     def decorator(f: TaskStylerFunc) -> TaskStylerFunc:
-        _task_stylers.append((priority, f))
+        _task_stylers.append((priority, formats, f))
         return f
 
     if func is None:
@@ -436,11 +480,16 @@ def style_metadata(func: MetadataStylerFunc) -> MetadataStylerFunc: ...
 
 
 @overload
-def style_metadata(*, priority: int = 10) -> Callable[[MetadataStylerFunc], MetadataStylerFunc]: ...
+def style_metadata(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[MetadataStylerFunc], MetadataStylerFunc]: ...
 
 
 def style_metadata(
-    func: MetadataStylerFunc | None = None, *, priority: int = 10
+    func: MetadataStylerFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
 ) -> MetadataStylerFunc | Callable[[MetadataStylerFunc], MetadataStylerFunc]:
     """Register a metadata styling function for markdown output.
 
@@ -452,6 +501,10 @@ def style_metadata(
     annotations) to the markdown metadata table without mutating entity.meta.
 
     Signature: (entity: Entity, context: StylingContext, metadata: dict) -> dict
+
+    Args:
+        priority: Execution priority (lower numbers first)
+        formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
 
     Examples:
         @style_metadata
@@ -465,18 +518,16 @@ def style_metadata(
                 result['Estimated Start'] = str(schedule.estimated_start)
             return result
 
-        @style_metadata(priority=20)
-        def add_deadline_warning(entity, context, metadata):
-            schedule = entity.annotations.get('schedule')
-            if schedule and schedule.deadline_violated:
-                result = metadata.copy()
-                result['⚠️ Status'] = 'LATE'
-                return result
-            return metadata
+        @style_metadata(priority=20, formats=['docx'])
+        def filter_for_docx(entity, context, metadata):
+            # Only applies to docx output
+            result = metadata.copy()
+            result.pop('verbose_field', None)
+            return result
     """
 
     def decorator(f: MetadataStylerFunc) -> MetadataStylerFunc:
-        _metadata_stylers.append((priority, f))
+        _metadata_stylers.append((priority, formats, f))
         return f
 
     if func is None:
@@ -649,7 +700,11 @@ def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, styler in stylers:
+    for _priority, formats, styler in stylers:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
         result = styler(entity, context)
         if result:
             final_style.update(result)
@@ -666,7 +721,11 @@ def apply_edge_styles(
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, styler in stylers:
+    for _priority, formats, styler in stylers:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
         result = styler(from_id, to_id, edge_type, context)
         if result:
             final_style.update(result)
@@ -684,7 +743,11 @@ def apply_label_styles(entity: Entity, context: StylingContext) -> str | None:
 
     # Apply in order, keeping track of last non-None result
     label = None
-    for _priority, styler in stylers:
+    for _priority, formats, styler in stylers:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
         result = styler(entity, context)
         if result is not None:
             label = result
@@ -699,7 +762,11 @@ def apply_task_styles(entity: Entity, context: StylingContext) -> dict[str, Any]
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, styler in stylers:
+    for _priority, formats, styler in stylers:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
         result = styler(entity, context)
         if result:
             # Special handling for tags - merge lists instead of replacing
@@ -735,7 +802,11 @@ def apply_metadata_styles(
 
     # Chain functions - output of one becomes input to next
     result = base_metadata
-    for _priority, styler in stylers:
+    for _priority, formats, styler in stylers:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
         result = styler(entity, context, result)
 
     return result
@@ -749,13 +820,19 @@ def apply_metadata_styles(
 class _StylingContextImpl:
     """Internal implementation of StylingContext protocol."""
 
-    def __init__(self, feature_map: FeatureMap):
+    def __init__(self, feature_map: FeatureMap, output_format: str | None = None):
         self._feature_map = feature_map
+        self._output_format = output_format
         self._metadata_cache: dict[str, list[str]] = {}
         self._transitive_requires_cache: dict[str, set[str]] = {}
         self._transitive_enables_cache: dict[str, set[str]] = {}
         self._leaf_entities: set[str] | None = None
         self._root_entities: set[str] | None = None
+
+    @property
+    def output_format(self) -> str | None:
+        """Output format being generated ('markdown', 'docx', 'gantt', etc.)."""
+        return self._output_format
 
     def get_entity(self, entity_id: str) -> Entity | None:
         """Get entity by ID, or None if not found."""
@@ -844,9 +921,19 @@ class _StylingContextImpl:
         return self._metadata_cache[key]
 
 
-def create_styling_context(feature_map: FeatureMap) -> StylingContext:
-    """Create a styling context for the given feature map."""
-    return _StylingContextImpl(feature_map)  # type: ignore
+def create_styling_context(
+    feature_map: FeatureMap, output_format: str | None = None
+) -> StylingContext:
+    """Create a styling context for the given feature map.
+
+    Args:
+        feature_map: The feature map to create context for
+        output_format: Optional output format identifier ('markdown', 'docx', 'gantt', etc.)
+
+    Returns:
+        A StylingContext that can be used by styling functions
+    """
+    return _StylingContextImpl(feature_map, output_format)  # type: ignore
 
 
 # ============================================================================

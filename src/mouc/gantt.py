@@ -116,7 +116,9 @@ class GanttScheduler:
             self.start_date = start_date
 
         # Create styling context for task styling
-        self.styling_context: StylingContext = create_styling_context(feature_map)
+        self.styling_context: StylingContext = create_styling_context(
+            feature_map, output_format="gantt"
+        )
 
     def _calculate_chart_start_date(self) -> date:
         """Calculate chart start date from fixed task dates and current date.

@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Format-specific styling: Decorators support `formats` parameter to filter by output format
 - Gantt charts now display date axis at top via `topAxis: true`
 
 ### Fixed

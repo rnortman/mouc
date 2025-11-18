@@ -967,3 +967,223 @@ def test_style_metadata_cleared_by_clear_registrations() -> None:
     result = styling.apply_metadata_styles(entities[0], ctx, entities[0].meta)
     assert result == entities[0].meta
     assert "custom" not in result
+
+
+# =============================================================================
+# Format Filtering Tests
+# =============================================================================
+
+
+def test_output_format_in_context() -> None:
+    """Test that output_format is available in styling context."""
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with no format
+    ctx_none = styling.create_styling_context(feature_map)
+    assert ctx_none.output_format is None
+
+    # Test with markdown format
+    ctx_md = styling.create_styling_context(feature_map, output_format="markdown")
+    assert ctx_md.output_format == "markdown"
+
+    # Test with docx format
+    ctx_docx = styling.create_styling_context(feature_map, output_format="docx")
+    assert ctx_docx.output_format == "docx"
+
+
+def test_metadata_format_filtering() -> None:
+    """Test that metadata stylers can be filtered by format."""
+    styling.clear_registrations()
+
+    @styling.style_metadata(formats=["docx"])
+    def docx_only(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["docx_field"] = "docx_value"
+        return result
+
+    @styling.style_metadata(formats=["markdown"])
+    def markdown_only(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["markdown_field"] = "markdown_value"
+        return result
+
+    @styling.style_metadata()  # No format filter - applies to all
+    def all_formats(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["all_field"] = "all_value"
+        return result
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with docx format
+    ctx_docx = styling.create_styling_context(feature_map, output_format="docx")
+    result_docx = styling.apply_metadata_styles(entities[0], ctx_docx, {})
+    assert "docx_field" in result_docx
+    assert "markdown_field" not in result_docx
+    assert "all_field" in result_docx
+
+    # Test with markdown format
+    ctx_md = styling.create_styling_context(feature_map, output_format="markdown")
+    result_md = styling.apply_metadata_styles(entities[0], ctx_md, {})
+    assert "docx_field" not in result_md
+    assert "markdown_field" in result_md
+    assert "all_field" in result_md
+
+
+def test_node_format_filtering() -> None:
+    """Test that node stylers can be filtered by format."""
+    styling.clear_registrations()
+
+    @styling.style_node(formats=["graph"])
+    def graph_only(entity: styling.Entity, context: styling.StylingContext) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    @styling.style_node()  # No format filter
+    def all_formats(entity: styling.Entity, context: styling.StylingContext) -> styling.NodeStyle:
+        return {"border_color": "#00ff00"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with graph format
+    ctx_graph = styling.create_styling_context(feature_map, output_format="graph")
+    result_graph = styling.apply_node_styles(entities[0], ctx_graph)
+    assert result_graph["fill_color"] == "#ff0000"
+    assert result_graph["border_color"] == "#00ff00"
+
+    # Test with other format
+    ctx_other = styling.create_styling_context(feature_map, output_format="other")
+    result_other = styling.apply_node_styles(entities[0], ctx_other)
+    assert "fill_color" not in result_other
+    assert result_other["border_color"] == "#00ff00"
+
+
+def test_label_format_filtering() -> None:
+    """Test that label stylers can be filtered by format."""
+    styling.clear_registrations()
+
+    @styling.style_label(formats=["markdown"])
+    def markdown_label(entity: styling.Entity, context: styling.StylingContext) -> str:
+        return "[Markdown Label]"
+
+    @styling.style_label(formats=["docx"])
+    def docx_label(entity: styling.Entity, context: styling.StylingContext) -> str:
+        return "[Docx Label]"
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with markdown format
+    ctx_md = styling.create_styling_context(feature_map, output_format="markdown")
+    result_md = styling.apply_label_styles(entities[0], ctx_md)
+    assert result_md == "[Markdown Label]"
+
+    # Test with docx format
+    ctx_docx = styling.create_styling_context(feature_map, output_format="docx")
+    result_docx = styling.apply_label_styles(entities[0], ctx_docx)
+    assert result_docx == "[Docx Label]"
+
+
+def test_task_format_filtering() -> None:
+    """Test that task stylers can be filtered by format."""
+    styling.clear_registrations()
+
+    @styling.style_task(formats=["gantt"])
+    def gantt_only(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"tags": ["done"]}
+
+    @styling.style_task()  # No format filter
+    def all_formats(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"section": "All Formats Section"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with gantt format
+    ctx_gantt = styling.create_styling_context(feature_map, output_format="gantt")
+    result_gantt = styling.apply_task_styles(entities[0], ctx_gantt)
+    assert result_gantt["tags"] == ["done"]
+    assert result_gantt["section"] == "All Formats Section"
+
+    # Test with other format
+    ctx_other = styling.create_styling_context(feature_map, output_format="other")
+    result_other = styling.apply_task_styles(entities[0], ctx_other)
+    assert "tags" not in result_other
+    assert result_other["section"] == "All Formats Section"
+
+
+def test_multiple_formats_in_filter() -> None:
+    """Test that stylers can specify multiple formats."""
+    styling.clear_registrations()
+
+    @styling.style_metadata(formats=["markdown", "docx"])
+    def doc_formats(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["doc_field"] = "value"
+        return result
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with markdown - should apply
+    ctx_md = styling.create_styling_context(feature_map, output_format="markdown")
+    result_md = styling.apply_metadata_styles(entities[0], ctx_md, {})
+    assert "doc_field" in result_md
+
+    # Test with docx - should apply
+    ctx_docx = styling.create_styling_context(feature_map, output_format="docx")
+    result_docx = styling.apply_metadata_styles(entities[0], ctx_docx, {})
+    assert "doc_field" in result_docx
+
+    # Test with gantt - should not apply
+    ctx_gantt = styling.create_styling_context(feature_map, output_format="gantt")
+    result_gantt = styling.apply_metadata_styles(entities[0], ctx_gantt, {})
+    assert "doc_field" not in result_gantt
+
+
+def test_format_filter_with_context_check() -> None:
+    """Test that stylers can use both decorator filtering and context checks."""
+    styling.clear_registrations()
+
+    @styling.style_metadata(formats=["markdown", "docx"])
+    def conditional_within_formats(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+
+        # Use context to apply different logic based on format
+        if context.output_format == "markdown":
+            result["link"] = f"[{metadata.get('jira', 'N/A')}](https://...)"
+        elif context.output_format == "docx":
+            result["jira"] = metadata.get("jira", "N/A")
+
+        return result
+
+    entities = [
+        Entity(
+            type="capability", id="cap1", name="Test", description="Test", meta={"jira": "PROJ-123"}
+        )
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with markdown
+    ctx_md = styling.create_styling_context(feature_map, output_format="markdown")
+    result_md = styling.apply_metadata_styles(entities[0], ctx_md, entities[0].meta)
+    assert result_md["link"] == "[PROJ-123](https://...)"
+    assert "jira" in result_md  # Original field still there
+
+    # Test with docx
+    ctx_docx = styling.create_styling_context(feature_map, output_format="docx")
+    result_docx = styling.apply_metadata_styles(entities[0], ctx_docx, entities[0].meta)
+    assert result_docx["jira"] == "PROJ-123"
+    assert "link" not in result_docx
