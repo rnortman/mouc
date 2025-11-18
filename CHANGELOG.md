@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Confirmed/inferred separation: Separate manual timeframes from auto-scheduled timeframes in output
 
 ### Changed
-- "Requires" and "Enables" sections now use bold text instead of headings for cleaner document hierarchy
+- "Requires" and "Enables" sections: markdown uses headings (h4/h5), DOCX uses bold text
 - CLI exception handling removed to show full backtraces
 - Entity ID, tags, and links now included in metadata, styleable via `@style_metadata` decorators
 
