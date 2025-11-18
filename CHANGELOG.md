@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2025-11-18
+
 ### Added
 - Global DNS periods: Company-wide DNS periods that apply to all resources (e.g., holidays, offsites)
 - Format-specific styling: Decorators support `formats` parameter to filter by output format
