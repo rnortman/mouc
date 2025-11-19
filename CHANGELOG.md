@@ -12,11 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Gantt organization system: `@group_tasks` and `@sort_tasks` decorators for custom task organization
 - Config-driven gantt grouping: `gantt.group_by` (none, type, resource, timeframe)
 - Config-driven gantt sorting: `gantt.sort_by` (yaml_order, start, end, deadline, name, priority)
-- CLI `--sort-by` option for gantt charts
+- CLI `--group-by` and `--sort-by` options for gantt charts
 
 ### Changed
 - Default gantt grouping changed from `type` to `none` (no sections)
-- CLI `--group-by` option removed (use config or custom styling functions instead)
 
 ## [0.2.0] - 2025-11-18
 

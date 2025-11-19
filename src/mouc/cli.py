@@ -248,8 +248,18 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         typer.echo(doc_output)
 
 
-def _validate_gantt_params(sort_by: str | None, vertical_dividers: str | None) -> None:
+def _validate_gantt_params(
+    group_by: str | None, sort_by: str | None, vertical_dividers: str | None
+) -> None:
     """Validate gantt command parameters."""
+    if group_by and group_by not in ("none", "type", "resource", "timeframe"):
+        typer.echo(
+            f"Error: Invalid group-by value '{group_by}'. "
+            "Must be 'none', 'type', 'resource', or 'timeframe'.",
+            err=True,
+        )
+        raise typer.Exit(1) from None
+
     if sort_by and sort_by not in ("start", "end", "deadline", "name", "priority", "yaml_order"):
         typer.echo(
             f"Error: Invalid sort-by value '{sort_by}'. "
@@ -344,6 +354,13 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         ),
     ] = None,
     title: Annotated[str, typer.Option("--title", "-t", help="Chart title")] = "Project Schedule",
+    group_by: Annotated[
+        str | None,
+        typer.Option(
+            "--group-by",
+            help="Group tasks by: 'none', 'type', 'resource', or 'timeframe'",
+        ),
+    ] = None,
     sort_by: Annotated[
         str | None,
         typer.Option(
@@ -414,7 +431,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         _load_styling(style_module, style_file)
 
     # Validate parameters
-    _validate_gantt_params(sort_by, vertical_dividers)
+    _validate_gantt_params(group_by, sort_by, vertical_dividers)
 
     # Parse dates
     parsed_start_date = _parse_date_option(start_date, "start-date")
@@ -441,6 +458,8 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         gantt_config = GanttConfig()
 
     # CLI overrides config
+    if group_by is not None:
+        gantt_config.group_by = group_by
     if sort_by is not None:
         gantt_config.sort_by = sort_by
 

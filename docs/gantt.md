@@ -342,9 +342,16 @@ gantt:
 - `name` - Sort alphabetically by entity name
 - `priority` - Sort by priority metadata descending
 
-**CLI Override for Sorting**:
+**CLI Overrides**:
 ```bash
+# Override grouping
+mouc gantt --group-by type --output schedule.md
+
+# Override sorting
 mouc gantt --sort-by start --output schedule.md
+
+# Override both
+mouc gantt --group-by resource --sort-by priority --output schedule.md
 ```
 
 ### Group by Type Example
@@ -568,6 +575,9 @@ mouc gantt [OPTIONS] [FILE]
 - `--current-date, -c DATE` - Current/as-of date for scheduling in `YYYY-MM-DD` format.
   - Default: today
 - `--title, -t TEXT` - Chart title (default: "Project Schedule")
+- `--group-by GROUP` - How to group tasks: `none`, `type`, `resource`, or `timeframe`
+  - Overrides `gantt.group_by` config setting
+  - Default: `none` (no grouping)
 - `--sort-by SORT` - How to sort tasks: `start`, `end`, `deadline`, `name`, `priority`, or `yaml_order`
   - Overrides `gantt.sort_by` config setting
   - Default: `yaml_order` (preserve YAML file order)
@@ -597,6 +607,12 @@ mouc gantt --output schedule.md
 
 # Output to .mmd file (raw Mermaid syntax)
 mouc gantt --output schedule.mmd
+
+# Group by entity type
+mouc gantt --group-by type --output grouped-schedule.md
+
+# Group by resource
+mouc gantt --group-by resource --output by-resource.md
 
 # Sort by start date
 mouc gantt --sort-by start --output sorted-schedule.md
