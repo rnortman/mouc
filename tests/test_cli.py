@@ -21,7 +21,8 @@ class TestGanttCommand:
         assert "gantt" in result.stdout
         assert "title Project Schedule" in result.stdout
         assert "dateFormat YYYY-MM-DD" in result.stdout
-        assert "section Capability" in result.stdout
+        # Default is no grouping (no sections)
+        assert "section" not in result.stdout
         assert "Lock-Free Queue Implementation" in result.stdout
 
     def test_gantt_with_start_date(self, tmp_path: Path) -> None:
@@ -108,8 +109,8 @@ class TestGanttCommand:
         # Warnings go to stderr, check output which combines stdout and stderr
         assert "Warning" in result.output or "after required date" in result.output
 
-    def test_gantt_group_by_resource(self, tmp_path: Path) -> None:
-        """Test gantt chart with resource-based grouping."""
+    def test_gantt_sort_by_start(self, tmp_path: Path) -> None:
+        """Test gantt chart with sort-by parameter."""
         result = runner.invoke(
             app,
             [
@@ -119,41 +120,18 @@ class TestGanttCommand:
                 "2025-02-01",
                 "--current-date",
                 "2025-02-01",
-                "--group-by",
-                "resource",
+                "--sort-by",
+                "start",
             ],
         )
 
         assert result.exit_code == 0
-        # Should have resource sections instead of type sections
-        assert "section alice" in result.stdout or "section" in result.stdout
-        # Should NOT have type sections
-        assert "section Capability" not in result.stdout
-        assert "section User Story" not in result.stdout
+        # Should have tasks sorted by start date (no specific order to verify, just check it runs)
+        assert "Lock-Free Queue Implementation" in result.stdout
 
-    def test_gantt_group_by_type(self, tmp_path: Path) -> None:
-        """Test gantt chart with type-based grouping (explicit)."""
-        result = runner.invoke(
-            app,
-            [
-                "gantt",
-                "examples/feature_map.yaml",
-                "--start-date",
-                "2025-02-01",
-                "--current-date",
-                "2025-02-01",
-                "--group-by",
-                "type",
-            ],
-        )
-
-        assert result.exit_code == 0
-        # Should have type sections
-        assert "section Capability" in result.stdout or "section User Story" in result.stdout
-
-    def test_gantt_invalid_group_by(self, tmp_path: Path) -> None:
-        """Test gantt chart with invalid group-by value."""
-        result = runner.invoke(app, ["gantt", "examples/feature_map.yaml", "--group-by", "invalid"])
+    def test_gantt_invalid_sort_by(self, tmp_path: Path) -> None:
+        """Test gantt chart with invalid sort-by value."""
+        result = runner.invoke(app, ["gantt", "examples/feature_map.yaml", "--sort-by", "invalid"])
 
         assert result.exit_code == 1
-        assert "Invalid group-by value" in result.output
+        assert "Invalid sort-by value" in result.output

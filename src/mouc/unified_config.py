@@ -21,6 +21,11 @@ class GanttConfig(BaseModel):
     """Configuration for Gantt chart generation."""
 
     markdown_base_url: str | None = None
+    group_by: str | None = None  # "type", "resource", "timeframe", "none", or None (default: none)
+    sort_by: str | None = (
+        None  # "start", "end", "deadline", "name", "priority", "yaml_order", or None (default: yaml_order)
+    )
+    entity_type_order: list[str] = ["capability", "user_story", "outcome"]  # For group_by: type
 
 
 class TimelineConfig(BaseModel):

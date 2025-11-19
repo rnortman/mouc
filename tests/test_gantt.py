@@ -12,6 +12,7 @@ from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
 from mouc.scheduler import parse_timeframe
+from mouc.unified_config import GanttConfig
 
 
 class TestGanttScheduler:
@@ -889,7 +890,13 @@ class TestMermaidGeneration:
         entities = [cap1]
         feature_map = FeatureMap(metadata=metadata, entities=entities)
 
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        # Use group_by="type" to test section-based organization
+
+        gantt_config = GanttConfig(group_by="type")
+
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -938,7 +945,14 @@ class TestMermaidGeneration:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+
+        # Use group_by="type" to test section-based organization
+
+        gantt_config = GanttConfig(group_by="type")
+
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 
@@ -1139,7 +1153,14 @@ class TestMermaidGeneration:
         resolve_graph_edges(entities)
 
         feature_map = FeatureMap(metadata=metadata, entities=entities)
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+
+        # Use group_by="type" to test section-based organization
+
+        gantt_config = GanttConfig(group_by="type")
+
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
         mermaid = scheduler.generate_mermaid(result)
 

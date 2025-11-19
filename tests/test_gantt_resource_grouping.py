@@ -4,6 +4,7 @@ from datetime import date
 
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.unified_config import GanttConfig
 
 
 class TestResourceGrouping:
@@ -30,9 +31,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check that we have resource sections
         assert "section alice" in mermaid
@@ -63,9 +67,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check that we have both resource sections
         assert "section alice" in mermaid
@@ -99,9 +106,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check that unassigned section exists
         assert "section unassigned" in mermaid
@@ -140,9 +150,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2, task3])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check alphabetical order
         alice_pos = mermaid.index("section alice")
@@ -172,9 +185,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="type")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="type")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check that we have type sections, not resource sections
         assert "section Capability" in mermaid
@@ -182,8 +198,8 @@ class TestResourceGrouping:
         assert "section alice" not in mermaid
         assert "section bob" not in mermaid
 
-    def test_group_by_default_is_type(self) -> None:
-        """Test that default grouping is by type."""
+    def test_group_by_default_is_none(self) -> None:
+        """Test that default grouping is none (no sections)."""
         metadata = FeatureMapMetadata()
         base_date = date(2025, 1, 1)
 
@@ -199,10 +215,12 @@ class TestResourceGrouping:
         scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
         result = scheduler.schedule()
 
-        # Call without group_by parameter - should default to "type"
+        # Call without gantt_config - should default to no grouping
         mermaid = scheduler.generate_mermaid(result)
 
-        assert "section Capability" in mermaid
+        # Default is no grouping (no sections)
+        assert "section" not in mermaid
+        assert "Capability Task" in mermaid
         assert "section alice" not in mermaid
 
     def test_group_by_resource_preserves_visual_indicators(self) -> None:
@@ -232,9 +250,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[late_task, unassigned_task])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Check late task is marked critical and has deadline milestone
         assert ":crit," in mermaid
@@ -265,9 +286,12 @@ class TestResourceGrouping:
         )
 
         feature_map = FeatureMap(metadata=metadata, entities=[task1, task2])
-        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        gantt_config = GanttConfig(group_by="resource")
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, gantt_config=gantt_config
+        )
         result = scheduler.schedule()
-        mermaid = scheduler.generate_mermaid(result, group_by="resource")
+        mermaid = scheduler.generate_mermaid(result)
 
         # Both should appear in alice's section
         assert "section alice" in mermaid

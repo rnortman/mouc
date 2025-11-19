@@ -22,7 +22,7 @@ from .logger import setup_logger
 from .models import FeatureMap
 from .parser import FeatureMapParser
 from .scheduler import SchedulingResult, SchedulingService
-from .unified_config import load_unified_config
+from .unified_config import GanttConfig, load_unified_config
 
 app = typer.Typer(
     name="mouc",
@@ -248,11 +248,12 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         typer.echo(doc_output)
 
 
-def _validate_gantt_params(group_by: str, vertical_dividers: str | None) -> None:
+def _validate_gantt_params(sort_by: str | None, vertical_dividers: str | None) -> None:
     """Validate gantt command parameters."""
-    if group_by not in ("type", "resource"):
+    if sort_by and sort_by not in ("start", "end", "deadline", "name", "priority", "yaml_order"):
         typer.echo(
-            f"Error: Invalid group-by value '{group_by}'. Must be 'type' or 'resource'.",
+            f"Error: Invalid sort-by value '{sort_by}'. "
+            "Must be 'start', 'end', 'deadline', 'name', 'priority', or 'yaml_order'.",
             err=True,
         )
         raise typer.Exit(1) from None
@@ -305,19 +306,6 @@ def _resolve_gantt_config_path(resources: Path | None) -> Path | None:
     return None
 
 
-def _load_gantt_markdown_url(config_path: Path | None) -> str | None:
-    """Load markdown base URL from gantt config."""
-    if not config_path:
-        return None
-
-    with suppress(FileNotFoundError, ValueError):
-        unified_config = load_unified_config(config_path)
-        if unified_config.gantt and unified_config.gantt.markdown_base_url:
-            return unified_config.gantt.markdown_base_url
-
-    return None
-
-
 def _format_gantt_output(mermaid_output: str, output_path: Path | None) -> None:
     """Output or write Gantt chart result."""
     if output_path:
@@ -356,14 +344,13 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         ),
     ] = None,
     title: Annotated[str, typer.Option("--title", "-t", help="Chart title")] = "Project Schedule",
-    group_by: Annotated[
-        str,
+    sort_by: Annotated[
+        str | None,
         typer.Option(
-            "--group-by",
-            "-g",
-            help="Group tasks by 'type' (capability/user story/outcome) or 'resource' (person/team)",
+            "--sort-by",
+            help="Sort tasks by: 'start', 'end', 'deadline', 'name', 'priority', or 'yaml_order'",
         ),
-    ] = "type",
+    ] = None,
     tick_interval: Annotated[
         str | None,
         typer.Option(
@@ -427,7 +414,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         _load_styling(style_module, style_file)
 
     # Validate parameters
-    _validate_gantt_params(group_by, vertical_dividers)
+    _validate_gantt_params(sort_by, vertical_dividers)
 
     # Parse dates
     parsed_start_date = _parse_date_option(start_date, "start-date")
@@ -437,9 +424,26 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     parser = FeatureMapParser()
     feature_map = parser.parse_file(file)
 
-    # Resolve config path and load markdown URL
+    # Resolve config path and load config
     resource_config_path = _resolve_gantt_config_path(resources)
-    gantt_config_markdown_url = _load_gantt_markdown_url(resource_config_path)
+
+    # Load gantt config and allow CLI override
+    gantt_config = None
+    gantt_config_markdown_url = None
+    if resource_config_path:
+        with suppress(FileNotFoundError, ValueError):
+            unified_config = load_unified_config(resource_config_path)
+            gantt_config = unified_config.gantt or GanttConfig()
+            gantt_config_markdown_url = gantt_config.markdown_base_url
+
+    # If no config loaded, create default
+    if gantt_config is None:
+        gantt_config = GanttConfig()
+
+    # CLI overrides config
+    if sort_by is not None:
+        gantt_config.sort_by = sort_by
+
     final_markdown_url = markdown_base_url or gantt_config_markdown_url
 
     # Schedule tasks
@@ -448,6 +452,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         start_date=parsed_start_date,
         current_date=parsed_current_date,
         resource_config_path=resource_config_path,
+        gantt_config=gantt_config,
     )
     result = scheduler.schedule()
 
@@ -462,7 +467,6 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     mermaid_output = scheduler.generate_mermaid(
         result,
         title=title,
-        group_by=group_by,
         tick_interval=tick_interval,
         axis_format=axis_format,
         vertical_dividers=vertical_dividers,

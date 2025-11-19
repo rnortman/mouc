@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from .backends.base import AnchorFunction
+from .builtin_gantt import register_builtin_organization
 from .resources import UNASSIGNED_RESOURCE
 from .scheduler import (
     ParallelScheduler,
@@ -21,8 +22,14 @@ from .scheduler import (
     parse_timeframe,
 )
 from .scheduler import ScheduledTask as SchedulerTask
-from .styling import StylingContext, apply_task_styles, create_styling_context
-from .unified_config import load_unified_config
+from .styling import (
+    StylingContext,
+    apply_task_grouping,
+    apply_task_sorting,
+    apply_task_styles,
+    create_styling_context,
+)
+from .unified_config import GanttConfig, load_unified_config
 
 if TYPE_CHECKING:
     from .models import Entity, FeatureMap
@@ -82,6 +89,7 @@ class GanttScheduler:
         resource_config_path: Path | str | None = None,
         scheduler_config: SchedulingConfig | None = None,
         global_dns_periods: list[DNSPeriod] | None = None,
+        gantt_config: GanttConfig | None = None,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -95,24 +103,29 @@ class GanttScheduler:
             resource_config_path: Optional path to resources.yaml file
             scheduler_config: Optional scheduling configuration for prioritization strategy
             global_dns_periods: Optional global DNS periods that apply to all resources
+            gantt_config: Optional gantt configuration for grouping/sorting
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
 
-        # Load resource config if path provided
-        if resource_config is None and resource_config_path is not None:
+        # Load configs if path provided
+        if resource_config_path is not None:
             # Load from unified config
             with suppress(FileNotFoundError):
                 unified = load_unified_config(resource_config_path)
-                resource_config = unified.resources
+                if resource_config is None:
+                    resource_config = unified.resources
                 if scheduler_config is None:
                     scheduler_config = unified.scheduler
                 if global_dns_periods is None:
                     global_dns_periods = unified.global_dns_periods
+                if gantt_config is None:
+                    gantt_config = unified.gantt
 
         self.resource_config = resource_config
         self.scheduler_config = scheduler_config
         self.global_dns_periods = global_dns_periods or []
+        self.gantt_config = gantt_config or GanttConfig()
 
         # Calculate start_date if not provided
         if start_date is None:
@@ -120,9 +133,16 @@ class GanttScheduler:
         else:
             self.start_date = start_date
 
-        # Create styling context for task styling
+        # Register built-in organization functions based on config
+        register_builtin_organization(
+            group_by=self.gantt_config.group_by,
+            sort_by=self.gantt_config.sort_by,
+        )
+
+        # Create styling context for task styling (with config access)
+        config_dict = {"gantt": self.gantt_config.model_dump()}
         self.styling_context: StylingContext = create_styling_context(
-            feature_map, output_format="gantt"
+            feature_map, output_format="gantt", config=config_dict
         )
 
     def _calculate_chart_start_date(self) -> date:
@@ -556,89 +576,11 @@ class GanttScheduler:
         lines.append(f"    todayMarker {current_date_str}")
         return lines
 
-    def _group_tasks_by_type(
-        self, result: ScheduleResult, entities_by_id: dict[str, Entity]
-    ) -> dict[str, list[ScheduledTask]]:
-        """Group tasks by entity type."""
-        tasks_by_type: dict[str, list[ScheduledTask]] = {}
-
-        for task in result.tasks:
-            entity = entities_by_id[task.entity_id]
-            entity_type = entity.type
-            if entity_type not in tasks_by_type:
-                tasks_by_type[entity_type] = []
-            tasks_by_type[entity_type].append(task)
-
-        return tasks_by_type
-
-    def _group_tasks_by_resource(self, result: ScheduleResult) -> dict[str, list[ScheduledTask]]:
-        """Group tasks by resource."""
-        tasks_by_resource: dict[str, list[ScheduledTask]] = {}
-
-        for task in result.tasks:
-            if not task.resources:
-                if "unassigned" not in tasks_by_resource:
-                    tasks_by_resource["unassigned"] = []
-                tasks_by_resource["unassigned"].append(task)
-            else:
-                for resource in task.resources:
-                    if resource not in tasks_by_resource:
-                        tasks_by_resource[resource] = []
-                    tasks_by_resource[resource].append(task)
-
-        return tasks_by_resource
-
-    def _add_tasks_by_type(
-        self,
-        lines: list[str],
-        result: ScheduleResult,
-        entities_by_id: dict[str, Entity],
-        markdown_base_url: str | None,
-        anchor_fn: AnchorFunction | None,
-    ) -> None:
-        """Add tasks grouped by type to Mermaid lines."""
-        tasks_by_type = self._group_tasks_by_type(result, entities_by_id)
-
-        type_order = {"capability": 0, "user_story": 1, "outcome": 2}
-        sorted_types = sorted(tasks_by_type.keys(), key=lambda t: type_order.get(t, 99))
-
-        for entity_type in sorted_types:
-            section_name = entity_type.replace("_", " ").title()
-            lines.append(f"    section {section_name}")
-
-            tasks = tasks_by_type[entity_type]
-            for task in tasks:
-                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url, anchor_fn)
-
-    def _add_tasks_by_resource(
-        self,
-        lines: list[str],
-        result: ScheduleResult,
-        entities_by_id: dict[str, Entity],
-        markdown_base_url: str | None,
-        anchor_fn: AnchorFunction | None,
-    ) -> None:
-        """Add tasks grouped by resource to Mermaid lines."""
-        tasks_by_resource = self._group_tasks_by_resource(result)
-
-        sorted_resources = sorted(tasks_by_resource.keys())
-        if "unassigned" in sorted_resources:
-            sorted_resources.remove("unassigned")
-            sorted_resources.append("unassigned")
-
-        for resource in sorted_resources:
-            lines.append(f"    section {resource}")
-
-            tasks = tasks_by_resource[resource]
-            for task in tasks:
-                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url, anchor_fn)
-
     def generate_mermaid(  # noqa: PLR0913 - Gantt chart generation needs many formatting options
         self,
         result: ScheduleResult,
         *,
         title: str = "Project Schedule",
-        group_by: str = "type",
         tick_interval: str | None = None,
         axis_format: str | None = None,
         vertical_dividers: str | None = None,
@@ -651,7 +593,6 @@ class GanttScheduler:
         Args:
             result: The scheduling result containing tasks
             title: Chart title (default: "Project Schedule")
-            group_by: How to group tasks - "type" (entity type) or "resource" (person/team)
             tick_interval: Mermaid tickInterval (e.g., "1week", "1month", "3month" for quarters)
             axis_format: Mermaid axisFormat string (e.g., "%Y-%m-%d", "%b %Y")
             vertical_dividers: Add vertical dividers at intervals: "quarter", "halfyear", or "year"
@@ -682,13 +623,61 @@ class GanttScheduler:
             if divider_lines:
                 lines.append("")
 
-        # Add tasks grouped by type or resource
-        if group_by == "type":
-            self._add_tasks_by_type(lines, result, entities_by_id, markdown_base_url, anchor_fn)
-        elif group_by == "resource":
-            self._add_tasks_by_resource(lines, result, entities_by_id, markdown_base_url, anchor_fn)
+        # Apply organization pipeline (group → sort)
+        organized_tasks = self._organize_tasks(result.tasks)
+
+        # Render organized tasks
+        self._render_organized_tasks(
+            lines, organized_tasks, entities_by_id, markdown_base_url, anchor_fn
+        )
 
         return "\n".join(lines)
+
+    def _organize_tasks(self, tasks: list[ScheduledTask]) -> dict[str | None, list[ScheduledTask]]:
+        """Apply organization pipeline: grouping → sorting.
+
+        Args:
+            tasks: List of scheduled tasks to organize
+
+        Returns:
+            Dict mapping section names (or None) to sorted task lists
+        """
+        # Step 1: Apply grouping (highest-priority function wins)
+        grouped_tasks = apply_task_grouping(tasks, self.styling_context)
+
+        # Step 2: Apply sorting within each group (highest-priority function wins)
+        sorted_groups: dict[str | None, list[ScheduledTask]] = {}
+        for group_key, group_tasks in grouped_tasks.items():
+            sorted_tasks = apply_task_sorting(group_tasks, self.styling_context)
+            sorted_groups[group_key] = sorted_tasks
+
+        return sorted_groups
+
+    def _render_organized_tasks(
+        self,
+        lines: list[str],
+        organized_tasks: dict[str | None, list[ScheduledTask]],
+        entities_by_id: dict[str, Entity],
+        markdown_base_url: str | None,
+        anchor_fn: AnchorFunction | None,
+    ) -> None:
+        """Render organized task structure to Mermaid lines.
+
+        Args:
+            lines: List of Mermaid lines to append to
+            organized_tasks: Dict mapping section names to task lists
+            entities_by_id: Map of entity IDs to entities
+            markdown_base_url: Base URL for markdown links
+            anchor_fn: Function to generate anchors
+        """
+        for group_key, tasks in organized_tasks.items():
+            # Add section header if group has a name
+            if group_key is not None:
+                lines.append(f"    section {group_key}")
+
+            # Add tasks
+            for task in tasks:
+                self._add_task_to_mermaid(lines, task, entities_by_id, markdown_base_url, anchor_fn)
 
     def _generate_theme_css(
         self, tasks: list[ScheduledTask], entities_by_id: dict[str, Entity]

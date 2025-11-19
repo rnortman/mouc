@@ -78,7 +78,7 @@ default_resource: "*"
         assert task_without_resources is not None
 
         # Generate Mermaid output grouped by resource
-        mermaid = scheduler.generate_mermaid(result, group_by="resource", title="Test Schedule")
+        mermaid = scheduler.generate_mermaid(result, title="Test Schedule")
 
         # Both tasks should appear in the Mermaid output
         assert "task_with_resources" in mermaid, (

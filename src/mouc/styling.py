@@ -8,6 +8,7 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, overload
 
 if TYPE_CHECKING:
+    from .gantt import ScheduledTask
     from .models import FeatureMap
 
 # Constants for color calculations
@@ -238,6 +239,12 @@ LabelStylerFunc = Callable[[Entity, StylingContext], str | None]
 TaskStylerFunc = Callable[[Entity, StylingContext], TaskStyle]
 MetadataStylerFunc = Callable[[Entity, StylingContext, dict[str, Any]], dict[str, Any]]
 
+# Task organization function signatures
+GroupTasksFunc = Callable[
+    [list["ScheduledTask"], StylingContext], dict[str | None, list["ScheduledTask"]]
+]
+SortTasksFunc = Callable[[list["ScheduledTask"], StylingContext], list["ScheduledTask"]]
+
 
 # ============================================================================
 # Internal Registry
@@ -248,6 +255,10 @@ _edge_stylers: list[tuple[int, list[str] | None, EdgeStylerFunc]] = []
 _label_stylers: list[tuple[int, list[str] | None, LabelStylerFunc]] = []
 _task_stylers: list[tuple[int, list[str] | None, TaskStylerFunc]] = []
 _metadata_stylers: list[tuple[int, list[str] | None, MetadataStylerFunc]] = []
+
+# Task organization registries
+_group_tasks_funcs: list[tuple[int, list[str] | None, GroupTasksFunc]] = []
+_sort_tasks_funcs: list[tuple[int, list[str] | None, SortTasksFunc]] = []
 
 
 # ============================================================================
@@ -537,6 +548,133 @@ def style_metadata(
     return decorator(func)
 
 
+@overload
+def group_tasks(func: GroupTasksFunc) -> GroupTasksFunc: ...
+
+
+@overload
+def group_tasks(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[GroupTasksFunc], GroupTasksFunc]: ...
+
+
+def group_tasks(
+    func: GroupTasksFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+) -> GroupTasksFunc | Callable[[GroupTasksFunc], GroupTasksFunc]:
+    """Register a task grouping function for gantt charts.
+
+    The function receives a list of scheduled tasks and context, and returns
+    a dict mapping section names to task lists. Dict insertion order determines
+    display order.
+
+    Only ONE grouping function is active (highest priority wins).
+
+    Signature: (tasks: list[ScheduledTask], context: StylingContext) -> dict[str | None, list[ScheduledTask]]
+
+    Args:
+        priority: Execution priority (higher number = higher priority, user functions default to 10,
+                 built-in config functions use 5)
+        formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
+
+    Return dict mapping:
+        - Keys: Section names (str) or None for no section
+        - Values: Lists of tasks to include in that section
+        - Dict order determines section display order
+
+    Examples:
+        @group_tasks(formats=['gantt'])
+        def group_by_milestone(tasks, context):
+            groups = {}
+            for task in tasks:
+                entity = context.get_entity(task.entity_id)
+                milestone = entity.meta.get('milestone', 'Other')
+                if milestone not in groups:
+                    groups[milestone] = []
+                groups[milestone].append(task)
+            return groups  # dict order = display order
+
+        @group_tasks(priority=20)
+        def group_by_team(tasks, context):
+            groups = {}
+            for task in tasks:
+                entity = context.get_entity(task.entity_id)
+                team = entity.meta.get('team', 'unassigned')
+                if team not in groups:
+                    groups[team] = []
+                groups[team].append(task)
+            # Sort groups alphabetically
+            return dict(sorted(groups.items()))
+    """
+
+    def decorator(f: GroupTasksFunc) -> GroupTasksFunc:
+        _group_tasks_funcs.append((priority, formats, f))
+        return f
+
+    if func is None:
+        # Called with arguments: @group_tasks(priority=20)
+        return decorator
+    # Called without arguments: @group_tasks
+    return decorator(func)
+
+
+@overload
+def sort_tasks(func: SortTasksFunc) -> SortTasksFunc: ...
+
+
+@overload
+def sort_tasks(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[SortTasksFunc], SortTasksFunc]: ...
+
+
+def sort_tasks(
+    func: SortTasksFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+) -> SortTasksFunc | Callable[[SortTasksFunc], SortTasksFunc]:
+    """Register a task sorting function for gantt charts.
+
+    The function receives a flat list of tasks (from one group) and returns
+    a sorted list. This is called once per group after grouping is applied.
+
+    Only ONE sorting function is active (highest priority wins).
+
+    Signature: (tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]
+
+    Args:
+        priority: Execution priority (higher number = higher priority, user functions default to 10,
+                 built-in config functions use 5)
+        formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
+
+    Examples:
+        @sort_tasks(formats=['gantt'])
+        def sort_by_start_date(tasks, context):
+            return sorted(tasks, key=lambda t: t.start_date)
+
+        @sort_tasks(priority=20)
+        def sort_critical_first(tasks, context):
+            def sort_key(task):
+                entity = context.get_entity(task.entity_id)
+                is_critical = 'critical' in entity.tags
+                return (not is_critical, task.start_date)  # False < True
+            return sorted(tasks, key=sort_key)
+    """
+
+    def decorator(f: SortTasksFunc) -> SortTasksFunc:
+        _sort_tasks_funcs.append((priority, formats, f))
+        return f
+
+    if func is None:
+        # Called with arguments: @sort_tasks(priority=20)
+        return decorator
+    # Called without arguments: @sort_tasks
+    return decorator(func)
+
+
 # ============================================================================
 # Utility Functions
 # ============================================================================
@@ -691,6 +829,8 @@ def clear_registrations() -> None:
     _label_stylers.clear()
     _task_stylers.clear()
     _metadata_stylers.clear()
+    _group_tasks_funcs.clear()
+    _sort_tasks_funcs.clear()
 
 
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
@@ -812,6 +952,64 @@ def apply_metadata_styles(
     return result
 
 
+def apply_task_grouping(
+    tasks: list[ScheduledTask], context: StylingContext
+) -> dict[str | None, list[ScheduledTask]]:
+    """Apply highest-priority grouping function, or return {None: tasks} if none registered.
+
+    Only the highest-priority grouping function that matches the output format is applied.
+
+    Args:
+        tasks: List of scheduled tasks to group
+        context: Styling context
+
+    Returns:
+        Dict mapping section names (or None) to task lists
+    """
+    # Sort by priority (higher numbers first for grouping - highest priority wins)
+    funcs = sorted(_group_tasks_funcs, key=lambda x: x[0], reverse=True)
+
+    # Find and apply highest priority function that matches format
+    for _priority, formats, func in funcs:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
+        # Apply this function and return
+        return func(tasks, context)
+
+    # No grouping function registered or matched - return single group
+    return {None: tasks}
+
+
+def apply_task_sorting(tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]:
+    """Apply highest-priority sorting function, or return tasks unchanged if none registered.
+
+    Only the highest-priority sorting function that matches the output format is applied.
+
+    Args:
+        tasks: List of tasks from a single group to sort
+        context: Styling context
+
+    Returns:
+        Sorted list of tasks
+    """
+    # Sort by priority (higher numbers first for sorting - highest priority wins)
+    funcs = sorted(_sort_tasks_funcs, key=lambda x: x[0], reverse=True)
+
+    # Find and apply highest priority function that matches format
+    for _priority, formats, func in funcs:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
+        # Apply this function and return
+        return func(tasks, context)
+
+    # No sorting function registered or matched - return tasks unchanged
+    return tasks
+
+
 # ============================================================================
 # StylingContext Implementation
 # ============================================================================
@@ -820,9 +1018,15 @@ def apply_metadata_styles(
 class _StylingContextImpl:
     """Internal implementation of StylingContext protocol."""
 
-    def __init__(self, feature_map: FeatureMap, output_format: str | None = None):
+    def __init__(
+        self,
+        feature_map: FeatureMap,
+        output_format: str | None = None,
+        config: dict[str, Any] | None = None,
+    ):
         self._feature_map = feature_map
         self._output_format = output_format
+        self._config = config or {}
         self._metadata_cache: dict[str, list[str]] = {}
         self._transitive_requires_cache: dict[str, set[str]] = {}
         self._transitive_enables_cache: dict[str, set[str]] = {}
@@ -922,18 +1126,21 @@ class _StylingContextImpl:
 
 
 def create_styling_context(
-    feature_map: FeatureMap, output_format: str | None = None
+    feature_map: FeatureMap,
+    output_format: str | None = None,
+    config: dict[str, Any] | None = None,
 ) -> StylingContext:
     """Create a styling context for the given feature map.
 
     Args:
         feature_map: The feature map to create context for
         output_format: Optional output format identifier ('markdown', 'docx', 'gantt', etc.)
+        config: Optional configuration dict (accessible to styling functions via context._config)
 
     Returns:
         A StylingContext that can be used by styling functions
     """
-    return _StylingContextImpl(feature_map, output_format)  # type: ignore
+    return _StylingContextImpl(feature_map, output_format, config)  # type: ignore
 
 
 # ============================================================================
@@ -947,6 +1154,8 @@ __all__ = [
     "style_label",
     "style_task",
     "style_metadata",
+    "group_tasks",
+    "sort_tasks",
     # Protocols
     "Entity",
     "Link",
@@ -965,5 +1174,7 @@ __all__ = [
     "apply_label_styles",
     "apply_task_styles",
     "apply_metadata_styles",
+    "apply_task_grouping",
+    "apply_task_sorting",
     "clear_registrations",
 ]

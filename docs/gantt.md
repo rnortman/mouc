@@ -17,8 +17,8 @@ mouc gantt --start-date 2024-01-01 --current-date 2025-01-01 --output historical
 # Customize the chart title
 mouc gantt --title "Q1 2025 Platform Roadmap" --output roadmap.md
 
-# Group by resource instead of entity type
-mouc gantt --group-by resource --output resource-view.md
+# Sort tasks by start date
+mouc gantt --sort-by start --output sorted-schedule.md
 ```
 
 The output is a Mermaid Gantt chart that can be rendered in Markdown viewers, GitHub, GitLab, and many documentation tools.
@@ -304,14 +304,54 @@ gantt
 
 **Note**: If a task is both late AND unassigned, `:crit` takes precedence (deadline violations are more important).
 
-## Grouping Options
+## Task Organization
 
-Gantt charts can be organized in two ways using the `--group-by` option:
+Gantt charts can be organized using grouping and sorting configured in `mouc_config.yaml` or via custom styling functions.
 
-### Group by Type (Default)
+### Default Behavior
+
+By default, tasks appear in a single ungrouped list in YAML file order:
 
 ```bash
-mouc gantt --group-by type  # or omit (default)
+mouc gantt --output schedule.md
+# No sections, tasks in YAML order
+```
+
+### Config-Driven Organization
+
+Configure grouping and sorting in `mouc_config.yaml`:
+
+```yaml
+gantt:
+  group_by: type  # or: resource, timeframe, none
+  sort_by: start  # or: end, deadline, name, priority, yaml_order
+  entity_type_order: [capability, user_story, outcome]  # for group_by: type
+```
+
+**Grouping Options** (`group_by`):
+- `none` - No grouping, all tasks together (default)
+- `type` - Group by entity type (capability, user story, outcome)
+- `resource` - Group by assigned resource name
+- `timeframe` - Group by timeframe metadata field
+
+**Sorting Options** (`sort_by`):
+- `yaml_order` - Preserve YAML file order (default)
+- `start` - Sort by start date ascending
+- `end` - Sort by end date ascending
+- `deadline` - Sort by deadline (end_before or timeframe end)
+- `name` - Sort alphabetically by entity name
+- `priority` - Sort by priority metadata descending
+
+**CLI Override for Sorting**:
+```bash
+mouc gantt --sort-by start --output schedule.md
+```
+
+### Group by Type Example
+
+```yaml
+gantt:
+  group_by: type
 ```
 
 Tasks are grouped into sections by entity type:
@@ -319,22 +359,20 @@ Tasks are grouped into sections by entity type:
 - **User Story**: Customer requests
 - **Outcome**: Business goals
 
-This view is useful for:
-- Understanding the distribution of work across different types
-- Seeing how technical capabilities support user stories
-- Tracking outcomes separately from implementation details
+Useful for understanding work distribution across types.
 
-### Group by Resource
+### Group by Resource Example
 
-```bash
-mouc gantt --group-by resource
+```yaml
+gantt:
+  group_by: resource
 ```
 
-Tasks are grouped into sections by assigned resource (person/team):
+Tasks are grouped by assigned resource (person/team):
 - Each resource gets their own section
-- Tasks with multiple resources appear in **each** resource's section
-- Resources are sorted alphabetically
-- Unassigned tasks appear in an "unassigned" section at the end
+- Tasks with multiple resources appear in **each** section
+- Resources sorted alphabetically
+- Unassigned tasks in "unassigned" section at end
 
 **Example:**
 ```yaml
@@ -354,15 +392,56 @@ entities:
       resources: ["alice"]  # Only in alice's section
 ```
 
-Generated chart will have:
-- `section alice` - Shows both "Backend API" and "Frontend UI"
-- `section bob` - Shows "Backend API" only
+Generated chart has:
+- `section alice` - Both "Backend API" and "Frontend UI"
+- `section bob` - "Backend API" only
 
-This view is useful for:
-- Resource capacity planning and workload balancing
-- Identifying overallocated or underutilized team members
-- Understanding each person's task queue
-- Spotting tasks that require collaboration (appear in multiple sections)
+Useful for resource capacity planning and workload balancing.
+
+### Custom Organization with Styling Functions
+
+For advanced organization, write custom styling functions:
+
+```python
+# my_gantt_styles.py
+from mouc.styling import group_tasks, sort_tasks
+
+@group_tasks(formats=['gantt'])
+def group_by_milestone(tasks, context):
+    """Group tasks by milestone metadata."""
+    groups = {}
+    for task in tasks:
+        entity = context.get_entity(task.entity_id)
+        milestone = entity.meta.get('milestone', 'Backlog')
+        if milestone not in groups:
+            groups[milestone] = []
+        groups[milestone].append(task)
+
+    # Dict order controls section display order
+    return dict(sorted(groups.items()))
+
+@sort_tasks(formats=['gantt'])
+def sort_critical_first(tasks, context):
+    """Critical tasks first, then by start date."""
+    def sort_key(task):
+        entity = context.get_entity(task.entity_id)
+        is_critical = entity.meta.get('priority', 0) > 80
+        return (not is_critical, task.start_date)
+    return sorted(tasks, key=sort_key)
+```
+
+```bash
+mouc gantt --style-file my_gantt_styles.py --output schedule.md
+```
+
+**Key points**:
+- Custom functions override config settings (higher priority)
+- `group_tasks` returns dict mapping section names to task lists
+- Dict insertion order controls section display order
+- `sort_tasks` applies within each group
+- Use `formats=['gantt']` to scope to gantt output only
+
+See the [Styling documentation](styling.md) for more details on styling functions.
 
 ## Examples
 
@@ -489,12 +568,14 @@ mouc gantt [OPTIONS] [FILE]
 - `--current-date, -c DATE` - Current/as-of date for scheduling in `YYYY-MM-DD` format.
   - Default: today
 - `--title, -t TEXT` - Chart title (default: "Project Schedule")
-- `--group-by, -g GROUPING` - How to organize chart sections: `type` or `resource`
-  - `type` - Group by entity type (capability, user story, outcome). Default.
-  - `resource` - Group by resource (person/team). Tasks with multiple resources appear in each section.
+- `--sort-by SORT` - How to sort tasks: `start`, `end`, `deadline`, `name`, `priority`, or `yaml_order`
+  - Overrides `gantt.sort_by` config setting
+  - Default: `yaml_order` (preserve YAML file order)
 - `--markdown-base-url URL` - Base URL for clickable task links (e.g., `./feature_map.md` or `https://github.com/user/repo/blob/main/feature_map.md`)
   - Tasks become clickable and link to corresponding markdown headers
   - Can also be configured via `gantt.markdown_base_url` in `mouc_config.yaml`
+- `--style-file PATH` - Python file with custom styling/organization functions
+  - See [Styling documentation](styling.md) for details
 - `--output, -o PATH` - Output file path
   - Files ending in `.md` are wrapped in ` ```mermaid ` code fences
   - Other files get raw Mermaid syntax
@@ -517,14 +598,17 @@ mouc gantt --output schedule.md
 # Output to .mmd file (raw Mermaid syntax)
 mouc gantt --output schedule.mmd
 
-# Group by resource for capacity planning
-mouc gantt --group-by resource --output resource-view.md
+# Sort by start date
+mouc gantt --sort-by start --output sorted-schedule.md
 
-# Group by type (explicit, same as default)
-mouc gantt --group-by type --output type-view.md
+# Sort by priority
+mouc gantt --sort-by priority --output priority-view.md
 
 # Make tasks clickable with links to markdown doc
 mouc gantt --markdown-base-url ./feature_map.md --output schedule.md
+
+# Use custom organization functions
+mouc gantt --style-file my_gantt_styles.py --output custom-view.md
 
 # Different input file
 mouc gantt project.yaml --output project-schedule.md
