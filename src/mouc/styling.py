@@ -8,7 +8,6 @@ from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, overload
 
 if TYPE_CHECKING:
-    from .gantt import ScheduledTask
     from .models import FeatureMap
 
 # Constants for color calculations
@@ -240,10 +239,8 @@ TaskStylerFunc = Callable[[Entity, StylingContext], TaskStyle]
 MetadataStylerFunc = Callable[[Entity, StylingContext, dict[str, Any]], dict[str, Any]]
 
 # Task organization function signatures
-GroupTasksFunc = Callable[
-    [list["ScheduledTask"], StylingContext], dict[str | None, list["ScheduledTask"]]
-]
-SortTasksFunc = Callable[[list["ScheduledTask"], StylingContext], list["ScheduledTask"]]
+GroupTasksFunc = Callable[[Sequence[Entity], StylingContext], dict[str | None, list[Entity]]]
+SortTasksFunc = Callable[[Sequence[Entity], StylingContext], list[Entity]]
 
 
 # ============================================================================
@@ -566,13 +563,13 @@ def group_tasks(
 ) -> GroupTasksFunc | Callable[[GroupTasksFunc], GroupTasksFunc]:
     """Register a task grouping function for gantt charts.
 
-    The function receives a list of scheduled tasks and context, and returns
-    a dict mapping section names to task lists. Dict insertion order determines
+    The function receives a list of entities and context, and returns
+    a dict mapping section names to entity lists. Dict insertion order determines
     display order.
 
     Only ONE grouping function is active (highest priority wins).
 
-    Signature: (tasks: list[ScheduledTask], context: StylingContext) -> dict[str | None, list[ScheduledTask]]
+    Signature: (entities: Sequence[Entity], context: StylingContext) -> dict[str | None, list[Entity]]
 
     Args:
         priority: Execution priority (higher number = higher priority, user functions default to 10,
@@ -581,30 +578,28 @@ def group_tasks(
 
     Return dict mapping:
         - Keys: Section names (str) or None for no section
-        - Values: Lists of tasks to include in that section
+        - Values: Lists of entities to include in that section
         - Dict order determines section display order
 
     Examples:
         @group_tasks(formats=['gantt'])
-        def group_by_milestone(tasks, context):
+        def group_by_milestone(entities, context):
             groups = {}
-            for task in tasks:
-                entity = context.get_entity(task.entity_id)
+            for entity in entities:
                 milestone = entity.meta.get('milestone', 'Other')
                 if milestone not in groups:
                     groups[milestone] = []
-                groups[milestone].append(task)
+                groups[milestone].append(entity)
             return groups  # dict order = display order
 
         @group_tasks(priority=20)
-        def group_by_team(tasks, context):
+        def group_by_team(entities, context):
             groups = {}
-            for task in tasks:
-                entity = context.get_entity(task.entity_id)
+            for entity in entities:
                 team = entity.meta.get('team', 'unassigned')
                 if team not in groups:
                     groups[team] = []
-                groups[team].append(task)
+                groups[team].append(entity)
             # Sort groups alphabetically
             return dict(sorted(groups.items()))
     """
@@ -638,12 +633,12 @@ def sort_tasks(
 ) -> SortTasksFunc | Callable[[SortTasksFunc], SortTasksFunc]:
     """Register a task sorting function for gantt charts.
 
-    The function receives a flat list of tasks (from one group) and returns
+    The function receives a flat list of entities (from one group) and returns
     a sorted list. This is called once per group after grouping is applied.
 
     Only ONE sorting function is active (highest priority wins).
 
-    Signature: (tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]
+    Signature: (entities: Sequence[Entity], context: StylingContext) -> list[Entity]
 
     Args:
         priority: Execution priority (higher number = higher priority, user functions default to 10,
@@ -652,16 +647,20 @@ def sort_tasks(
 
     Examples:
         @sort_tasks(formats=['gantt'])
-        def sort_by_start_date(tasks, context):
-            return sorted(tasks, key=lambda t: t.start_date)
+        def sort_by_start_date(entities, context):
+            def get_start(e):
+                sched = e.annotations.get('schedule')
+                return sched.estimated_start if sched else date.max
+            return sorted(entities, key=get_start)
 
         @sort_tasks(priority=20)
-        def sort_critical_first(tasks, context):
-            def sort_key(task):
-                entity = context.get_entity(task.entity_id)
+        def sort_critical_first(entities, context):
+            def sort_key(entity):
                 is_critical = 'critical' in entity.tags
-                return (not is_critical, task.start_date)  # False < True
-            return sorted(tasks, key=sort_key)
+                sched = entity.annotations.get('schedule')
+                start = sched.estimated_start if sched else date.max
+                return (not is_critical, start)  # False < True
+            return sorted(entities, key=sort_key)
     """
 
     def decorator(f: SortTasksFunc) -> SortTasksFunc:
@@ -953,18 +952,18 @@ def apply_metadata_styles(
 
 
 def apply_task_grouping(
-    tasks: list[ScheduledTask], context: StylingContext
-) -> dict[str | None, list[ScheduledTask]]:
-    """Apply highest-priority grouping function, or return {None: tasks} if none registered.
+    entities: Sequence[Entity], context: StylingContext
+) -> dict[str | None, list[Entity]]:
+    """Apply highest-priority grouping function, or return {None: entities} if none registered.
 
     Only the highest-priority grouping function that matches the output format is applied.
 
     Args:
-        tasks: List of scheduled tasks to group
+        entities: List of entities to group
         context: Styling context
 
     Returns:
-        Dict mapping section names (or None) to task lists
+        Dict mapping section names (or None) to entity lists
     """
     # Sort by priority (higher numbers first for grouping - highest priority wins)
     funcs = sorted(_group_tasks_funcs, key=lambda x: x[0], reverse=True)
@@ -976,23 +975,23 @@ def apply_task_grouping(
             continue
 
         # Apply this function and return
-        return func(tasks, context)
+        return func(entities, context)
 
     # No grouping function registered or matched - return single group
-    return {None: tasks}
+    return {None: list(entities)}
 
 
-def apply_task_sorting(tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]:
-    """Apply highest-priority sorting function, or return tasks unchanged if none registered.
+def apply_task_sorting(entities: Sequence[Entity], context: StylingContext) -> list[Entity]:
+    """Apply highest-priority sorting function, or return entities unchanged if none registered.
 
     Only the highest-priority sorting function that matches the output format is applied.
 
     Args:
-        tasks: List of tasks from a single group to sort
+        entities: List of entities from a single group to sort
         context: Styling context
 
     Returns:
-        Sorted list of tasks
+        Sorted list of entities
     """
     # Sort by priority (higher numbers first for sorting - highest priority wins)
     funcs = sorted(_sort_tasks_funcs, key=lambda x: x[0], reverse=True)
@@ -1004,10 +1003,10 @@ def apply_task_sorting(tasks: list[ScheduledTask], context: StylingContext) -> l
             continue
 
         # Apply this function and return
-        return func(tasks, context)
+        return func(entities, context)
 
-    # No sorting function registered or matched - return tasks unchanged
-    return tasks
+    # No sorting function registered or matched - return entities unchanged
+    return list(entities)
 
 
 # ============================================================================

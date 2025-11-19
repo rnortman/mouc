@@ -2,11 +2,13 @@
 
 # pyright: reportUnusedFunction=false
 
+from collections.abc import Sequence
 from datetime import date
 
 from mouc import styling
-from mouc.gantt import GanttScheduler, ScheduledTask
+from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.styling import Entity as EntityProtocol
 from mouc.styling import StylingContext
 from mouc.unified_config import GanttConfig
 
@@ -17,16 +19,14 @@ def test_group_tasks_decorator_basic() -> None:
 
     @styling.group_tasks(formats=["gantt"])
     def group_by_team(
-        tasks: list[ScheduledTask], context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        groups: dict[str | None, list[ScheduledTask]] = {}
-        for task in tasks:
-            entity = context.get_entity(task.entity_id)
-            assert entity is not None
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        groups: dict[str | None, list[EntityProtocol]] = {}
+        for entity in entities:
             team = entity.meta.get("team", "unassigned")
             if team not in groups:
                 groups[team] = []
-            groups[team].append(task)
+            groups[team].append(entity)
         return groups
 
     # Create test entities
@@ -67,17 +67,17 @@ def test_group_tasks_priority_override() -> None:
 
     @styling.group_tasks(priority=5, formats=["gantt"])
     def low_priority_grouping(
-        tasks: list[ScheduledTask], context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
         # This should be overridden
-        return {"Low Priority": tasks}
+        return {"Low Priority": list(entities)}
 
     @styling.group_tasks(priority=10, formats=["gantt"])
     def high_priority_grouping(
-        tasks: list[ScheduledTask], context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
         # This should win
-        return {"High Priority": tasks}
+        return {"High Priority": list(entities)}
 
     # Create test entity
     entities = [
@@ -108,18 +108,16 @@ def test_group_tasks_dict_order_controls_display() -> None:
 
     @styling.group_tasks(formats=["gantt"])
     def ordered_grouping(
-        tasks: list[ScheduledTask], context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
         # Explicitly order groups
         ordered = ["Team A", "Team B", "Team C"]
-        groups: dict[str | None, list[ScheduledTask]] = {name: [] for name in ordered}
+        groups: dict[str | None, list[EntityProtocol]] = {name: [] for name in ordered}
 
-        for task in tasks:
-            entity = context.get_entity(task.entity_id)
-            assert entity is not None
+        for entity in entities:
             team = entity.meta.get("team", "Team C")
             if team in groups:
-                groups[team].append(task)
+                groups[team].append(entity)
 
         # Remove empty groups while preserving order
         return {k: v for k, v in groups.items() if v}
@@ -163,13 +161,10 @@ def test_sort_tasks_decorator_basic() -> None:
     styling.clear_registrations()
 
     @styling.sort_tasks(formats=["gantt"])
-    def sort_by_name(tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]:
-        def get_name(task: ScheduledTask) -> str:
-            entity = context.get_entity(task.entity_id)
-            assert entity is not None
-            return entity.name
-
-        return sorted(tasks, key=get_name)
+    def sort_by_name(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return sorted(entities, key=lambda e: e.name)
 
     # Create test entities in reverse alphabetical order
     entities = [
@@ -211,26 +206,21 @@ def test_sort_tasks_within_groups() -> None:
 
     @styling.group_tasks(formats=["gantt"])
     def group_by_team(
-        tasks: list[ScheduledTask], context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        groups: dict[str | None, list[ScheduledTask]] = {}
-        for task in tasks:
-            entity = context.get_entity(task.entity_id)
-            assert entity is not None
+        entities: Sequence[EntityProtocol], context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        groups: dict[str | None, list[EntityProtocol]] = {}
+        for entity in entities:
             team = entity.meta.get("team", "unassigned")
             if team not in groups:
                 groups[team] = []
-            groups[team].append(task)
+            groups[team].append(entity)
         return dict(sorted(groups.items()))  # Sort teams alphabetically
 
     @styling.sort_tasks(formats=["gantt"])
-    def sort_by_name(tasks: list[ScheduledTask], context: StylingContext) -> list[ScheduledTask]:
-        def get_name(task: ScheduledTask) -> str:
-            entity = context.get_entity(task.entity_id)
-            assert entity is not None
-            return entity.name
-
-        return sorted(tasks, key=get_name)
+    def sort_by_name(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return sorted(entities, key=lambda e: e.name)
 
     # Create test entities
     entities = [
@@ -425,9 +415,9 @@ def test_user_function_overrides_config() -> None:
 
     @styling.group_tasks(priority=10, formats=["gantt"])
     def custom_grouping(
-        tasks: list[ScheduledTask], _context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        return {"Custom Section": tasks}
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        return {"Custom Section": list(entities)}
 
     # Create test entities
     entities = [
@@ -461,9 +451,9 @@ def test_group_tasks_none_key_no_section() -> None:
 
     @styling.group_tasks(formats=["gantt"])
     def no_grouping(
-        tasks: list[ScheduledTask], _context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        return {None: tasks}
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        return {None: list(entities)}
 
     # Create test entity
     entities = [
@@ -535,15 +525,15 @@ def test_format_filtering_for_organization() -> None:
 
     @styling.group_tasks(formats=["other_format"])
     def wrong_format_grouping(
-        tasks: list[ScheduledTask], _context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        return {"Wrong Format": tasks}
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        return {"Wrong Format": list(entities)}
 
     @styling.group_tasks(formats=["gantt"])
     def correct_format_grouping(
-        tasks: list[ScheduledTask], _context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        return {"Correct Format": tasks}
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        return {"Correct Format": list(entities)}
 
     # Create test entity
     entities = [
@@ -574,9 +564,9 @@ def test_clear_registrations_clears_organization_functions() -> None:
 
     @styling.group_tasks(formats=["gantt"])
     def my_grouping(
-        tasks: list[ScheduledTask], _context: StylingContext
-    ) -> dict[str | None, list[ScheduledTask]]:
-        return {"My Group": tasks}
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> dict[str | None, list[EntityProtocol]]:
+        return {"My Group": list(entities)}
 
     # Clear and verify it's gone
     styling.clear_registrations()

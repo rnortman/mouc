@@ -17,6 +17,7 @@ from .resources import UNASSIGNED_RESOURCE
 from .scheduler import (
     ParallelScheduler,
     ResourceSchedule,
+    ScheduleAnnotations,
     SchedulingConfig,
     Task,
     parse_timeframe,
@@ -605,6 +606,10 @@ class GanttScheduler:
             Mermaid gantt chart syntax as a string
         """
         entities_by_id = {e.id: e for e in self.feature_map.entities}
+
+        # Populate entity annotations with schedule information for use in organization functions
+        self._populate_schedule_annotations(result.tasks, entities_by_id)
+
         theme_css = self._generate_theme_css(result.tasks, entities_by_id)
 
         lines: list[str] = []
@@ -633,8 +638,40 @@ class GanttScheduler:
 
         return "\n".join(lines)
 
+    def _populate_schedule_annotations(
+        self, tasks: list[ScheduledTask], entities_by_id: dict[str, Entity]
+    ) -> None:
+        """Populate entity annotations with schedule information from scheduled tasks.
+
+        This makes schedule information available to organization functions that operate on entities.
+
+        Args:
+            tasks: List of scheduled tasks
+            entities_by_id: Mapping of entity IDs to entity objects
+        """
+        for task in tasks:
+            entity = entities_by_id.get(task.entity_id)
+            if entity:
+                # Create schedule annotation with basic info
+                # (We don't have all the info SchedulingService has, but we have the essentials)
+                entity.annotations["schedule"] = ScheduleAnnotations(
+                    estimated_start=task.start_date,
+                    estimated_end=task.end_date,
+                    computed_deadline=None,  # Not available in gantt flow
+                    computed_priority=None,  # Not available in gantt flow
+                    deadline_violated=False,  # Would need to compute
+                    resource_assignments=[
+                        (r, 1.0) for r in task.resources
+                    ],  # Convert to tuple format
+                    resources_were_computed=False,  # Not tracked here
+                    was_fixed=False,  # Not tracked here
+                )
+
     def _organize_tasks(self, tasks: list[ScheduledTask]) -> dict[str | None, list[ScheduledTask]]:
         """Apply organization pipeline: grouping → sorting.
+
+        Organization functions operate on Entity objects (with schedule annotations populated).
+        This method converts between ScheduledTask and Entity as needed.
 
         Args:
             tasks: List of scheduled tasks to organize
@@ -642,13 +679,24 @@ class GanttScheduler:
         Returns:
             Dict mapping section names (or None) to sorted task lists
         """
+        # Build mapping from entity_id to ScheduledTask for conversion back
+        task_by_entity_id = {task.entity_id: task for task in tasks}
+
+        # Convert to entities for organization
+        entities = [self.feature_map.get_entity_by_id(task.entity_id) for task in tasks]
+        entities = [e for e in entities if e is not None]  # Filter out None
+
         # Step 1: Apply grouping (highest-priority function wins)
-        grouped_tasks = apply_task_grouping(tasks, self.styling_context)
+        grouped_entities = apply_task_grouping(entities, self.styling_context)
 
         # Step 2: Apply sorting within each group (highest-priority function wins)
         sorted_groups: dict[str | None, list[ScheduledTask]] = {}
-        for group_key, group_tasks in grouped_tasks.items():
-            sorted_tasks = apply_task_sorting(group_tasks, self.styling_context)
+        for group_key, group_entities in grouped_entities.items():
+            sorted_entities = apply_task_sorting(group_entities, self.styling_context)
+            # Convert back to ScheduledTask for rendering
+            sorted_tasks = [
+                task_by_entity_id[e.id] for e in sorted_entities if e.id in task_by_entity_id
+            ]
             sorted_groups[group_key] = sorted_tasks
 
         return sorted_groups
