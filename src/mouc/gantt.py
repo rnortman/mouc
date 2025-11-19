@@ -25,6 +25,7 @@ from .scheduler import (
 from .scheduler import ScheduledTask as SchedulerTask
 from .styling import (
     StylingContext,
+    apply_entity_filters,
     apply_task_grouping,
     apply_task_sorting,
     apply_task_styles,
@@ -686,8 +687,11 @@ class GanttScheduler:
         entities = [self.feature_map.get_entity_by_id(task.entity_id) for task in tasks]
         entities = [e for e in entities if e is not None]  # Filter out None
 
+        # Apply entity filters
+        filtered_entities = apply_entity_filters(entities, self.styling_context)
+
         # Step 1: Apply grouping (highest-priority function wins)
-        grouped_entities = apply_task_grouping(entities, self.styling_context)
+        grouped_entities = apply_task_grouping(filtered_entities, self.styling_context)
 
         # Step 2: Apply sorting within each group (highest-priority function wins)
         sorted_groups: dict[str | None, list[ScheduledTask]] = {}

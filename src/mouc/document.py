@@ -169,13 +169,19 @@ class DocumentGenerator:
         """
         warnings: list[str] = []
 
+        # Apply entity filters before checking
+        filtered_entities = cast(
+            list[Entity],
+            styling.apply_entity_filters(self.feature_map.entities, self.backend.styling_context),
+        )
+
         # Build a map of entity IDs to their timeframes
         timeframe_map: dict[str, str | None] = {}
-        for entity in self.feature_map.entities:
+        for entity in filtered_entities:
             timeframe_map[entity.id] = entity.meta.get("timeframe")
 
         # Check each entity's dependencies
-        for entity in self.feature_map.entities:
+        for entity in filtered_entities:
             entity_timeframe = timeframe_map.get(entity.id)
 
             # Skip if entity has no timeframe (unscheduled entities can depend on anything)
@@ -300,8 +306,15 @@ class DocumentGenerator:
         """Generate timeline section grouped by timeframe."""
         all_entities = self.feature_map.entities
 
+        # Apply entity filters before grouping
+        filtered_entities = cast(
+            list[Entity], styling.apply_entity_filters(all_entities, self.backend.styling_context)
+        )
+
         # Group entities by timeframe (with confirmed/inferred separation if configured)
-        timeframe_groups = self._group_entities_by_timeframe(all_entities, self.toc_timeline_config)
+        timeframe_groups = self._group_entities_by_timeframe(
+            filtered_entities, self.toc_timeline_config
+        )
 
         # Separate scheduled from unscheduled
         scheduled_groups = {k: v for k, v in timeframe_groups.items() if k != "Unscheduled"}
@@ -461,10 +474,15 @@ class DocumentGenerator:
         """
         all_entities = self.feature_map.entities
 
+        # Apply entity filters before organization
+        filtered_entities = cast(
+            list[Entity], styling.apply_entity_filters(all_entities, self.backend.styling_context)
+        )
+
         # Handle primary grouping
         if self.organization.primary in ("alpha_by_id", "yaml_order"):
             # Single flat section with all entities
-            sorted_entities = self._get_sorted_entities(all_entities)
+            sorted_entities = self._get_sorted_entities(filtered_entities)
             if self.organization.secondary == "by_timeframe":
                 # Group by timeframe within the flat list
                 timeframe_groups = self._group_entities_by_timeframe(
@@ -488,7 +506,7 @@ class DocumentGenerator:
             return [("Entities", sorted_entities)]
 
         if self.organization.primary == "by_type":
-            type_groups = self._group_entities_by_type(all_entities)
+            type_groups = self._group_entities_by_type(filtered_entities)
             ordered_types = self.organization.entity_type_order
 
             if self.organization.secondary == "by_timeframe":
@@ -517,7 +535,7 @@ class DocumentGenerator:
 
         if self.organization.primary == "by_timeframe":
             timeframe_groups = self._group_entities_by_timeframe(
-                all_entities, self.body_timeline_config
+                filtered_entities, self.body_timeline_config
             )
 
             if self.organization.secondary == "by_type":
@@ -570,7 +588,7 @@ class DocumentGenerator:
             return self._build_timeframe_subsections(timeframe_groups, self.body_timeline_config)
 
         # Default fallback
-        return [("Entities", sorted(all_entities, key=lambda e: e.id))]
+        return [("Entities", sorted(filtered_entities, key=lambda e: e.id))]
 
     def _generate_organized_sections(self) -> None:
         """Generate document body sections based on organization config."""

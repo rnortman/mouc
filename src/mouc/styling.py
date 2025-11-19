@@ -242,6 +242,9 @@ MetadataStylerFunc = Callable[[Entity, StylingContext, dict[str, Any]], dict[str
 GroupTasksFunc = Callable[[Sequence[Entity], StylingContext], dict[str | None, list[Entity]]]
 SortTasksFunc = Callable[[Sequence[Entity], StylingContext], list[Entity]]
 
+# Entity filtering function signature
+FilterEntityFunc = Callable[[Sequence[Entity], StylingContext], list[Entity]]
+
 
 # ============================================================================
 # Internal Registry
@@ -256,6 +259,9 @@ _metadata_stylers: list[tuple[int, list[str] | None, MetadataStylerFunc]] = []
 # Task organization registries
 _group_tasks_funcs: list[tuple[int, list[str] | None, GroupTasksFunc]] = []
 _sort_tasks_funcs: list[tuple[int, list[str] | None, SortTasksFunc]] = []
+
+# Entity filtering registry
+_filter_entity_funcs: list[tuple[int, list[str] | None, FilterEntityFunc]] = []
 
 
 # ============================================================================
@@ -674,6 +680,63 @@ def sort_tasks(
     return decorator(func)
 
 
+@overload
+def filter_entity(func: FilterEntityFunc) -> FilterEntityFunc: ...
+
+
+@overload
+def filter_entity(
+    *, priority: int = 10, formats: list[str] | None = None
+) -> Callable[[FilterEntityFunc], FilterEntityFunc]: ...
+
+
+def filter_entity(
+    func: FilterEntityFunc | None = None,
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+) -> FilterEntityFunc | Callable[[FilterEntityFunc], FilterEntityFunc]:
+    """Register an entity filtering function that works across all output types.
+
+    The function receives a sequence of entities and context, and returns a filtered
+    list of entities. Multiple filters are chained in priority order (lower first).
+
+    Signature: (entities: Sequence[Entity], context: StylingContext) -> list[Entity]
+
+    Args:
+        priority: Execution priority (lower numbers first). Default is 10.
+        formats: Optional list of formats to apply to (e.g., ['gantt', 'markdown']).
+                None means all formats (markdown, docx, graph, gantt).
+
+    Examples:
+        @filter_entity(formats=['gantt'])
+        def filter_completed(entities, context):
+            '''Exclude completed tasks from gantt charts.'''
+            return [e for e in entities if e.meta.get('status') != 'done']
+
+        @filter_entity(priority=5)
+        def filter_by_tags(entities, context):
+            '''Include only entities with specific tags.'''
+            allowed_tags = {'backend', 'frontend'}
+            return [e for e in entities if any(tag in allowed_tags for tag in e.tags)]
+
+        @filter_entity(formats=['markdown', 'docx'])
+        def filter_by_timeframe(entities, context):
+            '''Include only Q1 entities in documents.'''
+            return [e for e in entities if e.meta.get('timeframe', '').startswith('2025-Q1')]
+    """
+
+    def decorator(f: FilterEntityFunc) -> FilterEntityFunc:
+        _filter_entity_funcs.append((priority, formats, f))
+        return f
+
+    if func is None:
+        # Called with arguments: @filter_entity(priority=20)
+        return decorator
+    # Called without arguments: @filter_entity
+    return decorator(func)
+
+
 # ============================================================================
 # Utility Functions
 # ============================================================================
@@ -830,6 +893,7 @@ def clear_registrations() -> None:
     _metadata_stylers.clear()
     _group_tasks_funcs.clear()
     _sort_tasks_funcs.clear()
+    _filter_entity_funcs.clear()
 
 
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
@@ -947,6 +1011,35 @@ def apply_metadata_styles(
             continue
 
         result = styler(entity, context, result)
+
+    return result
+
+
+def apply_entity_filters(entities: Sequence[Entity], context: StylingContext) -> list[Entity]:
+    """Apply all matching entity filters in priority order (lower priority first).
+
+    Filters are chained: each filter's output becomes the next filter's input.
+    This allows complex filtering by composing simple filters.
+
+    Args:
+        entities: Sequence of entities to filter
+        context: Styling context
+
+    Returns:
+        Filtered list of entities
+    """
+    # Sort by priority (lower numbers first - filters chain in order)
+    funcs = sorted(_filter_entity_funcs, key=lambda x: x[0])
+
+    # Chain all matching filters
+    result: list[Entity] = list(entities)
+    for _priority, formats, func in funcs:
+        # Skip if format filter is set and doesn't match
+        if formats is not None and context.output_format not in formats:
+            continue
+
+        # Apply filter (output becomes input for next filter)
+        result = func(result, context)
 
     return result
 
@@ -1155,6 +1248,7 @@ __all__ = [
     "style_metadata",
     "group_tasks",
     "sort_tasks",
+    "filter_entity",
     # Protocols
     "Entity",
     "Link",
@@ -1175,5 +1269,6 @@ __all__ = [
     "apply_metadata_styles",
     "apply_task_grouping",
     "apply_task_sorting",
+    "apply_entity_filters",
     "clear_registrations",
 ]

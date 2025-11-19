@@ -7,6 +7,7 @@ The Mouc styling system allows you to customize the appearance of graph visualiz
 - [Quick Start](#quick-start)
 - [Basic Usage](#basic-usage)
 - [Writing Style Functions](#writing-style-functions)
+  - [Entity Filtering](#entity-filtering)
 - [API Reference](#api-reference)
 - [Examples](#examples)
 - [Best Practices](#best-practices)
@@ -344,6 +345,76 @@ If no task stylers are registered, gantt charts use the default behavior:
 - Tasks with `status: done` are marked with the `done` tag
 - Tasks that are late (past deadline) are marked with the `crit` tag
 - Unassigned tasks are marked with the `active` tag
+
+### Entity Filtering
+
+Entity filtering functions control which entities appear in the output. Filters work across all output types (documents, graphs, and gantt charts) and run before any organization, grouping, or sorting logic:
+
+```python
+@filter_entity
+def filter_incomplete(entities, context):
+    """Only show incomplete tasks."""
+    return [e for e in entities if e.meta.get('status') != 'done']
+
+@filter_entity(formats=['gantt'])
+def filter_q1_only(entities, context):
+    """Only show Q1 items in gantt charts."""
+    return [e for e in entities if e.meta.get('timeframe', '').startswith('2025-Q1')]
+```
+
+#### Filter Chaining
+
+Unlike grouping and sorting (where highest priority wins), **all filters are applied in sequence** in priority order (lower priority first):
+
+```python
+@filter_entity(priority=5)
+def filter_by_type(entities, context):
+    """First, keep only capabilities and user stories."""
+    return [e for e in entities if e.type in ('capability', 'user_story')]
+
+@filter_entity(priority=10)
+def filter_by_priority(entities, context):
+    """Then, keep only high priority items from the filtered set."""
+    return [e for e in entities if e.meta.get('priority', 0) > 5]
+```
+
+In this example, both filters run in sequence:
+1. First filter runs (priority 5): removes outcomes
+2. Second filter runs (priority 10): removes low priority items from the remaining entities
+
+#### Format Targeting
+
+Filters can be targeted to specific output formats:
+
+```python
+@filter_entity(formats=['gantt'])
+def gantt_only_filter(entities, context):
+    """This filter only applies to gantt charts."""
+    return [e for e in entities if e.meta.get('status') != 'done']
+
+@filter_entity(formats=['graph', 'markdown'])
+def doc_and_graph_filter(entities, context):
+    """This filter applies to graphs and markdown, but not gantt."""
+    return [e for e in entities if 'archived' not in e.tags]
+
+@filter_entity()  # No formats = applies to all outputs
+def global_filter(entities, context):
+    """This filter applies to all output types."""
+    return [e for e in entities if e.meta.get('deleted') != True]
+```
+
+#### Pipeline Order
+
+Entity filters run **before** organization, grouping, and sorting:
+
+```
+Feature Map → Filter → Group/Sort → Render
+```
+
+This means:
+- Filtered entities are completely removed from the output
+- TOC and sections only include filtered entities
+- Dependency relationships in graphs only show filtered entities
 
 ## API Reference
 
@@ -788,6 +859,37 @@ def label_styling(entity, context):
         return '[🔥 CRITICAL]'
     return None  # Use default label for non-critical entities
 ```
+
+### Example 9: Entity Filtering
+
+Control which entities appear in output across all formats:
+
+```python
+from mouc.styling import *
+
+@filter_entity(formats=['gantt'])
+def hide_completed_in_gantt(entities, context):
+    """Don't show completed tasks in gantt charts."""
+    return [e for e in entities if e.meta.get('status') != 'done']
+
+@filter_entity(priority=5)
+def filter_by_timeframe(entities, context):
+    """Only show Q1 and Q2 entities."""
+    return [
+        e for e in entities
+        if e.meta.get('timeframe', '').startswith(('2025-Q1', '2025-Q2'))
+    ]
+
+@filter_entity(priority=10)
+def filter_backend_only(entities, context):
+    """Further filter to backend work only (runs after timeframe filter)."""
+    return [e for e in entities if 'backend' in e.tags]
+```
+
+This example demonstrates:
+- Format-specific filtering (gantt only)
+- Chained filters (timeframe → backend)
+- Priority ordering (lower priority runs first)
 
 ## Best Practices
 

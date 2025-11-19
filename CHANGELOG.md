@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Entity filtering: `@filter_entity` decorator works across all outputs (doc, graph, gantt)
 - Gantt organization system: `@group_tasks` and `@sort_tasks` decorators for custom task organization
 - Config-driven gantt grouping: `gantt.group_by` (none, type, resource, timeframe)
 - Config-driven gantt sorting: `gantt.sort_by` (yaml_order, start, end, deadline, name, priority)

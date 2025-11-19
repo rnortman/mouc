@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from . import styling
 
@@ -37,23 +37,29 @@ class GraphGenerator:
         tags: list[str] | None = None,
     ) -> str:
         """Generate a DOT graph based on the specified view."""
+        # Apply entity filters before generating any view
+        base_entities = cast(
+            "list[Entity]",
+            styling.apply_entity_filters(self.feature_map.entities, self.styling_context),
+        )
+
         if view == GraphView.ALL:
-            return self._generate_all()
+            return self._generate_all(base_entities)
         if view == GraphView.CRITICAL_PATH:
             if not target:
                 raise ValueError("Critical path view requires a target")
-            return self._generate_critical_path(target)
+            return self._generate_critical_path(base_entities, target)
         if view == GraphView.FILTERED:
             if not tags:
                 raise ValueError("Filtered view requires tags")
-            return self._generate_filtered(tags)
+            return self._generate_filtered(base_entities, tags)
         if view == GraphView.TIMELINE:
-            return self._generate_timeline()
+            return self._generate_timeline(base_entities)
         if view == GraphView.TIMEFRAME_COLORED:
-            return self._generate_timeframe_colored()
+            return self._generate_timeframe_colored(base_entities)
         raise ValueError(f"Unknown view: {view}")
 
-    def _generate_all(self) -> str:
+    def _generate_all(self, entities: list[Entity]) -> str:
         """Generate a complete graph with all entities."""
         lines = ["digraph FeatureMap {"]
         lines.append("  rankdir=LR;")
@@ -61,14 +67,14 @@ class GraphGenerator:
         lines.append("")
 
         # Add all entities
-        for entity in self.feature_map.entities:
+        for entity in entities:
             node_def = self._format_node(entity)
             lines.append(f"  {node_def}")
         lines.append("")
 
         # Add edges (unblocks direction)
         lines.append("  // Dependencies (unblocks direction)")
-        for entity in self.feature_map.entities:
+        for entity in entities:
             for dep_id in entity.requires:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
@@ -76,7 +82,7 @@ class GraphGenerator:
         lines.append("}")
         return "\n".join(lines)
 
-    def _generate_critical_path(self, target: str) -> str:
+    def _generate_critical_path(self, entities: list[Entity], target: str) -> str:
         """Generate a graph showing only the critical path to a target."""
         # Find all dependencies of the target
         dependencies = self._find_all_dependencies(target)
@@ -99,7 +105,7 @@ class GraphGenerator:
         lines.append("")
 
         # Add edges only for nodes in the critical path (unblocks direction)
-        for entity in self.feature_map.entities:
+        for entity in entities:
             if entity.id not in dependencies:
                 continue
             for dep_id in entity.requires:
@@ -110,12 +116,12 @@ class GraphGenerator:
         lines.append("}")
         return "\n".join(lines)
 
-    def _generate_filtered(self, tags: list[str]) -> str:
+    def _generate_filtered(self, entities: list[Entity], tags: list[str]) -> str:
         """Generate a graph filtered by tags."""
         # Find all entities with matching tags
         matching_ids: set[str] = set()
 
-        for entity in self.feature_map.entities:
+        for entity in entities:
             if any(tag in entity.tags for tag in tags):
                 matching_ids.add(entity.id)
 
@@ -141,7 +147,7 @@ class GraphGenerator:
         lines.append("")
 
         # Add edges (unblocks direction)
-        for entity in self.feature_map.entities:
+        for entity in entities:
             if entity.id not in expanded_ids:
                 continue
             for dep_id in entity.requires:
@@ -253,13 +259,13 @@ class GraphGenerator:
 
         return {"shape": "oval", "fill_color": color_map.get(entity.type, "white")}
 
-    def _generate_timeline(self) -> str:
+    def _generate_timeline(self, entities: list[Entity]) -> str:
         """Generate a timeline graph grouped by timeframe."""
         # Group entities by timeframe
         timeframe_groups: dict[str, list[Entity]] = {}
         unscheduled: list[Entity] = []
 
-        for entity in self.feature_map.entities:
+        for entity in entities:
             timeframe = entity.meta.get("timeframe")
             if timeframe:
                 if timeframe not in timeframe_groups:
@@ -310,7 +316,7 @@ class GraphGenerator:
 
         # Add all edges (dependencies)
         lines.append("  // Dependencies")
-        for entity in self.feature_map.entities:
+        for entity in entities:
             for dep_id in entity.requires:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
@@ -318,13 +324,13 @@ class GraphGenerator:
         lines.append("}")
         return "\n".join(lines)
 
-    def _generate_timeframe_colored(self) -> str:
+    def _generate_timeframe_colored(self, entities: list[Entity]) -> str:
         """Generate a graph where node colors represent timeframes."""
         # Group entities by timeframe
         timeframe_groups: dict[str, list[Entity]] = {}
         unscheduled: list[Entity] = []
 
-        for entity in self.feature_map.entities:
+        for entity in entities:
             timeframe = entity.meta.get("timeframe")
             if timeframe:
                 if timeframe not in timeframe_groups:
@@ -355,7 +361,7 @@ class GraphGenerator:
         lines.append("")
 
         # Add all nodes with colors based on timeframe
-        for entity in self.feature_map.entities:
+        for entity in entities:
             color = entity_colors.get(entity.id, "white")
             node_def = self._format_node(entity, override_style={"fill_color": color})
             lines.append(f"  {node_def}")
@@ -364,7 +370,7 @@ class GraphGenerator:
 
         # Add edges (unblocks direction)
         lines.append("  // Dependencies")
-        for entity in self.feature_map.entities:
+        for entity in entities:
             for dep_id in entity.requires:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
