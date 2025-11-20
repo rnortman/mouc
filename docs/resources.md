@@ -133,6 +133,34 @@ entities:
       resources: ["alice|bob|charlie"]  # Try alice, then bob, then charlie
 ```
 
+### Resource Exclusion
+
+Use `!` prefix to exclude specific resources:
+
+```yaml
+entities:
+  team_task:
+    type: capability
+    name: Team Task
+    description: Task for anyone except bob
+    meta:
+      effort: "1w"
+      resources: ["*|!bob"]  # Any resource except bob
+```
+
+Exclusion syntax can be combined with other specifications:
+
+```yaml
+# All resources except bob and charlie
+resources: ["!bob|!charlie"]
+
+# Team members except alice
+resources: ["backend_team|!alice"]
+
+# Wildcard with multiple exclusions
+resources: ["*|!contractor|!intern"]
+```
+
 ### Group Assignment
 
 Use group aliases defined in mouc_config.yaml:
@@ -175,6 +203,9 @@ When a task becomes eligible for scheduling, the scheduler expands its resource 
 - `"alice|bob|charlie"` → `["alice", "bob", "charlie"]` (preserves order)
 - `"team_a"` → members of team_a group (in group order)
 - `"alice"` → `["alice"]` (explicit assignment)
+- `"!bob"` → all resources except bob
+- `"*|!bob|!charlie"` → all resources except bob and charlie
+- `"team_a|!alice"` → team_a members except alice
 
 ### 2. Availability Filtering
 
@@ -276,10 +307,29 @@ meta:
   resources: ["frontend_team"]  # Expands to alice|bob
 ```
 
+### Groups with Exclusions
+
+Groups can use exclusion syntax in their definitions:
+
+```yaml
+groups:
+  # All resources except contractors
+  full_time_team:
+    - "*"
+    - "!contractor"
+
+  # Backend team except alice
+  backend_without_alice:
+    - charlie
+    - david
+    - "!alice"  # Redundant but explicit
+```
+
 Groups are especially useful for:
 - Team-based assignment
 - Skill-based pools (e.g., "database_experts")
 - Rotating assignments (first available team member)
+- Excluding specific resources from larger sets
 
 ## Examples
 

@@ -54,11 +54,21 @@ class ResourceConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_group_members(self) -> "ResourceConfig":
-        """Ensure group members reference defined resources."""
+        """Ensure group members reference defined resources or valid exclusions."""
         resource_names = {r.name for r in self.resources}
         for group_name, members in self.groups.items():
             for member in members:
-                if member not in resource_names:
+                # Skip wildcard
+                if member == "*":
+                    continue
+                # Handle exclusion syntax
+                if member.startswith("!"):
+                    actual_name = member[1:]
+                    if actual_name not in resource_names:
+                        raise ValueError(
+                            f"Group '{group_name}' excludes undefined resource '{actual_name}'"
+                        )
+                elif member not in resource_names:
                     raise ValueError(
                         f"Group '{group_name}' references undefined resource '{member}'"
                     )
@@ -98,8 +108,15 @@ class ResourceConfig(BaseModel):
         return periods
 
     def expand_group(self, group_name: str) -> list[str]:
-        """Expand a group alias to its member list (preserves order)."""
-        return self.groups.get(group_name, [])
+        """Expand a group alias to its member list, handling exclusions (preserves order)."""
+        members = self.groups.get(group_name, [])
+        if not members:
+            return []
+
+        # Use expand_resource_spec to handle exclusions in group definitions
+        # Convert list to pipe-separated string
+        spec = "|".join(members)
+        return self.expand_resource_spec(spec)
 
     def expand_resource_spec(self, spec: str | list[str]) -> list[str]:
         """Expand a resource specification to an ordered list of resource names.
@@ -111,6 +128,9 @@ class ResourceConfig(BaseModel):
                 - "team_a" -> expand group alias
                 - ["john", "mary"] -> use as-is (preserves order)
                 - "" or [] -> empty list (no auto-assignment)
+                - "!john" -> all resources except john
+                - "*|!john|!mary" -> all resources except john and mary
+                - "team_a|!john" -> team_a members except john
 
         Returns:
             Ordered list of resource names
@@ -121,19 +141,43 @@ class ResourceConfig(BaseModel):
         if not spec or spec == "":
             return []
 
-        if spec == "*":
-            return self.get_resource_order()
+        # Parse spec into parts separated by |
+        parts = [s.strip() for s in spec.split("|")] if "|" in spec else [spec]
 
-        # Check if it's a group alias
-        if spec in self.groups:
-            return self.groups[spec]
+        # Separate inclusions and exclusions
+        inclusions: list[str] = []
+        exclusions: list[str] = []
+        for part in parts:
+            if part.startswith("!"):
+                exclusions.append(part[1:])  # Remove ! prefix
+            else:
+                inclusions.append(part)
 
-        # Check if it contains | separator
-        if "|" in spec:
-            return [s.strip() for s in spec.split("|")]
+        # Build the result set starting from inclusions
+        result: list[str] = []
 
-        # Single resource name
-        return [spec]
+        # If no inclusions specified, start with all resources
+        if not inclusions:
+            result = self.get_resource_order()
+        else:
+            # Process each inclusion
+            for inclusion in inclusions:
+                if inclusion == "*":
+                    result.extend(self.get_resource_order())
+                elif inclusion in self.groups:
+                    result.extend(self.groups[inclusion])
+                else:
+                    result.append(inclusion)
+
+        # Remove duplicates while preserving order
+        seen: set[str] = set()
+        result = [r for r in result if not (r in seen or seen.add(r))]  # type: ignore
+
+        # Apply exclusions
+        if exclusions:
+            result = [r for r in result if r not in exclusions]
+
+        return result
 
 
 def create_default_config() -> ResourceConfig:

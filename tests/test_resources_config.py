@@ -193,3 +193,206 @@ def test_create_default_config():
     assert config.resources[0].name == "unassigned"
     assert len(config.resources[0].dns_periods) == 0
     assert len(config.groups) == 0
+
+
+def test_expand_resource_spec_simple_exclusion():
+    """Test simple exclusion: !john means all resources except john."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("!bob")
+    assert result == ["alice", "charlie"]
+
+
+def test_expand_resource_spec_wildcard_with_exclusion():
+    """Test wildcard with exclusions: *|!john|!mary."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("*|!bob|!charlie")
+    assert result == ["alice", "dave"]
+
+
+def test_expand_resource_spec_group_with_exclusion():
+    """Test group expansion with exclusion: team_a|!john."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ],
+        groups={"team_a": ["alice", "bob", "charlie"]},
+    )
+
+    result = config.expand_resource_spec("team_a|!bob")
+    assert result == ["alice", "charlie"]
+
+
+def test_expand_resource_spec_mixed_inclusion_exclusion():
+    """Test mixed inclusions and exclusions: alice|bob|!john."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ]
+    )
+
+    # Include alice and bob, exclude charlie (no effect since charlie not included)
+    result = config.expand_resource_spec("alice|bob|!charlie")
+    assert result == ["alice", "bob"]
+
+
+def test_expand_resource_spec_multiple_exclusions():
+    """Test multiple exclusions."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+            ResourceDefinition(name="eve", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("!bob|!dave|!eve")
+    assert result == ["alice", "charlie"]
+
+
+def test_expand_resource_spec_exclusion_preserves_order():
+    """Test that exclusions preserve original order."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("*|!bob")
+    assert result == ["alice", "charlie", "dave"]
+
+
+def test_expand_resource_spec_duplicate_removal():
+    """Test that duplicates are removed while preserving order."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("alice|bob|alice|charlie|bob")
+    assert result == ["alice", "bob", "charlie"]
+
+
+def test_expand_resource_spec_group_with_multiple_exclusions():
+    """Test group with multiple exclusions."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+        ],
+        groups={"team_a": ["alice", "bob", "charlie", "dave"]},
+    )
+
+    result = config.expand_resource_spec("team_a|!bob|!dave")
+    assert result == ["alice", "charlie"]
+
+
+def test_expand_resource_spec_exclude_nonexistent():
+    """Test excluding a resource that doesn't exist."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+        ]
+    )
+
+    # Excluding nonexistent resource should not cause error
+    result = config.expand_resource_spec("*|!charlie")
+    assert result == ["alice", "bob"]
+
+
+def test_expand_resource_spec_exclude_all():
+    """Test excluding all resources results in empty list."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+        ]
+    )
+
+    result = config.expand_resource_spec("!alice|!bob")
+    assert result == []
+
+
+def test_expand_group_with_exclusion_in_definition():
+    """Test group definition that includes exclusions."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+        ],
+        groups={"team_without_bob": ["*", "!bob"]},
+    )
+
+    result = config.expand_group("team_without_bob")
+    assert result == ["alice", "charlie", "dave"]
+
+
+def test_expand_group_with_wildcard_and_exclusions():
+    """Test group with wildcard and multiple exclusions."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="contractor", dns_periods=[]),
+        ],
+        groups={"full_team": ["*", "!contractor"]},
+    )
+
+    result = config.expand_group("full_team")
+    assert result == ["alice", "bob", "charlie"]
+
+
+def test_group_validation_with_exclusion():
+    """Test that group validation handles exclusion syntax."""
+    # Valid: excluding a defined resource
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+        ],
+        groups={"team_a": ["*", "!bob"]},
+    )
+    assert config.expand_group("team_a") == ["alice"]
+
+
+def test_group_validation_undefined_exclusion():
+    """Test that groups can't exclude undefined resources."""
+    with pytest.raises(ValidationError, match="excludes undefined resource"):
+        ResourceConfig(
+            resources=[
+                ResourceDefinition(name="alice", dns_periods=[]),
+            ],
+            groups={"team_a": ["*", "!bob"]},  # bob not defined
+        )
