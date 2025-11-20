@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2025-11-20
+
+### Fixed
+- Resource exclusion syntax now works in gantt charts (consolidated duplicate resource parsing logic)
+- Group expansion with exclusions now works correctly in resource specs
+
 ## [0.4.0] - 2025-11-20
 
 ### Added

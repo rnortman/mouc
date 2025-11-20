@@ -273,13 +273,21 @@ class SchedulerInputValidator:
                 return ([], self.resource_config.default_resource, True)
             return ([(UNASSIGNED_RESOURCE, 1.0)], None, False)
 
-        # Check for auto-assignment specs
-        if len(resources_raw) == 1:
-            spec_str = str(resources_raw[0])
-            if spec_str == "*" or "|" in spec_str:
+        # Check for auto-assignment specs when we have resource config
+        if self.resource_config and len(resources_raw) == 1 and isinstance(resources_raw[0], str):
+            spec_str = resources_raw[0]
+            # Only treat as spec if it's a wildcard, contains pipes, starts with !, or is a group
+            is_spec = (
+                spec_str == "*"
+                or "|" in spec_str
+                or spec_str.startswith("!")
+                or spec_str in self.resource_config.groups
+            )
+            if is_spec:
+                logger.debug(f"      parse_resources: treating '{spec_str}' as spec for expansion")
                 return ([], spec_str, True)
 
-        # Parse concrete resources
+        # Parse concrete resources (no resource config or complex allocations)
         result: list[tuple[str, float]] = []
         for resource_str in resources_raw:
             if isinstance(resource_str, tuple):
@@ -295,8 +303,6 @@ class SchedulerInputValidator:
                 result.append((name, capacity))
             else:
                 spec_str = str(resource_str).strip()
-                if self.resource_config and spec_str in self.resource_config.groups:
-                    return ([], spec_str, True)
                 result.append((spec_str, 1.0))
 
         return (result, None, False)

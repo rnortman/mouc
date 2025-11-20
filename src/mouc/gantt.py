@@ -13,16 +13,18 @@ from pydantic import BaseModel, Field
 
 from .backends.base import AnchorFunction
 from .builtin_gantt import register_builtin_organization
-from .resources import UNASSIGNED_RESOURCE
 from .scheduler import (
     ParallelScheduler,
     ResourceSchedule,
     ScheduleAnnotations,
+    SchedulerInputValidator,
     SchedulingConfig,
     Task,
     parse_timeframe,
 )
-from .scheduler import ScheduledTask as SchedulerTask
+from .scheduler import (
+    ScheduledTask as SchedulerTask,
+)
 from .styling import (
     StylingContext,
     apply_entity_filters,
@@ -129,6 +131,9 @@ class GanttScheduler:
         self.global_dns_periods = global_dns_periods or []
         self.gantt_config = gantt_config or GanttConfig()
 
+        # Create resource parser
+        self.validator = SchedulerInputValidator(resource_config=self.resource_config)
+
         # Calculate start_date if not provided
         if start_date is None:
             self.start_date = self._calculate_chart_start_date()
@@ -174,7 +179,7 @@ class GanttScheduler:
 
     def _create_fixed_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
         """Create a Task object for a fixed-date entity."""
-        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
         start, end = self._schedule_fixed_task(entity)
 
         return Task(
@@ -215,7 +220,7 @@ class GanttScheduler:
 
     def _create_regular_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
         """Create a Task object for a regular (non-fixed) entity."""
-        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
         duration = self._calculate_duration(entity)
         start_after, end_before = self._extract_constraints(gantt_meta)
 
@@ -377,7 +382,7 @@ class GanttScheduler:
             return start + timedelta(days=duration)
 
         # Parse resources from metadata
-        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
 
         # If wildcard or no specific resources, fall back to naive calculation
         # (We could be smarter here and check all resources, but that's complex)
@@ -408,7 +413,7 @@ class GanttScheduler:
         """Calculate duration in days from effort and resource allocation."""
         gantt_meta = self._get_gantt_meta(entity)
         effort_days = self._parse_effort(gantt_meta.effort)
-        resources, resource_spec = self._parse_resources(gantt_meta.resources)
+        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
 
         # Total capacity = sum of resource allocations
         # If resource_spec is set (wildcard/group), assume 1.0 capacity for duration calc
@@ -452,69 +457,6 @@ class GanttScheduler:
         if unit == "m":
             return num * 30  # 30 calendar days per month (approximation)
         return 7.0
-
-    def _parse_resources(
-        self, resources_raw: list[str | tuple[str, float]]
-    ) -> tuple[list[tuple[str, float]], str | None]:
-        """Parse resources list to (name, capacity) tuples and extract resource spec.
-
-        Supported formats:
-        - ["alice"] -> ([("alice", 1.0)], None)
-        - ["alice", "bob"] -> ([("alice", 1.0), ("bob", 1.0)], None)
-        - ["alice:0.5"] -> ([("alice", 0.5)], None)
-        - ["*"] -> ([], "*")  - wildcard, needs auto-assignment
-        - ["john|mary|susan"] -> ([], "john|mary|susan") - multi-resource, needs auto-assignment
-        - [] -> ([], None) - empty, unassigned (becomes [("unassigned", 1.0)])
-
-        Returns:
-            Tuple of (resource list, resource_spec for auto-assignment)
-            If resource_spec is not None, resource list will be empty and assignment is deferred
-        """
-        if not resources_raw:
-            # Empty resources = use default_resource from config if available
-            if self.resource_config and self.resource_config.default_resource:
-                # Use configured default resource spec for auto-assignment
-                return ([], self.resource_config.default_resource)
-            # Fall back to UNASSIGNED_RESOURCE
-            return ([(UNASSIGNED_RESOURCE, 1.0)], None)
-
-        # Check for special specs that need auto-assignment (only wildcards and pipe-lists)
-        if len(resources_raw) == 1:
-            spec_str = str(resources_raw[0])
-            # Only treat "*" or pipe-separated lists as auto-assignment specs
-            if spec_str == "*" or "|" in spec_str:
-                # Wildcard or pipe-separated list
-                return ([], spec_str)
-
-        # Parse as concrete resources
-        result: list[tuple[str, float]] = []
-        for resource_str in resources_raw:
-            if isinstance(resource_str, tuple):
-                # Handle tuple format: ("alice", 0.5)
-                name_raw: str
-                capacity_raw: float
-                name_raw, capacity_raw = resource_str
-                result.append((name_raw, capacity_raw))
-            elif ":" in str(resource_str):
-                # Handle string format: "alice:0.5"
-                parts = str(resource_str).split(":", 1)
-                name = parts[0].strip()
-                try:
-                    capacity = float(parts[1].strip())
-                except ValueError:
-                    capacity = 1.0
-                result.append((name, capacity))
-            else:
-                # Handle plain name: "alice"
-                # Check if this could be a group alias (needs resource config to determine)
-                # For now, treat it as a concrete resource
-                spec_str = str(resource_str).strip()
-                # If resource_config exists and this is a group, return as spec
-                if self.resource_config and spec_str in self.resource_config.groups:
-                    return ([], spec_str)
-                result.append((spec_str, 1.0))
-
-        return (result, None)
 
     def _parse_date(self, date_str: str | date) -> date | None:
         """Parse a date string or date object to date object.

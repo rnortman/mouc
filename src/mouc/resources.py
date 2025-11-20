@@ -165,7 +165,7 @@ class ResourceConfig(BaseModel):
                 if inclusion == "*":
                     result.extend(self.get_resource_order())
                 elif inclusion in self.groups:
-                    result.extend(self.groups[inclusion])
+                    result.extend(self.expand_group(inclusion))
                 else:
                     result.append(inclusion)
 
