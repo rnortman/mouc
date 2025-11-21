@@ -789,7 +789,7 @@ class ParallelScheduler:
         These tasks are treated as already scheduled:
         - Added to result immediately
         - Removed from self.tasks (won't be scheduled)
-        - No DNS period checks applied
+        - DNS periods ARE applied when computing end_date from start_date + duration
 
         Returns:
             List of fixed scheduled tasks
@@ -807,7 +807,8 @@ class ParallelScheduler:
                 end = task.end_on
             elif task.start_on is not None:
                 start = task.start_on
-                end = start + timedelta(days=task.duration_days)
+                # Calculate DNS-aware end date for tasks with fixed start_date
+                end = self._calculate_dns_aware_end_date(task, start)
             else:
                 assert task.end_on is not None
                 end = task.end_on
@@ -828,6 +829,44 @@ class ParallelScheduler:
             del self.tasks[fixed_task.task_id]
 
         return fixed_results
+
+    def _calculate_dns_aware_end_date(self, task: Task, start: date) -> date:
+        """Calculate end date accounting for DNS periods of assigned resources.
+
+        Args:
+            task: The task with assigned resources
+            start: Fixed start date
+
+        Returns:
+            End date accounting for DNS periods (or naive end date if no resources/config)
+        """
+        # If no resource config, fall back to naive calculation
+        if self.resource_config is None:
+            return start + timedelta(days=task.duration_days)
+
+        # If no specific resources assigned, fall back to naive calculation
+        if not task.resources:
+            return start + timedelta(days=task.duration_days)
+
+        # Calculate DNS-aware completion time for each resource
+        max_end = start
+        for resource_name, _ in task.resources:
+            # Get DNS periods for this resource (including global DNS periods)
+            dns_periods = self.resource_config.get_dns_periods(
+                resource_name, self.global_dns_periods
+            )
+
+            # Create a ResourceSchedule to calculate completion time
+            resource_schedule = ResourceSchedule(
+                unavailable_periods=dns_periods,
+                resource_name=resource_name,
+            )
+
+            # Calculate when this resource would complete the task
+            completion = resource_schedule.calculate_completion_time(start, task.duration_days)
+            max_end = max(max_end, completion)
+
+        return max_end
 
     def _topological_sort(self) -> list[str]:
         """Compute topological ordering of tasks.

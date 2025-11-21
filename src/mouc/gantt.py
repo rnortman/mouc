@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from contextlib import suppress
 from dataclasses import dataclass, field
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -15,7 +15,6 @@ from .backends.base import AnchorFunction
 from .builtin_gantt import register_builtin_organization
 from .scheduler import (
     ParallelScheduler,
-    ResourceSchedule,
     ScheduleAnnotations,
     SchedulerInputValidator,
     SchedulingConfig,
@@ -178,13 +177,25 @@ class GanttScheduler:
         return GanttMetadata(**entity.meta)
 
     def _create_fixed_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
-        """Create a Task object for a fixed-date entity."""
+        """Create a Task object for a fixed-date entity.
+
+        Note: When only start_date is provided, we set start_on but NOT end_on,
+        allowing ParallelScheduler to compute DNS-aware end dates.
+        """
         resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
-        start, end = self._schedule_fixed_task(entity)
+
+        start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
+        end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
+
+        # If both dates specified, duration is the span between them
+        if start is not None and end is not None:
+            duration = (end - start).days
+        else:
+            duration = self._calculate_duration(entity)
 
         return Task(
             id=entity.id,
-            duration_days=(end - start).days,
+            duration_days=duration,
             resources=resources,
             dependencies=list(entity.requires),
             start_on=start,
@@ -329,85 +340,6 @@ class GanttScheduler:
             result.warnings.append(str(e))
 
         return result
-
-    def _schedule_fixed_task(self, entity: Entity) -> tuple[date, date]:
-        """Schedule a task with fixed start_date and/or end_date.
-
-        Args:
-            entity: The entity to schedule
-
-        Returns:
-            Tuple of (start_date, end_date)
-        """
-        gantt_meta = self._get_gantt_meta(entity)
-
-        start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
-        end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
-
-        # If both are specified, use them
-        if start is not None and end is not None:
-            return (start, end)
-
-        duration = self._calculate_duration(entity)
-
-        # If only start_date is specified, compute end_date from effort
-        if start is not None:
-            end = self._calculate_dns_aware_end_date(gantt_meta, start, duration)
-            return (start, end)
-
-        # If only end_date is specified, compute start_date from effort
-        if end is not None:
-            # For backward calculation, use naive calculation for simplicity
-            start = end - timedelta(days=duration)
-            return (start, end)
-
-        # Shouldn't reach here
-        raise ValueError(f"Entity {entity.id} has neither start_date nor end_date")
-
-    def _calculate_dns_aware_end_date(
-        self, gantt_meta: GanttMetadata, start: date, duration: float
-    ) -> date:
-        """Calculate end date accounting for DNS periods of assigned resources.
-
-        Args:
-            gantt_meta: Validated metadata for the entity
-            start: Fixed start date
-            duration: Task duration in days
-
-        Returns:
-            End date accounting for DNS periods (or naive end date if no resources/config)
-        """
-        # If no resource config, fall back to naive calculation
-        if self.resource_config is None:
-            return start + timedelta(days=duration)
-
-        # Parse resources from metadata
-        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
-
-        # If wildcard or no specific resources, fall back to naive calculation
-        # (We could be smarter here and check all resources, but that's complex)
-        if resource_spec or not resources:
-            return start + timedelta(days=duration)
-
-        # Calculate DNS-aware completion time for each resource
-        max_end = start
-        for resource_name, _ in resources:
-            # Get DNS periods for this resource (including global DNS periods)
-            dns_periods = self.resource_config.get_dns_periods(
-                resource_name, self.global_dns_periods
-            )
-
-            # Create a ResourceSchedule to calculate completion time
-            resource_schedule = ResourceSchedule(
-                unavailable_periods=dns_periods,
-                resource_name=resource_name,
-            )
-
-            # Calculate when this resource would complete the task
-            completion = resource_schedule.calculate_completion_time(start, duration)
-            max_end = max(max_end, completion)
-
-        return max_end
 
     def _calculate_duration(self, entity: Entity) -> float:
         """Calculate duration in days from effort and resource allocation."""
