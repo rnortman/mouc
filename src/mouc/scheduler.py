@@ -994,7 +994,7 @@ class ParallelScheduler:
             if deadline and deadline != date.max:
                 slack = (deadline - current_time).days
                 duration = self.tasks[task_id].duration_days
-                cr = slack / max(duration, 0.1)  # Avoid division by zero
+                cr = slack / max(duration, 1.0)  # Avoid division by zero
                 crs.append(cr)
 
         # No deadline tasks left - use fallback
@@ -1034,7 +1034,7 @@ class ParallelScheduler:
         deadline = latest_dates.get(task_id)
         if deadline and deadline != date.max:
             slack = (deadline - current_time).days
-            cr = slack / max(task.duration_days, 0.1)
+            cr = slack / max(task.duration_days, 1.0)
         else:
             cr = default_cr
 
@@ -1278,7 +1278,7 @@ class ParallelScheduler:
                     # Calculate CR
                     if deadline and deadline != date.max:
                         slack = (deadline - current_time).days
-                        cr = slack / max(task.duration_days, 0.1)
+                        cr = slack / max(task.duration_days, 1.0)
                         cr_str = f"{cr:.2f}"
                     else:
                         cr_str = f"{default_cr:.2f} (default)"
@@ -1301,7 +1301,7 @@ class ParallelScheduler:
                 deadline = latest_dates.get(task_id)
                 if deadline and deadline != date.max:
                     slack = (deadline - current_time).days
-                    cr = slack / max(task.duration_days, 0.1)
+                    cr = slack / max(task.duration_days, 1.0)
                     cr_str = f"{cr:.2f}"
                 else:
                     cr_str = f"{default_cr:.2f} (default)"

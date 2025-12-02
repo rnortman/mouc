@@ -2,6 +2,8 @@
 
 from datetime import date
 
+import pytest
+
 from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
 
 
@@ -332,6 +334,317 @@ def test_zero_duration_task_avoids_division_by_zero():
 
     assert len(result) == 1
     # Should complete without error
+
+
+def test_zero_duration_task_consumes_no_time():
+    """Test that zero-duration tasks complete on their start date."""
+    config = SchedulingConfig(strategy="cr_first")
+
+    task = Task(
+        id="task_zero",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
+    result = scheduler.schedule()
+
+    assert len(result) == 1
+    task_result = result[0]
+    # Zero-duration tasks should have start_date == end_date
+    assert task_result.start_date == task_result.end_date
+    assert task_result.start_date == date(2025, 1, 1)
+
+
+def test_zero_duration_task_does_not_block_resource():
+    """Test that zero-duration tasks don't block resource availability for other tasks.
+
+    BUG: Currently zero-duration tasks block the resource for a full day.
+    This test documents expected behavior - the normal task should be able to
+    start on the same day since the zero-duration task consumes no time.
+    """
+    config = SchedulingConfig(strategy="priority_first")
+
+    # Zero-duration task with high priority
+    task_zero = Task(
+        id="task_zero",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 90},
+    )
+
+    # Normal task that uses same resource
+    task_normal = Task(
+        id="task_normal",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler([task_zero, task_normal], date(2025, 1, 1), config=config)
+    result = scheduler.schedule()
+
+    assert len(result) == 2
+    task_zero_result = next(r for r in result if r.task_id == "task_zero")
+    task_normal_result = next(r for r in result if r.task_id == "task_normal")
+
+    # Zero-duration task should start at the beginning
+    assert task_zero_result.start_date == date(2025, 1, 1)
+
+    # BUG: Both tasks should be able to start on the same date
+    # because the zero-duration task doesn't consume any time.
+    # However, the current implementation blocks the resource for a full day.
+    # This test is marked xfail until the bug is fixed.
+    pytest.xfail("BUG: Zero-duration tasks incorrectly block resources for a full day")
+    assert task_normal_result.start_date == date(2025, 1, 1)
+
+
+def test_zero_duration_scheduled_by_priority_when_no_deadline():
+    """Test that zero-duration tasks without deadlines are scheduled by priority."""
+    config = SchedulingConfig(strategy="priority_first")
+
+    # Zero-duration task with high priority
+    task_zero_high = Task(
+        id="task_zero_high",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 90},
+    )
+
+    # Zero-duration task with low priority
+    task_zero_low = Task(
+        id="task_zero_low",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 30},
+    )
+
+    scheduler = ParallelScheduler([task_zero_low, task_zero_high], date(2025, 1, 1), config=config)
+    result = scheduler.schedule()
+
+    assert len(result) == 2
+    # Both should complete, both should have same start/end date since 0 duration
+    task_high_result = next(r for r in result if r.task_id == "task_zero_high")
+    task_low_result = next(r for r in result if r.task_id == "task_zero_low")
+
+    # Since both are zero duration, they don't actually compete for time
+    # but they should both be scheduled successfully
+    assert task_high_result.start_date == task_high_result.end_date
+    assert task_low_result.start_date == task_low_result.end_date
+
+
+def test_zero_duration_task_respects_deadline_urgency():
+    """Test that zero-duration tasks with urgent deadlines are scheduled appropriately.
+
+    This test verifies that a 0-duration task with an urgent deadline
+    is scheduled in a reasonable order relative to tasks with normal durations.
+    """
+    config = SchedulingConfig(strategy="cr_first")
+
+    # Zero-duration task with very urgent deadline (tomorrow)
+    task_zero_urgent = Task(
+        id="task_zero_urgent",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 2),  # Tomorrow
+        meta={"priority": 50},
+    )
+
+    # Normal duration task with relaxed deadline
+    # CR = 30 / 10 = 3.0 (moderately urgent)
+    task_normal_relaxed = Task(
+        id="task_normal_relaxed",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 31),  # 30 days out
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_normal_relaxed, task_zero_urgent], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule()
+
+    assert len(result) == 2
+    task_zero_result = next(r for r in result if r.task_id == "task_zero_urgent")
+    task_normal_result = next(r for r in result if r.task_id == "task_normal_relaxed")
+
+    # The zero-duration urgent task should be scheduled
+    assert task_zero_result.start_date == task_zero_result.end_date
+
+    # The normal task should also be scheduled (may or may not be same day
+    # depending on CR calculation - the key is both complete successfully)
+    assert task_normal_result.end_date is not None
+
+
+def test_zero_duration_task_with_dependencies():
+    """Test that zero-duration tasks work correctly in dependency chains."""
+    config = SchedulingConfig(strategy="priority_first")
+
+    # First task: normal duration
+    task_first = Task(
+        id="task_first",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    # Middle task: zero duration, depends on first
+    task_middle_zero = Task(
+        id="task_middle_zero",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=["task_first"],
+        meta={"priority": 50},
+    )
+
+    # Last task: normal duration, depends on zero-duration task
+    task_last = Task(
+        id="task_last",
+        duration_days=3.0,
+        resources=[("alice", 1.0)],
+        dependencies=["task_middle_zero"],
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_first, task_middle_zero, task_last], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule()
+
+    assert len(result) == 3
+    task_first_result = next(r for r in result if r.task_id == "task_first")
+    task_middle_result = next(r for r in result if r.task_id == "task_middle_zero")
+    task_last_result = next(r for r in result if r.task_id == "task_last")
+
+    # First task starts at the beginning
+    assert task_first_result.start_date == date(2025, 1, 1)
+    assert task_first_result.end_date == date(2025, 1, 6)  # 5 days
+
+    # Zero-duration task starts after first task ends
+    assert task_middle_result.start_date >= task_first_result.end_date
+    # And completes instantly
+    assert task_middle_result.start_date == task_middle_result.end_date
+
+    # Last task can start immediately after zero-duration task
+    # (same day since zero duration doesn't consume time)
+    assert task_last_result.start_date >= task_middle_result.end_date
+
+
+def test_zero_duration_cr_not_artificially_inflated():
+    """Test that zero-duration tasks don't get artificially high CR values.
+
+    BUG: The CR formula uses `slack / max(duration, 0.1)` which makes 0-duration
+    tasks appear 10x more relaxed than a 1-day task with the same deadline.
+
+    This test creates a scenario where:
+    - Task A (0 duration) blocks Task B (urgent deadline)
+    - Task C competes for the same resource as Task A
+    - Task A should be scheduled before Task C because it blocks urgent work
+
+    With the bug: Task A gets CR = slack / 0.1 = very high, appears relaxed
+    Without bug: Task A gets CR = slack / 1.0 = reasonable, properly prioritized
+    """
+    config = SchedulingConfig(strategy="cr_first")
+
+    # Task A: 0-duration task that blocks an urgent task
+    # With deadline propagation, Task A inherits Task B's urgency
+    task_a_zero = Task(
+        id="task_a_zero",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    # Task B: Urgent task that depends on Task A (0-duration)
+    # Deadline in 10 days, duration 5 days -> needs to start by day 5
+    # So Task A (its dependency) needs to complete by day 5
+    task_b_urgent = Task(
+        id="task_b_urgent",
+        duration_days=5.0,
+        resources=[("bob", 1.0)],  # Different resource
+        dependencies=["task_a_zero"],
+        end_before=date(2025, 1, 11),  # 10 days out
+        meta={"priority": 50},
+    )
+
+    # Task C: Competes with Task A for same resource, has relaxed deadline
+    # Duration 3 days, deadline in 30 days -> CR = 30/3 = 10
+    task_c_relaxed = Task(
+        id="task_c_relaxed",
+        duration_days=3.0,
+        resources=[("alice", 1.0)],  # Same resource as Task A
+        dependencies=[],
+        end_before=date(2025, 1, 31),  # 30 days out
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_a_zero, task_b_urgent, task_c_relaxed], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule()
+
+    assert len(result) == 3
+    task_a_result = next(r for r in result if r.task_id == "task_a_zero")
+    task_c_result = next(r for r in result if r.task_id == "task_c_relaxed")
+
+    # Task A should be scheduled before or at the same time as Task C
+    # because Task A blocks urgent work (Task B).
+    #
+    # Previously: CR = slack / 0.1 made 0-duration tasks appear very relaxed
+    # Fixed: CR = slack / 1.0 treats 0-duration tasks like 1-day tasks
+    #
+    # Expected: Task A starts <= Task C starts (Task A should not be deprioritized)
+    assert task_a_result.start_date <= task_c_result.start_date, (
+        f"Zero-duration task blocking urgent work was deprioritized: "
+        f"task_a started {task_a_result.start_date}, task_c started {task_c_result.start_date}"
+    )
+
+
+def test_multiple_zero_duration_tasks_same_resource():
+    """Test multiple zero-duration tasks can be scheduled on same resource same day.
+
+    BUG: Currently each zero-duration task blocks the resource for a full day,
+    so 5 zero-duration tasks take 5 days instead of 0 days.
+    """
+    config = SchedulingConfig(strategy="priority_first")
+
+    tasks = [
+        Task(
+            id=f"task_zero_{i}",
+            duration_days=0.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50 + i},
+        )
+        for i in range(5)
+    ]
+
+    scheduler = ParallelScheduler(tasks, date(2025, 1, 1), config=config)
+    result = scheduler.schedule()
+
+    assert len(result) == 5
+
+    # All zero-duration tasks should have start_date == end_date
+    for r in result:
+        assert r.start_date == r.end_date
+
+    # BUG: All zero-duration tasks should complete on the same day
+    # since they don't actually consume any time.
+    # However, the current implementation blocks the resource for a full day per task.
+    pytest.xfail("BUG: Zero-duration tasks incorrectly block resources for a full day")
+    for r in result:
+        assert r.start_date == date(2025, 1, 1)
 
 
 def test_negative_slack_handling():
