@@ -1,8 +1,6 @@
 """Tests for priority and critical ratio scheduling."""
 
-from datetime import date
-
-import pytest
+from datetime import date, timedelta
 
 from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
 
@@ -359,19 +357,18 @@ def test_zero_duration_task_consumes_no_time():
 
 
 def test_zero_duration_task_does_not_block_resource():
-    """Test that zero-duration tasks don't block resource availability for other tasks.
+    """Test that zero-duration tasks (milestones) don't block resource availability.
 
-    BUG: Currently zero-duration tasks block the resource for a full day.
-    This test documents expected behavior - the normal task should be able to
-    start on the same day since the zero-duration task consumes no time.
+    Zero-duration tasks are treated as milestones - they complete instantly without
+    consuming any resource time. Other tasks can start on the same day.
     """
     config = SchedulingConfig(strategy="priority_first")
 
-    # Zero-duration task with high priority
+    # Zero-duration task (milestone) - even if resources are specified, they're ignored
     task_zero = Task(
         id="task_zero",
         duration_days=0.0,
-        resources=[("alice", 1.0)],
+        resources=[("alice", 1.0)],  # Will be ignored for milestones
         dependencies=[],
         meta={"priority": 90},
     )
@@ -392,14 +389,12 @@ def test_zero_duration_task_does_not_block_resource():
     task_zero_result = next(r for r in result if r.task_id == "task_zero")
     task_normal_result = next(r for r in result if r.task_id == "task_normal")
 
-    # Zero-duration task should start at the beginning
+    # Zero-duration task should be a milestone with no resources
     assert task_zero_result.start_date == date(2025, 1, 1)
+    assert task_zero_result.end_date == date(2025, 1, 1)
+    assert task_zero_result.resources == []  # Milestones have no resource assignment
 
-    # BUG: Both tasks should be able to start on the same date
-    # because the zero-duration task doesn't consume any time.
-    # However, the current implementation blocks the resource for a full day.
-    # This test is marked xfail until the bug is fixed.
-    pytest.xfail("BUG: Zero-duration tasks incorrectly block resources for a full day")
+    # Normal task should also start on the same day - milestones don't block
     assert task_normal_result.start_date == date(2025, 1, 1)
 
 
@@ -612,10 +607,10 @@ def test_zero_duration_cr_not_artificially_inflated():
 
 
 def test_multiple_zero_duration_tasks_same_resource():
-    """Test multiple zero-duration tasks can be scheduled on same resource same day.
+    """Test multiple zero-duration tasks (milestones) all complete on the same day.
 
-    BUG: Currently each zero-duration task blocks the resource for a full day,
-    so 5 zero-duration tasks take 5 days instead of 0 days.
+    Zero-duration tasks are milestones that complete instantly without blocking
+    any resources, so all 5 milestones complete on the same day.
     """
     config = SchedulingConfig(strategy="priority_first")
 
@@ -623,7 +618,7 @@ def test_multiple_zero_duration_tasks_same_resource():
         Task(
             id=f"task_zero_{i}",
             duration_days=0.0,
-            resources=[("alice", 1.0)],
+            resources=[("alice", 1.0)],  # Will be ignored for milestones
             dependencies=[],
             meta={"priority": 50 + i},
         )
@@ -635,16 +630,47 @@ def test_multiple_zero_duration_tasks_same_resource():
 
     assert len(result) == 5
 
-    # All zero-duration tasks should have start_date == end_date
+    # All milestones should complete on the same day with no resources
     for r in result:
         assert r.start_date == r.end_date
-
-    # BUG: All zero-duration tasks should complete on the same day
-    # since they don't actually consume any time.
-    # However, the current implementation blocks the resource for a full day per task.
-    pytest.xfail("BUG: Zero-duration tasks incorrectly block resources for a full day")
-    for r in result:
         assert r.start_date == date(2025, 1, 1)
+        assert r.resources == []  # Milestones have no resource assignment
+
+
+def test_zero_duration_milestone_waits_for_dependencies():
+    """Test that 0d milestones complete on the day their dependencies finish."""
+    config = SchedulingConfig(strategy="priority_first")
+
+    task_work = Task(
+        id="task_work",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+    task_milestone = Task(
+        id="task_milestone",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],  # Will be ignored for milestones
+        dependencies=["task_work"],
+        meta={"priority": 50},
+    )
+
+    scheduler = ParallelScheduler([task_work, task_milestone], date(2025, 1, 1), config=config)
+    result = scheduler.schedule()
+
+    assert len(result) == 2
+    work_result = next(r for r in result if r.task_id == "task_work")
+    milestone_result = next(r for r in result if r.task_id == "task_milestone")
+
+    # Work task completes normally (5 days from Jan 1 = Jan 6)
+    assert work_result.start_date == date(2025, 1, 1)
+    assert work_result.end_date == date(2025, 1, 6)
+
+    # Milestone completes the day after work finishes (dependency satisfied)
+    assert milestone_result.start_date == work_result.end_date + timedelta(days=1)
+    assert milestone_result.end_date == milestone_result.start_date
+    assert milestone_result.resources == []
 
 
 def test_negative_slack_handling():

@@ -820,7 +820,8 @@ class ParallelScheduler:
                     start_date=start,
                     end_date=end,
                     duration_days=task.duration_days,
-                    resources=[r for r, _ in task.resources],
+                    # Zero-duration tasks are milestones - no resource assignment
+                    resources=[] if task.duration_days == 0 else [r for r, _ in task.resources],
                 )
             )
 
@@ -1307,6 +1308,23 @@ class ParallelScheduler:
                     cr_str = f"{default_cr:.2f} (default)"
                 logger.checks(f"  Considering task {task_id} (priority={priority}, CR={cr_str})")
 
+                # Zero-duration tasks are milestones - schedule immediately, no resource
+                if task.duration_days == 0:
+                    scheduled[task_id] = (current_time, current_time)
+                    unscheduled.remove(task_id)
+                    scheduled_any = True
+                    logger.changes(f"  Scheduled milestone {task_id} at {current_time}")
+                    result.append(
+                        ScheduledTask(
+                            task_id=task_id,
+                            start_date=current_time,
+                            end_date=current_time,
+                            duration_days=0.0,
+                            resources=[],  # No resource for milestones
+                        )
+                    )
+                    continue  # Skip resource assignment logic
+
                 # Check if this is auto-assignment or explicit multi-resource assignment
                 if task.resource_spec and self.resource_config:
                     # AUTO-ASSIGNMENT: Use greedy with foresight to find best single resource
@@ -1430,9 +1448,9 @@ class ParallelScheduler:
             if not scheduled_any:
                 next_events: list[date] = []
 
-                # Task completions
+                # Task completions (including milestones that end on current_time)
                 for _, end in scheduled.values():
-                    if end > current_time:
+                    if end >= current_time:
                         next_events.append(end + timedelta(days=1))
 
                 # Start constraints becoming active

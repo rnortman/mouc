@@ -2145,3 +2145,82 @@ class TestFixedScheduleTasks:
         assert task_result.start_date == date(2025, 2, 1)
         assert task_result.end_date == date(2025, 2, 15)
         assert task_result.duration_days == 14.0
+
+
+class TestMilestoneTasks:
+    """Test milestone (0-duration) tasks."""
+
+    @pytest.fixture
+    def base_date(self) -> date:
+        """Base date for testing."""
+        return date(2025, 1, 1)
+
+    def test_zero_duration_renders_as_milestone(self, base_date: date) -> None:
+        """Test that 0d tasks render with :milestone tag in Mermaid output."""
+        metadata = FeatureMapMetadata()
+
+        milestone = Entity(
+            type="capability",
+            id="milestone1",
+            name="Project Kickoff",
+            description="Kickoff milestone",
+            meta={"effort": "0d", "resources": ["alice"]},  # Resources should be ignored
+        )
+
+        entities = [milestone]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 1
+        task_result = result.tasks[0]
+
+        # Should be scheduled on start date with no duration
+        assert task_result.start_date == base_date
+        assert task_result.end_date == base_date
+        assert task_result.duration_days == 0.0
+        assert task_result.resources == []  # Milestones have no resource assignment
+
+        # Generate Mermaid and check for milestone tag
+        mermaid = scheduler.generate_mermaid(result)
+        assert ":milestone," in mermaid
+        assert "Project Kickoff" in mermaid
+
+    def test_milestone_does_not_block_other_tasks(self, base_date: date) -> None:
+        """Test that milestone doesn't block other tasks on the same resource."""
+        metadata = FeatureMapMetadata()
+
+        milestone = Entity(
+            type="capability",
+            id="milestone1",
+            name="Kickoff",
+            description="Kickoff milestone",
+            meta={"effort": "0d", "resources": ["alice"]},
+        )
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Real Work",
+            description="Actual work",
+            meta={"effort": "5d", "resources": ["alice"]},
+        )
+
+        entities = [milestone, task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        assert len(result.tasks) == 2
+
+        milestone_result = next(t for t in result.tasks if t.entity_id == "milestone1")
+        task_result = next(t for t in result.tasks if t.entity_id == "task1")
+
+        # Both should start on the same day - milestone doesn't block
+        assert milestone_result.start_date == base_date
+        assert task_result.start_date == base_date
+
+        # Milestone has no resources, task has alice
+        assert milestone_result.resources == []
+        assert task_result.resources == ["alice"]

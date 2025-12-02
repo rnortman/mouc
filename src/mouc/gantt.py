@@ -821,8 +821,23 @@ class GanttScheduler:
         task_style = apply_task_styles(entity, self.styling_context)
         tags = self._get_task_tags(gantt_meta, task, task_style, is_late)
 
-        tags_str = ", ".join(tags) + ", " if tags else ""
         start_str = task.start_date.strftime("%Y-%m-%d")
+
+        # Check if this is a milestone (0d task)
+        is_milestone = task.duration_days == 0 or (
+            task.start_date == task.end_date and not task.resources
+        )
+        if is_milestone:
+            # Render as Mermaid milestone
+            lines.append(f"    {label} :milestone, {task.entity_id}, {start_str}, 0d")
+            # Add click directive if markdown_base_url is provided
+            if markdown_base_url and anchor_fn:
+                anchor = anchor_fn(task.entity_id, entity.name)
+                url = f"{markdown_base_url}#{anchor}"
+                lines.append(f'    click {task.entity_id} href "{url}"')
+            return
+
+        tags_str = ", ".join(tags) + ", " if tags else ""
         # Calculate duration from actual date range (accounts for DNS gaps)
         calendar_duration = (task.end_date - task.start_date).days
         duration_str = f"{calendar_duration}d"
