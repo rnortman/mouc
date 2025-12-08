@@ -21,7 +21,13 @@ from .jira_cli import jira_app, write_feature_map
 from .logger import setup_logger
 from .models import FeatureMap
 from .parser import FeatureMapParser
-from .scheduler import SchedulingResult, SchedulingService
+from .scheduler import (
+    AlgorithmConfig,
+    AlgorithmType,
+    SchedulingConfig,
+    SchedulingResult,
+    SchedulingService,
+)
 from .unified_config import GanttConfig, load_unified_config
 
 app = typer.Typer(
@@ -453,6 +459,14 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
             help="Comma-separated tags to enable styling functions (merged with config)",
         ),
     ] = None,
+    algorithm: Annotated[
+        str | None,
+        typer.Option(
+            "--algorithm",
+            "-a",
+            help="Scheduling algorithm to use. Overrides config. Available: 'parallel_sgs'",
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -481,11 +495,13 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     # Load gantt config and allow CLI override
     gantt_config = None
     gantt_config_markdown_url = None
+    scheduler_config = None
     if resource_config_path:
         with suppress(FileNotFoundError, ValueError):
             unified_config = load_unified_config(resource_config_path)
             gantt_config = unified_config.gantt or GanttConfig()
             gantt_config_markdown_url = gantt_config.markdown_base_url
+            scheduler_config = unified_config.scheduler
 
     # If no config loaded, create default
     if gantt_config is None:
@@ -496,6 +512,21 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         gantt_config.group_by = group_by
     if sort_by is not None:
         gantt_config.sort_by = sort_by
+
+    # Override algorithm if specified on CLI
+    if algorithm:
+        try:
+            algorithm_type = AlgorithmType(algorithm)
+        except ValueError:
+            typer.echo(
+                f"Error: Invalid algorithm '{algorithm}'. "
+                f"Available: {', '.join(a.value for a in AlgorithmType)}",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+        if scheduler_config is None:
+            scheduler_config = SchedulingConfig()
+        scheduler_config.algorithm = AlgorithmConfig(type=algorithm_type)
 
     final_markdown_url = markdown_base_url or gantt_config_markdown_url
 
@@ -508,6 +539,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         start_date=parsed_start_date,
         current_date=parsed_current_date,
         resource_config_path=resource_config_path,
+        scheduler_config=scheduler_config,
         gantt_config=gantt_config,
         style_tags=active_style_tags,
     )
@@ -597,6 +629,14 @@ def schedule(
             help="Current/as-of date for scheduling (YYYY-MM-DD). Defaults to today",
         ),
     ] = None,
+    algorithm: Annotated[
+        str | None,
+        typer.Option(
+            "--algorithm",
+            "-a",
+            help="Scheduling algorithm to use. Overrides config. Available: 'parallel_sgs'",
+        ),
+    ] = None,
     annotate_yaml: Annotated[
         bool,
         typer.Option(
@@ -623,6 +663,21 @@ def schedule(
         resource_config = unified.resources
         scheduler_config = unified.scheduler
         global_dns_periods = unified.global_dns_periods
+
+    # Override algorithm if specified on CLI
+    if algorithm:
+        try:
+            algorithm_type = AlgorithmType(algorithm)
+        except ValueError:
+            typer.echo(
+                f"Error: Invalid algorithm '{algorithm}'. "
+                f"Available: {', '.join(a.value for a in AlgorithmType)}",
+                err=True,
+            )
+            raise typer.Exit(1) from None
+        if scheduler_config is None:
+            scheduler_config = SchedulingConfig()
+        scheduler_config.algorithm = AlgorithmConfig(type=algorithm_type)
 
     # Run scheduling service
     service = SchedulingService(

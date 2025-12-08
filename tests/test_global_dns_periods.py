@@ -36,7 +36,7 @@ def test_global_dns_periods_applied_to_all_resources():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -85,7 +85,7 @@ def test_global_dns_merged_with_per_resource_dns():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -130,7 +130,7 @@ def test_overlapping_dns_periods_full_overlap():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -174,7 +174,7 @@ def test_overlapping_dns_periods_partial_overlap():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -218,7 +218,7 @@ def test_multiple_global_dns_periods():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -270,7 +270,7 @@ def test_global_dns_with_resource_selection():
         global_dns_periods=global_dns_periods,
         config=config,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -312,7 +312,7 @@ def test_no_global_dns_periods():
         start_date,
         resource_config=resource_config,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -356,7 +356,7 @@ def test_adjacent_dns_periods():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]
@@ -414,7 +414,7 @@ def test_per_resource_dns_before_global_dns():
         resource_config=resource_config,
         global_dns_periods=global_dns_periods,
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     scheduled_task = result[0]

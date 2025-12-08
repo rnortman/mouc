@@ -31,7 +31,7 @@ def test_cr_computation_same_deadline_different_duration():
     )
 
     scheduler = ParallelScheduler([task_short, task_long], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -71,7 +71,7 @@ def test_priority_first_strategy():
     scheduler = ParallelScheduler(
         [task_urgent, task_high_priority], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -110,7 +110,7 @@ def test_cr_first_strategy():
     scheduler = ParallelScheduler(
         [task_high_priority, task_urgent], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -149,7 +149,7 @@ def test_weighted_strategy_default_weights():
     )
 
     scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -189,7 +189,7 @@ def test_no_deadline_tasks_use_median_cr():
     scheduler = ParallelScheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -255,7 +255,7 @@ def test_median_cr_with_multiple_deadline_tasks():
     scheduler = ParallelScheduler(
         [task_high_cr, task_mid_cr, task_low_cr, task_no_deadline], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 4
 
@@ -301,7 +301,7 @@ def test_numeric_default_cr():
     scheduler = ParallelScheduler(
         [task_no_deadline, task_deadline], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -328,7 +328,7 @@ def test_zero_duration_task_avoids_division_by_zero():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should complete without error
@@ -347,7 +347,7 @@ def test_zero_duration_task_consumes_no_time():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     task_result = result[0]
@@ -383,7 +383,7 @@ def test_zero_duration_task_does_not_block_resource():
     )
 
     scheduler = ParallelScheduler([task_zero, task_normal], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
     task_zero_result = next(r for r in result if r.task_id == "task_zero")
@@ -421,7 +421,7 @@ def test_zero_duration_scheduled_by_priority_when_no_deadline():
     )
 
     scheduler = ParallelScheduler([task_zero_low, task_zero_high], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
     # Both should complete, both should have same start/end date since 0 duration
@@ -466,7 +466,7 @@ def test_zero_duration_task_respects_deadline_urgency():
     scheduler = ParallelScheduler(
         [task_normal_relaxed, task_zero_urgent], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
     task_zero_result = next(r for r in result if r.task_id == "task_zero_urgent")
@@ -514,7 +514,7 @@ def test_zero_duration_task_with_dependencies():
     scheduler = ParallelScheduler(
         [task_first, task_middle_zero, task_last], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 3
     task_first_result = next(r for r in result if r.task_id == "task_first")
@@ -587,7 +587,7 @@ def test_zero_duration_cr_not_artificially_inflated():
     scheduler = ParallelScheduler(
         [task_a_zero, task_b_urgent, task_c_relaxed], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 3
     task_a_result = next(r for r in result if r.task_id == "task_a_zero")
@@ -626,7 +626,7 @@ def test_multiple_zero_duration_tasks_same_resource():
     ]
 
     scheduler = ParallelScheduler(tasks, date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 5
 
@@ -657,7 +657,7 @@ def test_zero_duration_milestone_waits_for_dependencies():
     )
 
     scheduler = ParallelScheduler([task_work, task_milestone], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
     work_result = next(r for r in result if r.task_id == "task_work")
@@ -688,7 +688,7 @@ def test_negative_slack_handling():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should still schedule (negative CR will be very low, making it urgent)
@@ -721,7 +721,7 @@ def test_pure_cr_scheduling():
     scheduler = ParallelScheduler(
         [task_high_priority, task_urgent], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -760,7 +760,7 @@ def test_pure_priority_scheduling():
     scheduler = ParallelScheduler(
         [task_urgent, task_high_priority], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -795,7 +795,7 @@ def test_default_priority_is_50():
     )
 
     scheduler = ParallelScheduler([task_default, task_high], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -829,7 +829,7 @@ def test_all_no_deadline_tasks_use_fallback():
     )
 
     scheduler = ParallelScheduler([task2, task1], date(2025, 1, 1), config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -1028,7 +1028,7 @@ def test_priority_propagation_no_lowering():
     scheduler = ParallelScheduler(
         [task_high, task_low, task_competing], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     # task_high (90) should beat task_competing (80)
     task_high_result = next(r for r in result if r.task_id == "task_high")
@@ -1072,7 +1072,7 @@ def test_priority_propagation_affects_scheduling():
     scheduler = ParallelScheduler(
         [task_low, task_dependent, task_competing], date(2025, 1, 1), config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     # With propagation: task_low (inherits 90) should beat task_competing (70)
     task_low_result = next(r for r in result if r.task_id == "task_low")

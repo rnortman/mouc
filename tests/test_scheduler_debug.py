@@ -206,7 +206,7 @@ def test_verbosity_with_cr_first_strategy():
 
     try:
         scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), config=config)
-        result = scheduler.schedule()
+        result = scheduler.schedule().scheduled_tasks
         output = output_stream.getvalue()
     finally:
         reset_logger()

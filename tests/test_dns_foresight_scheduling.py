@@ -72,7 +72,7 @@ def test_dns_interruption_better_than_waiting_for_busy_resource():
     scheduler = ParallelScheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     task_result = result[0]
@@ -135,7 +135,7 @@ def test_wait_for_faster_resource_when_not_immediately_available():
     scheduler = ParallelScheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     task_result = result[0]
@@ -197,7 +197,7 @@ def test_lower_priority_work_fills_gap_while_waiting():
     scheduler = ParallelScheduler(
         [task_a, task_b], start_date, resource_config=resource_config, config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -267,7 +267,7 @@ def test_very_long_dns_makes_waiting_worthwhile():
     scheduler = ParallelScheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     task_result = result[0]
@@ -334,7 +334,7 @@ def test_multiple_resources_pick_soonest_completion():
     scheduler = ParallelScheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     task_result = result[0]
@@ -396,7 +396,7 @@ def test_short_dns_vs_long_dns_different_decisions():
     scheduler_a = ParallelScheduler(
         [task_a], start_date, resource_config=resource_config_a, config=config
     )
-    result_a = scheduler_a.schedule()
+    result_a = scheduler_a.schedule().scheduled_tasks
     task_a_result = result_a[0]
 
     # Should start with Alice immediately (short DNS: completes day 12 vs Bob day 18)
@@ -436,7 +436,7 @@ def test_short_dns_vs_long_dns_different_decisions():
     scheduler_b = ParallelScheduler(
         [task_b], start_date, resource_config=resource_config_b, config=config
     )
-    result_b = scheduler_b.schedule()
+    result_b = scheduler_b.schedule().scheduled_tasks
     task_b_result = result_b[0]
 
     # Should wait for Bob (long DNS: Alice completes day 25 vs Bob day 18)

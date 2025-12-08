@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import date
@@ -14,15 +13,10 @@ from pydantic import BaseModel, Field
 from .backends.base import AnchorFunction
 from .builtin_gantt import register_builtin_organization
 from .scheduler import (
-    ParallelScheduler,
     ScheduleAnnotations,
-    SchedulerInputValidator,
     SchedulingConfig,
-    Task,
+    SchedulingService,
     parse_timeframe,
-)
-from .scheduler import (
-    ScheduledTask as SchedulerTask,
 )
 from .styling import (
     StylingContext,
@@ -132,9 +126,6 @@ class GanttScheduler:
         self.global_dns_periods = global_dns_periods or []
         self.gantt_config = gantt_config or GanttConfig()
 
-        # Create resource parser
-        self.validator = SchedulerInputValidator(resource_config=self.resource_config)
-
         # Calculate start_date if not provided
         if start_date is None:
             self.start_date = self._calculate_chart_start_date()
@@ -178,81 +169,23 @@ class GanttScheduler:
         """Extract and validate gantt metadata from entity."""
         return GanttMetadata(**entity.meta)
 
-    def _create_fixed_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
-        """Create a Task object for a fixed-date entity.
-
-        Note: When only start_date is provided, we set start_on but NOT end_on,
-        allowing ParallelScheduler to compute DNS-aware end dates.
-        """
-        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
-
-        start = self._parse_date(gantt_meta.start_date) if gantt_meta.start_date else None
-        end = self._parse_date(gantt_meta.end_date) if gantt_meta.end_date else None
-
-        # If both dates specified, duration is the span between them
-        if start is not None and end is not None:
-            duration = (end - start).days
-        else:
-            duration = self._calculate_duration(entity)
-
-        return Task(
-            id=entity.id,
-            duration_days=duration,
-            resources=resources,
-            dependencies=list(entity.requires),
-            start_on=start,
-            end_on=end,
-            resource_spec=resource_spec,
-            meta=entity.meta,
+    def schedule(self) -> ScheduleResult:
+        """Schedule all entities respecting dependencies, resources, and deadlines."""
+        # Delegate to SchedulingService for actual scheduling
+        service = SchedulingService(
+            feature_map=self.feature_map,
+            current_date=self.current_date,
+            resource_config=self.resource_config,
+            config=self.scheduler_config,
+            global_dns_periods=self.global_dns_periods,
         )
+        scheduling_result = service.schedule()
 
-    def _extract_constraints(self, gantt_meta: GanttMetadata) -> tuple[date | None, date | None]:
-        """Extract start_after and end_before constraints from metadata.
+        # Convert to gantt ScheduleResult format
+        result = ScheduleResult()
+        result.warnings.extend(scheduling_result.warnings)
 
-        Returns:
-            Tuple of (start_after, end_before)
-        """
-        start_after = None
-        end_before = None
-
-        if gantt_meta.start_after:
-            start_after = self._parse_date(gantt_meta.start_after)
-        elif gantt_meta.timeframe:
-            timeframe_start, _ = parse_timeframe(gantt_meta.timeframe)
-            if timeframe_start:
-                start_after = timeframe_start
-
-        if gantt_meta.end_before:
-            end_before = self._parse_date(gantt_meta.end_before)
-        elif gantt_meta.timeframe:
-            _, timeframe_end = parse_timeframe(gantt_meta.timeframe)
-            if timeframe_end:
-                end_before = timeframe_end
-
-        return start_after, end_before
-
-    def _create_regular_task(self, entity: Entity, gantt_meta: GanttMetadata) -> Task:
-        """Create a Task object for a regular (non-fixed) entity."""
-        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
-        duration = self._calculate_duration(entity)
-        start_after, end_before = self._extract_constraints(gantt_meta)
-
-        return Task(
-            id=entity.id,
-            duration_days=duration,
-            resources=resources,
-            dependencies=list(entity.requires),
-            start_after=start_after,
-            end_before=end_before,
-            resource_spec=resource_spec,
-            meta=entity.meta,
-        )
-
-    def _convert_scheduler_results(
-        self, scheduled_tasks: list[SchedulerTask], result: ScheduleResult
-    ) -> None:
-        """Convert scheduler results to ScheduledTask format."""
-        for scheduled_task in scheduled_tasks:
+        for scheduled_task in scheduling_result.scheduled_tasks:
             result.tasks.append(
                 ScheduledTask(
                     entity_id=scheduled_task.task_id,
@@ -263,134 +196,10 @@ class GanttScheduler:
                 )
             )
 
-    def _check_deadline_violations(
-        self, result: ScheduleResult, entities_by_id: dict[str, Entity]
-    ) -> None:
-        """Check for deadline violations and add warnings."""
-        for task in result.tasks:
-            entity = entities_by_id[task.entity_id]
-            gantt_meta = self._get_gantt_meta(entity)
-
-            deadline = None
-            if gantt_meta.end_before:
-                deadline = self._parse_date(gantt_meta.end_before)
-            elif gantt_meta.timeframe:
-                _, deadline = parse_timeframe(gantt_meta.timeframe)
-
-            if deadline and task.end_date > deadline:
-                days_late = (task.end_date - deadline).days
-                result.warnings.append(
-                    f"Entity '{task.entity_id}' finishes {days_late} days after required date "
-                    f"({task.end_date} vs {deadline})"
-                )
-
-    def schedule(self) -> ScheduleResult:
-        """Schedule all entities respecting dependencies, resources, and deadlines."""
-        result = ScheduleResult()
-        entities_by_id = {e.id: e for e in self.feature_map.entities}
-
-        # Track tasks marked done without dates (excluded from scheduling and Gantt)
-        done_without_dates: set[str] = set()
-
-        # Convert all entities to scheduler tasks
-        tasks_to_schedule: list[Task] = []
-
-        for entity in self.feature_map.entities:
-            gantt_meta = self._get_gantt_meta(entity)
-
-            # Check if task is marked done without dates
-            if (
-                gantt_meta.status == "done"
-                and gantt_meta.start_date is None
-                and gantt_meta.end_date is None
-            ):
-                # Exclude from scheduling and Gantt, but satisfies dependencies
-                done_without_dates.add(entity.id)
-                result.warnings.append(
-                    f"Task '{entity.id}' marked done without dates - excluded from schedule"
-                )
-                continue
-
-            # Handle fixed tasks (with explicit start_date or end_date)
-            if gantt_meta.start_date is not None or gantt_meta.end_date is not None:
-                task = self._create_fixed_task(entity, gantt_meta)
-            else:
-                # Regular task: calculate duration and constraints
-                task = self._create_regular_task(entity, gantt_meta)
-
-            tasks_to_schedule.append(task)
-
-        # Run the scheduler
-        try:
-            scheduler = ParallelScheduler(
-                tasks_to_schedule,
-                self.current_date,
-                resource_config=self.resource_config,
-                completed_task_ids=done_without_dates,
-                config=self.scheduler_config,
-                global_dns_periods=self.global_dns_periods,
-            )
-            scheduled_tasks = scheduler.schedule()
-
-            # Convert scheduler results to our format
-            self._convert_scheduler_results(scheduled_tasks, result)
-
-            # Check for deadline violations
-            self._check_deadline_violations(result, entities_by_id)
-
-        except ValueError as e:
-            result.warnings.append(str(e))
+        # Store annotations for _populate_schedule_annotations
+        self._scheduling_annotations = scheduling_result.annotations
 
         return result
-
-    def _calculate_duration(self, entity: Entity) -> float:
-        """Calculate duration in days from effort and resource allocation."""
-        gantt_meta = self._get_gantt_meta(entity)
-        effort_days = self._parse_effort(gantt_meta.effort)
-        resources, resource_spec, _ = self.validator.parse_resources(gantt_meta.resources)
-
-        # Total capacity = sum of resource allocations
-        # If resource_spec is set (wildcard/group), assume 1.0 capacity for duration calc
-        if resource_spec:
-            total_capacity = 1.0
-        else:
-            total_capacity = sum(capacity for _, capacity in resources)
-            if total_capacity == 0:
-                total_capacity = 1.0
-
-        return effort_days / total_capacity
-
-    def _parse_effort(self, effort_str: str) -> float:
-        """Parse effort string to calendar days for scheduling.
-
-        Supported formats:
-        - "5d" = 5 calendar days
-        - "2w" = 14 calendar days (2 weeks * 7 days)
-        - "1.5m" = 45 calendar days (1.5 months * 30 days)
-        - "L" = Large (equivalent to 60 days, or 2 months)
-
-        Note: We use calendar days for Gantt chart scheduling, not working days.
-        """
-        effort_str = effort_str.strip().lower()
-
-        # Check for size labels first
-        if effort_str == "l":
-            return 60.0  # 2 months
-
-        match = re.match(r"^([\d.]+)([dwm])$", effort_str)
-        if not match:
-            return 7.0  # Default to 1 week
-
-        value, unit = match.groups()
-        num = float(value)
-
-        if unit == "d":
-            return num
-        if unit == "w":
-            return num * 7  # 7 calendar days per week
-        if unit == "m":
-            return num * 30  # 30 calendar days per month (approximation)
-        return 7.0
 
     def _parse_date(self, date_str: str | date) -> date | None:
         """Parse a date string or date object to date object.
@@ -518,31 +327,36 @@ class GanttScheduler:
     def _populate_schedule_annotations(
         self, tasks: list[ScheduledTask], entities_by_id: dict[str, Entity]
     ) -> None:
-        """Populate entity annotations with schedule information from scheduled tasks.
+        """Populate entity annotations with schedule information.
 
-        This makes schedule information available to organization functions that operate on entities.
+        Uses full annotations from SchedulingService (computed_deadline, computed_priority, etc.)
+        which are stored during schedule() call.
 
         Args:
-            tasks: List of scheduled tasks
+            tasks: List of scheduled tasks (used for entity ID iteration)
             entities_by_id: Mapping of entity IDs to entity objects
         """
-        for task in tasks:
-            entity = entities_by_id.get(task.entity_id)
-            if entity:
-                # Create schedule annotation with basic info
-                # (We don't have all the info SchedulingService has, but we have the essentials)
-                entity.annotations["schedule"] = ScheduleAnnotations(
-                    estimated_start=task.start_date,
-                    estimated_end=task.end_date,
-                    computed_deadline=None,  # Not available in gantt flow
-                    computed_priority=None,  # Not available in gantt flow
-                    deadline_violated=False,  # Would need to compute
-                    resource_assignments=[
-                        (r, 1.0) for r in task.resources
-                    ],  # Convert to tuple format
-                    resources_were_computed=False,  # Not tracked here
-                    was_fixed=False,  # Not tracked here
-                )
+        # Use full annotations from SchedulingService if available
+        if hasattr(self, "_scheduling_annotations") and self._scheduling_annotations:
+            for entity_id, annotation in self._scheduling_annotations.items():
+                entity = entities_by_id.get(entity_id)
+                if entity:
+                    entity.annotations["schedule"] = annotation
+        else:
+            # Fallback for edge cases (shouldn't happen in normal use)
+            for task in tasks:
+                entity = entities_by_id.get(task.entity_id)
+                if entity:
+                    entity.annotations["schedule"] = ScheduleAnnotations(
+                        estimated_start=task.start_date,
+                        estimated_end=task.end_date,
+                        computed_deadline=None,
+                        computed_priority=None,
+                        deadline_violated=False,
+                        resource_assignments=[(r, 1.0) for r in task.resources],
+                        resources_were_computed=False,
+                        was_fixed=False,
+                    )
 
     def _organize_tasks(self, tasks: list[ScheduledTask]) -> dict[str | None, list[ScheduledTask]]:
         """Apply organization pipeline: grouping → sorting.

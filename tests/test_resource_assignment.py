@@ -27,7 +27,7 @@ def test_wildcard_assignment_all_resources():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should assign to alice (first in config order)
@@ -54,7 +54,7 @@ def test_pipe_separated_assignment():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should assign to john (first in pipe-separated list)
@@ -82,7 +82,7 @@ def test_pipe_assignment_respects_order():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     assert result[0].resources == ["charlie"]
@@ -111,7 +111,7 @@ def test_dns_period_blocks_assignment():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 5), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should skip alice (DNS) and pick bob
@@ -138,7 +138,7 @@ def test_group_alias_expansion():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should assign to john (first in group)
@@ -173,7 +173,7 @@ def test_assignment_with_busy_resources():
     )
 
     scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
     # task1 gets alice
@@ -213,7 +213,7 @@ def test_assignment_waits_for_resource_availability():
     )
 
     scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -263,7 +263,7 @@ def test_deadline_priority_with_auto_assignment():
     )
 
     scheduler = ParallelScheduler([task2, task1], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
@@ -294,7 +294,7 @@ def test_no_resource_spec_no_assignment():
     )
 
     scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should keep explicit assignment
@@ -330,7 +330,7 @@ def test_empty_resource_spec_uses_unassigned():
     )
 
     scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule()
+    result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Refactored scheduler into pluggable architecture with factories for algorithms and pre-processors
+- GanttScheduler now delegates to SchedulingService (unified scheduling path)
+- Added `--algorithm` CLI flag to `schedule` and `gantt` commands
+
 ## [0.4.5] - 2025-12-08
 
 ### Added
