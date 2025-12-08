@@ -85,6 +85,13 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
         Path | None,
         typer.Option("--style-file", help="Python file path for styling functions"),
     ] = None,
+    style_tags: Annotated[
+        str | None,
+        typer.Option(
+            "--style-tags",
+            help="Comma-separated tags to enable styling functions (merged with config)",
+        ),
+    ] = None,
 ) -> None:
     """Generate dependency graphs in DOT format."""
     # Validate arguments
@@ -108,8 +115,16 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
     parser = FeatureMapParser()
     feature_map = parser.parse_file(file)
 
+    # Collect style tags from CLI and config
+    active_style_tags = _collect_style_tags(style_tags, file)
+
+    # Create styling context with tags
+    styling_context = styling.create_styling_context(
+        feature_map, output_format="graph", style_tags=active_style_tags
+    )
+
     # Generate the graph
-    generator = GraphGenerator(feature_map)
+    generator = GraphGenerator(feature_map, styling_context)
     dot_output = generator.generate(view, target=target, tags=tags)
 
     # Output the result
@@ -152,6 +167,13 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     style_file: Annotated[
         Path | None,
         typer.Option("--style-file", help="Python file path for styling functions"),
+    ] = None,
+    style_tags: Annotated[
+        str | None,
+        typer.Option(
+            "--style-tags",
+            help="Comma-separated tags to enable styling functions (merged with config)",
+        ),
     ] = None,
 ) -> None:
     """Generate documentation in Markdown or DOCX format."""
@@ -220,8 +242,13 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         )
         service.populate_feature_map_annotations()
 
+    # Collect style tags from CLI and config
+    active_style_tags = _collect_style_tags(style_tags, file)
+
     # Generate the documentation
-    styling_context = styling.create_styling_context(feature_map, output_format=format)
+    styling_context = styling.create_styling_context(
+        feature_map, output_format=format, style_tags=active_style_tags
+    )
 
     # Select backend and config based on format
     if format == "docx":
@@ -419,6 +446,13 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         Path | None,
         typer.Option("--style-file", help="Python file path for styling functions"),
     ] = None,
+    style_tags: Annotated[
+        str | None,
+        typer.Option(
+            "--style-tags",
+            help="Comma-separated tags to enable styling functions (merged with config)",
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -465,6 +499,9 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
 
     final_markdown_url = markdown_base_url or gantt_config_markdown_url
 
+    # Collect style tags from CLI and config
+    active_style_tags = _collect_style_tags(style_tags, file)
+
     # Schedule tasks
     scheduler = GanttScheduler(
         feature_map,
@@ -472,13 +509,16 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         current_date=parsed_current_date,
         resource_config_path=resource_config_path,
         gantt_config=gantt_config,
+        style_tags=active_style_tags,
     )
     result = scheduler.schedule()
 
     # Create anchor function for markdown links if needed
     anchor_fn = None
     if final_markdown_url:
-        styling_context = styling.create_styling_context(feature_map, output_format="gantt")
+        styling_context = styling.create_styling_context(
+            feature_map, output_format="gantt", style_tags=active_style_tags
+        )
         backend = MarkdownBackend(feature_map, styling_context)
         anchor_fn = backend.make_anchor
 
@@ -652,6 +692,39 @@ def _load_styling(style_module: str | None, style_file: Path | None) -> None:
             raise MoucError(f"Could not load styling file: {style_file}")
         user_module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(user_module)
+
+
+def _collect_style_tags(cli_style_tags: str | None, feature_map_path: Path) -> set[str]:
+    """Collect style tags from CLI and config file.
+
+    Args:
+        cli_style_tags: Comma-separated tags from CLI --style-tags option
+        feature_map_path: Path to feature map (used to find config file)
+
+    Returns:
+        Set of active style tags (CLI tags merged with config tags)
+    """
+    tags: set[str] = set()
+
+    # Parse CLI tags
+    if cli_style_tags:
+        tags.update(tag.strip() for tag in cli_style_tags.split(",") if tag.strip())
+
+    # Load config tags
+    config_path = get_config_path()
+    if not config_path:
+        # Try feature map directory first, then current directory
+        feature_map_dir = Path(feature_map_path).parent
+        config_path = feature_map_dir / "mouc_config.yaml"
+        if not config_path.exists():
+            config_path = Path("mouc_config.yaml")
+
+    if config_path.exists():
+        with suppress(FileNotFoundError, ValueError):
+            unified_config = load_unified_config(config_path)
+            tags.update(unified_config.style_tags)
+
+    return tags
 
 
 def main() -> int:

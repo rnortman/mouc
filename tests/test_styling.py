@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import date
 
 from mouc import styling
@@ -1353,3 +1354,365 @@ def test_tags_and_links_in_metadata_can_be_styled() -> None:
     assert "PROJ-123" not in output
     assert "| Link |" not in output
     assert "https://example.com" not in output
+
+
+# =============================================================================
+# Style Tags Filtering Tests
+# =============================================================================
+
+
+def test_style_tags_in_context() -> None:
+    """Test that style_tags is available in styling context."""
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with no tags
+    ctx_none = styling.create_styling_context(feature_map)
+    assert ctx_none.style_tags == set()
+
+    # Test with some tags
+    ctx_tags = styling.create_styling_context(feature_map, style_tags={"detailed", "verbose"})
+    assert ctx_tags.style_tags == {"detailed", "verbose"}
+
+
+def test_style_node_tag_filtering() -> None:
+    """Test that node stylers can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["detailed"])
+    def detailed_only(entity: styling.Entity, context: styling.StylingContext) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    @styling.style_node()  # No tag filter - always runs
+    def all_tags(entity: styling.Entity, context: styling.StylingContext) -> styling.NodeStyle:
+        return {"border_color": "#00ff00"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag
+    ctx_detailed = styling.create_styling_context(feature_map, style_tags={"detailed"})
+    result_detailed = styling.apply_node_styles(entities[0], ctx_detailed)
+    assert result_detailed["fill_color"] == "#ff0000"
+    assert result_detailed["border_color"] == "#00ff00"
+
+    # Test without matching tag
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_tag = styling.apply_node_styles(entities[0], ctx_no_tag)
+    assert "fill_color" not in result_no_tag
+    assert result_no_tag["border_color"] == "#00ff00"
+
+
+def test_style_tags_or_logic() -> None:
+    """Test that multiple tags on a styler use OR logic (any match enables)."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["tag_a", "tag_b"])
+    def any_tag_matches(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with tag_a only - should run
+    ctx_a = styling.create_styling_context(feature_map, style_tags={"tag_a"})
+    result_a = styling.apply_node_styles(entities[0], ctx_a)
+    assert result_a["fill_color"] == "#ff0000"
+
+    # Test with tag_b only - should run
+    ctx_b = styling.create_styling_context(feature_map, style_tags={"tag_b"})
+    result_b = styling.apply_node_styles(entities[0], ctx_b)
+    assert result_b["fill_color"] == "#ff0000"
+
+    # Test with both tags - should run
+    ctx_both = styling.create_styling_context(feature_map, style_tags={"tag_a", "tag_b"})
+    result_both = styling.apply_node_styles(entities[0], ctx_both)
+    assert result_both["fill_color"] == "#ff0000"
+
+    # Test with unrelated tag - should NOT run
+    ctx_other = styling.create_styling_context(feature_map, style_tags={"other_tag"})
+    result_other = styling.apply_node_styles(entities[0], ctx_other)
+    assert "fill_color" not in result_other
+
+
+def test_style_edge_tag_filtering() -> None:
+    """Test that edge stylers can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.style_edge(tags=["highlight"])
+    def highlight_edges(
+        from_id: str, to_id: str, edge_type: str, context: styling.StylingContext
+    ) -> styling.EdgeStyle:
+        return {"color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag
+    ctx_highlight = styling.create_styling_context(feature_map, style_tags={"highlight"})
+    result = styling.apply_edge_styles("cap1", "cap2", "requires", ctx_highlight)
+    assert result["color"] == "#ff0000"
+
+    # Test without matching tag
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_tag = styling.apply_edge_styles("cap1", "cap2", "requires", ctx_no_tag)
+    assert result_no_tag == {}
+
+
+def test_style_label_tag_filtering() -> None:
+    """Test that label stylers can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.style_label(tags=["custom-labels"])
+    def custom_label(entity: styling.Entity, context: styling.StylingContext) -> str:
+        return "[Custom]"
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag
+    ctx_custom = styling.create_styling_context(feature_map, style_tags={"custom-labels"})
+    result = styling.apply_label_styles(entities[0], ctx_custom)
+    assert result == "[Custom]"
+
+    # Test without matching tag - should return None (default)
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_tag = styling.apply_label_styles(entities[0], ctx_no_tag)
+    assert result_no_tag is None
+
+
+def test_style_task_tag_filtering() -> None:
+    """Test that task stylers can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.style_task(tags=["color-by-team"])
+    def color_by_team(entity: styling.Entity, context: styling.StylingContext) -> styling.TaskStyle:
+        return {"fill_color": "#4287f5"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag
+    ctx_color = styling.create_styling_context(feature_map, style_tags={"color-by-team"})
+    result = styling.apply_task_styles(entities[0], ctx_color)
+    assert result["fill_color"] == "#4287f5"
+
+    # Test without matching tag
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_tag = styling.apply_task_styles(entities[0], ctx_no_tag)
+    assert result_no_tag == {}
+
+
+def test_style_metadata_tag_filtering() -> None:
+    """Test that metadata stylers can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.style_metadata(tags=["verbose"])
+    def add_verbose_fields(
+        entity: styling.Entity, context: styling.StylingContext, metadata: dict[str, object]
+    ) -> dict[str, object]:
+        result = metadata.copy()
+        result["verbose_field"] = "verbose_value"
+        return result
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Test",
+            description="Test",
+            meta={"original": "value"},
+        )
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag
+    ctx_verbose = styling.create_styling_context(feature_map, style_tags={"verbose"})
+    result = styling.apply_metadata_styles(entities[0], ctx_verbose, entities[0].meta)
+    assert result["verbose_field"] == "verbose_value"
+    assert result["original"] == "value"
+
+    # Test without matching tag
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_tag = styling.apply_metadata_styles(entities[0], ctx_no_tag, entities[0].meta)
+    assert "verbose_field" not in result_no_tag
+    assert result_no_tag["original"] == "value"
+
+
+def test_filter_entity_tag_filtering() -> None:
+    """Test that entity filter functions can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(tags=["hide-completed"])
+    def hide_completed(
+        entities: Sequence[styling.Entity], context: styling.StylingContext
+    ) -> list[styling.Entity]:
+        return [e for e in entities if e.meta.get("status") != "done"]
+
+    entities = [
+        Entity(
+            type="capability", id="cap1", name="Done", description="Test", meta={"status": "done"}
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Active",
+            description="Test",
+            meta={"status": "active"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag - should filter out done items
+    ctx_hide = styling.create_styling_context(feature_map, style_tags={"hide-completed"})
+    result = styling.apply_entity_filters(entities, ctx_hide)
+    assert len(result) == 1
+    assert result[0].id == "cap2"
+
+    # Test without matching tag - should return all
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_all = styling.apply_entity_filters(entities, ctx_no_tag)
+    assert len(result_all) == 2
+
+
+def test_group_tasks_tag_filtering() -> None:
+    """Test that group_tasks functions can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.group_tasks(tags=["group-by-team"])
+    def group_by_team(
+        entities: Sequence[styling.Entity], context: styling.StylingContext
+    ) -> dict[str | None, list[styling.Entity]]:
+        groups: dict[str | None, list[styling.Entity]] = {}
+        for entity in entities:
+            team = entity.meta.get("team", "Other")
+            if team not in groups:
+                groups[team] = []
+            groups[team].append(entity)
+        return groups
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap1",
+            description="Test",
+            meta={"team": "Platform"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap2",
+            description="Test",
+            meta={"team": "Backend"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag - should group
+    ctx_group = styling.create_styling_context(feature_map, style_tags={"group-by-team"})
+    result = styling.apply_task_grouping(entities, ctx_group)
+    assert "Platform" in result
+    assert "Backend" in result
+    assert len(result["Platform"]) == 1
+    assert len(result["Backend"]) == 1
+
+    # Test without matching tag - should return single group with None key
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_no_group = styling.apply_task_grouping(entities, ctx_no_tag)
+    assert None in result_no_group
+    assert len(result_no_group[None]) == 2
+
+
+def test_sort_tasks_tag_filtering() -> None:
+    """Test that sort_tasks functions can be filtered by tags."""
+    styling.clear_registrations()
+
+    @styling.sort_tasks(tags=["sort-alpha"])
+    def sort_alphabetically(
+        entities: Sequence[styling.Entity], context: styling.StylingContext
+    ) -> list[styling.Entity]:
+        return sorted(entities, key=lambda e: e.name)
+
+    entities = [
+        Entity(type="capability", id="cap1", name="Zebra", description="Test"),
+        Entity(type="capability", id="cap2", name="Apple", description="Test"),
+        Entity(type="capability", id="cap3", name="Banana", description="Test"),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with matching tag - should sort alphabetically
+    ctx_sort = styling.create_styling_context(feature_map, style_tags={"sort-alpha"})
+    result = styling.apply_task_sorting(entities, ctx_sort)
+    assert [e.name for e in result] == ["Apple", "Banana", "Zebra"]
+
+    # Test without matching tag - should preserve order
+    ctx_no_tag = styling.create_styling_context(feature_map, style_tags=set())
+    result_unsorted = styling.apply_task_sorting(entities, ctx_no_tag)
+    assert [e.name for e in result_unsorted] == ["Zebra", "Apple", "Banana"]
+
+
+def test_style_tags_combined_with_format_filtering() -> None:
+    """Test that both tags and format filtering work together."""
+    styling.clear_registrations()
+
+    @styling.style_node(formats=["graph"], tags=["detailed"])
+    def graph_detailed_only(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with both format and tag matching - should apply
+    ctx_both = styling.create_styling_context(
+        feature_map, output_format="graph", style_tags={"detailed"}
+    )
+    result_both = styling.apply_node_styles(entities[0], ctx_both)
+    assert result_both["fill_color"] == "#ff0000"
+
+    # Test with format matching but tag not matching - should NOT apply
+    ctx_format_only = styling.create_styling_context(
+        feature_map, output_format="graph", style_tags=set()
+    )
+    result_format_only = styling.apply_node_styles(entities[0], ctx_format_only)
+    assert "fill_color" not in result_format_only
+
+    # Test with tag matching but format not matching - should NOT apply
+    ctx_tag_only = styling.create_styling_context(
+        feature_map, output_format="other", style_tags={"detailed"}
+    )
+    result_tag_only = styling.apply_node_styles(entities[0], ctx_tag_only)
+    assert "fill_color" not in result_tag_only
+
+    # Test with neither matching - should NOT apply
+    ctx_neither = styling.create_styling_context(
+        feature_map, output_format="other", style_tags=set()
+    )
+    result_neither = styling.apply_node_styles(entities[0], ctx_neither)
+    assert "fill_color" not in result_neither
+
+
+def test_style_tags_none_always_runs() -> None:
+    """Test that stylers with tags=None always run regardless of active tags."""
+    styling.clear_registrations()
+
+    @styling.style_node  # tags=None (default)
+    def always_run(entity: styling.Entity, context: styling.StylingContext) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with no active tags - should still run
+    ctx_no_tags = styling.create_styling_context(feature_map, style_tags=set())
+    result = styling.apply_node_styles(entities[0], ctx_no_tags)
+    assert result["fill_color"] == "#ff0000"
+
+    # Test with some active tags - should still run
+    ctx_with_tags = styling.create_styling_context(feature_map, style_tags={"random", "tags"})
+    result_with_tags = styling.apply_node_styles(entities[0], ctx_with_tags)
+    assert result_with_tags["fill_color"] == "#ff0000"

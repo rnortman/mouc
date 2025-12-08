@@ -88,6 +88,9 @@ class UnifiedConfig(BaseModel):
 
     resources: ResourceConfig
     global_dns_periods: list[DNSPeriod] = Field(default_factory=list[DNSPeriod])
+    style_tags: list[str] = Field(
+        default_factory=list
+    )  # Tags for enabling/disabling styler functions
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
     scheduler: SchedulingConfig | None = None
@@ -182,9 +185,13 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0
             TimelineConfig.model_validate(docx_data["organization"]["timeline"])  # Validate early
         docx_config = DocxConfig.model_validate(docx_data)
 
+    # Parse style_tags if present
+    style_tags: list[str] = data.get("style_tags", [])
+
     return UnifiedConfig(
         resources=resource_config,
         global_dns_periods=global_dns_periods,
+        style_tags=style_tags,
         jira=jira_config,
         gantt=gantt_config,
         scheduler=scheduler_config,

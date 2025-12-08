@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.5] - 2025-12-08
+
+### Added
+- Tag-based styler filtering: `--style-tags` CLI option and `style_tags` config to selectively enable styler functions
+
 ## [0.4.4] - 2025-12-02
 
 ### Changed

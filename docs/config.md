@@ -10,6 +10,7 @@ Mouc uses a single unified configuration file (`mouc_config.yaml`) that contains
 - [Resources Section](#resources-section)
   - [Task Priority](#task-priority)
 - [Scheduler Section](#scheduler-section)
+- [Style Tags Section](#style-tags-section)
 - [Markdown Section](#markdown-section)
 - [DOCX Section](#docx-section)
 - [Jira Section](#jira-section)
@@ -70,6 +71,11 @@ scheduler:
   cr_weight: 10.0
   priority_weight: 1.0
   default_cr: "median"
+
+# OPTIONAL: Style tags for filtering styler functions
+style_tags:
+  - detailed
+  - color-by-team
 
 # OPTIONAL: Markdown output settings
 markdown:
@@ -260,6 +266,28 @@ scheduler:
 ```
 
 See [Scheduling Documentation](scheduling.md) for detailed algorithm behavior.
+
+## Style Tags Section
+
+The `style_tags` field specifies default style tags that control which styler functions are active. This section is **optional**.
+
+```yaml
+style_tags:
+  - detailed
+  - color-by-team
+```
+
+**`style_tags`** (optional, default: `[]`): List of tags to activate for styler function filtering.
+
+Style tags work with the `tags` parameter on styler decorators (e.g., `@style_node(tags=['detailed'])`). A function only runs if at least one of its tags matches an active tag (OR logic). Functions without tags always run.
+
+**Activation sources:**
+- Config file: `style_tags` list (shown above)
+- CLI: `--style-tags detailed,color-by-team`
+
+CLI tags and config tags are merged together.
+
+See [Styling Documentation](styling.md#tag-based-filtering) for details on declaring tags on functions.
 
 ## Markdown Section
 
@@ -701,6 +729,14 @@ scheduler:
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority
   default_cr: "median"      # "median" or numeric value
+
+# ============================================================================
+# STYLE TAGS (Optional)
+# ============================================================================
+
+style_tags:
+  - detailed                 # Activate styler functions tagged with 'detailed'
+  - color-by-team           # Can also pass --style-tags on CLI
 
 # ============================================================================
 # MARKDOWN OUTPUT (Optional)

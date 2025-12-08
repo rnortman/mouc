@@ -198,36 +198,55 @@ def register_builtin_organization(group_by: str | None, sort_by: str | None) -> 
     # Clear any previously registered built-in functions (priority=BUILTIN_PRIORITY, formats=['gantt'])
     # This prevents duplicate registrations when multiple schedulers are created
     styling._group_tasks_funcs[:] = [
-        (pri, fmt, func)
-        for pri, fmt, func in styling._group_tasks_funcs
-        if pri != BUILTIN_PRIORITY or (fmt and "gantt" not in fmt)
+        reg
+        for reg in styling._group_tasks_funcs
+        if reg.priority != BUILTIN_PRIORITY or (reg.formats and "gantt" not in reg.formats)
     ]
     styling._sort_tasks_funcs[:] = [
-        (pri, fmt, func)
-        for pri, fmt, func in styling._sort_tasks_funcs
-        if pri != BUILTIN_PRIORITY or (fmt and "gantt" not in fmt)
+        reg
+        for reg in styling._sort_tasks_funcs
+        if reg.priority != BUILTIN_PRIORITY or (reg.formats and "gantt" not in reg.formats)
     ]
 
     # Register grouping function based on group_by config
+    # Built-ins use tags=None to always run regardless of active style_tags
     if group_by == "type":
-        styling._group_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_group_by_type))
+        styling._group_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_group_by_type)
+        )
     elif group_by == "resource":
-        styling._group_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_group_by_resource))
+        styling._group_tasks_funcs.append(
+            styling.StylerRegistration(
+                BUILTIN_PRIORITY, ["gantt"], None, _builtin_group_by_resource
+            )
+        )
     elif group_by == "timeframe":
         styling._group_tasks_funcs.append(
-            (BUILTIN_PRIORITY, ["gantt"], _builtin_group_by_timeframe)
+            styling.StylerRegistration(
+                BUILTIN_PRIORITY, ["gantt"], None, _builtin_group_by_timeframe
+            )
         )
     # 'none' or None: no grouping function registered
 
     # Register sorting function based on sort_by config
     if sort_by == "start":
-        styling._sort_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_sort_by_start))
+        styling._sort_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_sort_by_start)
+        )
     elif sort_by == "end":
-        styling._sort_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_sort_by_end))
+        styling._sort_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_sort_by_end)
+        )
     elif sort_by == "deadline":
-        styling._sort_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_sort_by_deadline))
+        styling._sort_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_sort_by_deadline)
+        )
     elif sort_by == "name":
-        styling._sort_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_sort_by_name))
+        styling._sort_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_sort_by_name)
+        )
     elif sort_by == "priority":
-        styling._sort_tasks_funcs.append((BUILTIN_PRIORITY, ["gantt"], _builtin_sort_by_priority))
+        styling._sort_tasks_funcs.append(
+            styling.StylerRegistration(BUILTIN_PRIORITY, ["gantt"], None, _builtin_sort_by_priority)
+        )
     # 'yaml_order' or None: no sorting function registered (preserves order)

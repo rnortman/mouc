@@ -9,6 +9,7 @@ The Mouc styling system allows you to customize the appearance of graph visualiz
 - [Writing Style Functions](#writing-style-functions)
   - [Entity Filtering](#entity-filtering)
 - [API Reference](#api-reference)
+- [Tag-Based Filtering](#tag-based-filtering)
 - [Examples](#examples)
 - [Best Practices](#best-practices)
 
@@ -475,6 +476,19 @@ elif context.output_format == 'docx':
     pass
 ```
 
+#### Active Style Tags
+
+```python
+# Get active style tags for conditional logic
+tags = context.style_tags
+# Returns: set[str] of active tags
+
+# Check if a specific tag is active
+if 'detailed' in context.style_tags:
+    # Include extra detail
+    pass
+```
+
 ### Entity Properties
 
 #### Schedule Annotations
@@ -572,6 +586,90 @@ fg = contrast_text_color(bg)  # Returns '#ffffff' or '#000000'
 # Works with HSL colors too
 bg = sequential_hue('Q2', timeframes)
 fg = contrast_text_color(bg)
+```
+
+## Tag-Based Filtering
+
+Style functions can be conditionally enabled using tags. This allows a single styling module to serve multiple report types by selectively activating functions.
+
+### Declaring Tags on Functions
+
+Add the `tags` parameter to any decorator to make the function tag-gated:
+
+```python
+@style_node(tags=['detailed'])
+def show_extra_info(entity, context):
+    """Only runs when 'detailed' tag is active."""
+    return {'fontsize': 14}
+
+@style_task(tags=['color-by-team', 'team-view'])
+def team_colors(entity, context):
+    """Runs when EITHER 'color-by-team' OR 'team-view' is active."""
+    team = entity.meta.get('team')
+    colors = {'platform': '#4287f5', 'backend': '#42f554'}
+    return {'fill_color': colors.get(team, 'white')}
+
+@filter_entity(tags=['hide-completed'])
+def filter_done(entities, context):
+    """Filter only runs when 'hide-completed' tag is active."""
+    return [e for e in entities if e.meta.get('status') != 'done']
+```
+
+### Tag Matching Logic
+
+- **`tags=None`** (default): Function always runs (backwards compatible)
+- **`tags=['a', 'b']`**: Function runs if **ANY** tag matches active tags (OR logic)
+
+### Activating Tags
+
+#### Via CLI
+
+Use `--style-tags` with comma-separated values:
+
+```bash
+mouc gantt feature_map.yaml --style-tags detailed,color-by-team
+mouc doc feature_map.yaml --style-tags executive-summary
+mouc graph feature_map.yaml --style-tags hide-completed
+```
+
+#### Via Config File
+
+Add `style_tags` to `mouc_config.yaml`:
+
+```yaml
+# mouc_config.yaml
+style_tags:
+  - detailed
+  - color-by-team
+
+resources:
+  # ... resource config
+```
+
+CLI tags and config tags are **merged** together.
+
+### Combining Tags with Formats
+
+Tags work alongside the existing `formats` parameter. Both must match for a function to run:
+
+```python
+@style_task(formats=['gantt'], tags=['detailed'])
+def detailed_gantt_styling(entity, context):
+    """Only runs for gantt output AND when 'detailed' tag is active."""
+    return {'tags': ['active']}
+```
+
+### Checking Tags in Functions
+
+Access active tags via `context.style_tags`:
+
+```python
+@style_node
+def conditional_styling(entity, context):
+    """Use tags for conditional logic within a function."""
+    if 'verbose' in context.style_tags:
+        return {'fontsize': 16, 'border_width': 3}
+    return {'fontsize': 12}
 ```
 
 ## Examples

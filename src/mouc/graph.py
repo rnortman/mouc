@@ -24,11 +24,23 @@ class GraphView(Enum):
 class GraphGenerator:
     """Generate dependency graphs in DOT format."""
 
-    def __init__(self, feature_map: FeatureMap):
-        """Initialize with a feature map."""
+    def __init__(
+        self,
+        feature_map: FeatureMap,
+        styling_context: styling.StylingContext | None = None,
+    ):
+        """Initialize with a feature map.
+
+        Args:
+            feature_map: The feature map to generate a graph from
+            styling_context: Optional pre-configured styling context. If not provided,
+                           a default context will be created.
+        """
         self.feature_map = feature_map
-        # Create styling context
-        self.styling_context = styling.create_styling_context(feature_map, output_format="graph")
+        # Use provided context or create a default one
+        self.styling_context = styling_context or styling.create_styling_context(
+            feature_map, output_format="graph"
+        )
 
     def generate(
         self,

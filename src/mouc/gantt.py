@@ -93,6 +93,7 @@ class GanttScheduler:
         scheduler_config: SchedulingConfig | None = None,
         global_dns_periods: list[DNSPeriod] | None = None,
         gantt_config: GanttConfig | None = None,
+        style_tags: set[str] | None = None,
     ):
         """Initialize scheduler with a feature map and optional dates.
 
@@ -107,6 +108,7 @@ class GanttScheduler:
             scheduler_config: Optional scheduling configuration for prioritization strategy
             global_dns_periods: Optional global DNS periods that apply to all resources
             gantt_config: Optional gantt configuration for grouping/sorting
+            style_tags: Optional set of active style tags for filtering styling functions
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
@@ -148,7 +150,7 @@ class GanttScheduler:
         # Create styling context for task styling (with config access)
         config_dict = {"gantt": self.gantt_config.model_dump()}
         self.styling_context: StylingContext = create_styling_context(
-            feature_map, output_format="gantt", config=config_dict
+            feature_map, output_format="gantt", config=config_dict, style_tags=style_tags
         )
 
     def _calculate_chart_start_date(self) -> date:

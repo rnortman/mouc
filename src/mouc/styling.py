@@ -5,7 +5,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, overload
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Generic, Literal, Protocol, TypedDict, TypeVar, overload
 
 if TYPE_CHECKING:
     from .models import FeatureMap
@@ -153,6 +154,14 @@ class StylingContext(Protocol):
         """
         ...
 
+    @property
+    def style_tags(self) -> set[str]:
+        """Active style tags for filtering styling functions.
+
+        Returns empty set if no tags are active.
+        """
+        ...
+
 
 # ============================================================================
 # Return Type Definitions
@@ -250,18 +259,31 @@ FilterEntityFunc = Callable[[Sequence[Entity], StylingContext], list[Entity]]
 # Internal Registry
 # ============================================================================
 
-_node_stylers: list[tuple[int, list[str] | None, NodeStylerFunc]] = []
-_edge_stylers: list[tuple[int, list[str] | None, EdgeStylerFunc]] = []
-_label_stylers: list[tuple[int, list[str] | None, LabelStylerFunc]] = []
-_task_stylers: list[tuple[int, list[str] | None, TaskStylerFunc]] = []
-_metadata_stylers: list[tuple[int, list[str] | None, MetadataStylerFunc]] = []
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+@dataclass(frozen=True, slots=True)
+class StylerRegistration(Generic[_F]):
+    """Registration entry for a styling function."""
+
+    priority: int
+    formats: list[str] | None
+    tags: list[str] | None
+    func: _F
+
+
+_node_stylers: list[StylerRegistration[NodeStylerFunc]] = []
+_edge_stylers: list[StylerRegistration[EdgeStylerFunc]] = []
+_label_stylers: list[StylerRegistration[LabelStylerFunc]] = []
+_task_stylers: list[StylerRegistration[TaskStylerFunc]] = []
+_metadata_stylers: list[StylerRegistration[MetadataStylerFunc]] = []
 
 # Task organization registries
-_group_tasks_funcs: list[tuple[int, list[str] | None, GroupTasksFunc]] = []
-_sort_tasks_funcs: list[tuple[int, list[str] | None, SortTasksFunc]] = []
+_group_tasks_funcs: list[StylerRegistration[GroupTasksFunc]] = []
+_sort_tasks_funcs: list[StylerRegistration[SortTasksFunc]] = []
 
 # Entity filtering registry
-_filter_entity_funcs: list[tuple[int, list[str] | None, FilterEntityFunc]] = []
+_filter_entity_funcs: list[StylerRegistration[FilterEntityFunc]] = []
 
 
 # ============================================================================
@@ -275,7 +297,10 @@ def style_node(func: NodeStylerFunc) -> NodeStylerFunc: ...
 
 @overload
 def style_node(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[NodeStylerFunc], NodeStylerFunc]: ...
 
 
@@ -284,6 +309,7 @@ def style_node(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> NodeStylerFunc | Callable[[NodeStylerFunc], NodeStylerFunc]:
     """Register a node styling function.
 
@@ -298,6 +324,8 @@ def style_node(
     Args:
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Examples:
         @style_node
@@ -307,10 +335,14 @@ def style_node(
         @style_node(priority=20, formats=['graph'])
         def graph_only_styler(entity, context):
             return {'border_color': '#00ff00'}
+
+        @style_node(tags=['detailed'])
+        def detailed_styler(entity, context):
+            return {'fontsize': 14}
     """
 
     def decorator(f: NodeStylerFunc) -> NodeStylerFunc:
-        _node_stylers.append((priority, formats, f))
+        _node_stylers.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -326,7 +358,10 @@ def style_edge(func: EdgeStylerFunc) -> EdgeStylerFunc: ...
 
 @overload
 def style_edge(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[EdgeStylerFunc], EdgeStylerFunc]: ...
 
 
@@ -335,6 +370,7 @@ def style_edge(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> EdgeStylerFunc | Callable[[EdgeStylerFunc], EdgeStylerFunc]:
     """Register an edge styling function.
 
@@ -346,6 +382,8 @@ def style_edge(
     Args:
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Edge types:
         - 'requires': entity depends on another
@@ -358,7 +396,7 @@ def style_edge(
     """
 
     def decorator(f: EdgeStylerFunc) -> EdgeStylerFunc:
-        _edge_stylers.append((priority, formats, f))
+        _edge_stylers.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -374,7 +412,10 @@ def style_label(func: LabelStylerFunc) -> LabelStylerFunc: ...
 
 @overload
 def style_label(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[LabelStylerFunc], LabelStylerFunc]: ...
 
 
@@ -383,6 +424,7 @@ def style_label(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> LabelStylerFunc | Callable[[LabelStylerFunc], LabelStylerFunc]:
     """Register a markdown label styling function.
 
@@ -399,6 +441,8 @@ def style_label(
     Args:
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Example:
         @style_label
@@ -411,7 +455,7 @@ def style_label(
     """
 
     def decorator(f: LabelStylerFunc) -> LabelStylerFunc:
-        _label_stylers.append((priority, formats, f))
+        _label_stylers.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -427,7 +471,10 @@ def style_task(func: TaskStylerFunc) -> TaskStylerFunc: ...
 
 @overload
 def style_task(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[TaskStylerFunc], TaskStylerFunc]: ...
 
 
@@ -436,6 +483,7 @@ def style_task(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> TaskStylerFunc | Callable[[TaskStylerFunc], TaskStylerFunc]:
     """Register a gantt task styling function.
 
@@ -450,6 +498,8 @@ def style_task(
     Args:
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Mermaid supports the following task tags:
         - 'done': Marks completed tasks (green)
@@ -479,7 +529,7 @@ def style_task(
     """
 
     def decorator(f: TaskStylerFunc) -> TaskStylerFunc:
-        _task_stylers.append((priority, formats, f))
+        _task_stylers.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -495,7 +545,10 @@ def style_metadata(func: MetadataStylerFunc) -> MetadataStylerFunc: ...
 
 @overload
 def style_metadata(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[MetadataStylerFunc], MetadataStylerFunc]: ...
 
 
@@ -504,6 +557,7 @@ def style_metadata(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> MetadataStylerFunc | Callable[[MetadataStylerFunc], MetadataStylerFunc]:
     """Register a metadata styling function for markdown output.
 
@@ -519,6 +573,8 @@ def style_metadata(
     Args:
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Examples:
         @style_metadata
@@ -541,7 +597,7 @@ def style_metadata(
     """
 
     def decorator(f: MetadataStylerFunc) -> MetadataStylerFunc:
-        _metadata_stylers.append((priority, formats, f))
+        _metadata_stylers.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -557,7 +613,10 @@ def group_tasks(func: GroupTasksFunc) -> GroupTasksFunc: ...
 
 @overload
 def group_tasks(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[GroupTasksFunc], GroupTasksFunc]: ...
 
 
@@ -566,6 +625,7 @@ def group_tasks(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> GroupTasksFunc | Callable[[GroupTasksFunc], GroupTasksFunc]:
     """Register a task grouping function for gantt charts.
 
@@ -581,6 +641,8 @@ def group_tasks(
         priority: Execution priority (higher number = higher priority, user functions default to 10,
                  built-in config functions use 5)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Return dict mapping:
         - Keys: Section names (str) or None for no section
@@ -611,7 +673,7 @@ def group_tasks(
     """
 
     def decorator(f: GroupTasksFunc) -> GroupTasksFunc:
-        _group_tasks_funcs.append((priority, formats, f))
+        _group_tasks_funcs.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -627,7 +689,10 @@ def sort_tasks(func: SortTasksFunc) -> SortTasksFunc: ...
 
 @overload
 def sort_tasks(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[SortTasksFunc], SortTasksFunc]: ...
 
 
@@ -636,6 +701,7 @@ def sort_tasks(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> SortTasksFunc | Callable[[SortTasksFunc], SortTasksFunc]:
     """Register a task sorting function for gantt charts.
 
@@ -650,6 +716,8 @@ def sort_tasks(
         priority: Execution priority (higher number = higher priority, user functions default to 10,
                  built-in config functions use 5)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Examples:
         @sort_tasks(formats=['gantt'])
@@ -670,7 +738,7 @@ def sort_tasks(
     """
 
     def decorator(f: SortTasksFunc) -> SortTasksFunc:
-        _sort_tasks_funcs.append((priority, formats, f))
+        _sort_tasks_funcs.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -686,7 +754,10 @@ def filter_entity(func: FilterEntityFunc) -> FilterEntityFunc: ...
 
 @overload
 def filter_entity(
-    *, priority: int = 10, formats: list[str] | None = None
+    *,
+    priority: int = 10,
+    formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> Callable[[FilterEntityFunc], FilterEntityFunc]: ...
 
 
@@ -695,6 +766,7 @@ def filter_entity(
     *,
     priority: int = 10,
     formats: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> FilterEntityFunc | Callable[[FilterEntityFunc], FilterEntityFunc]:
     """Register an entity filtering function that works across all output types.
 
@@ -707,6 +779,8 @@ def filter_entity(
         priority: Execution priority (lower numbers first). Default is 10.
         formats: Optional list of formats to apply to (e.g., ['gantt', 'markdown']).
                 None means all formats (markdown, docx, graph, gantt).
+        tags: Optional list of tags that enable this function. None means always run.
+              If specified, function runs only if ANY tag matches active style_tags.
 
     Examples:
         @filter_entity(formats=['gantt'])
@@ -720,14 +794,14 @@ def filter_entity(
             allowed_tags = {'backend', 'frontend'}
             return [e for e in entities if any(tag in allowed_tags for tag in e.tags)]
 
-        @filter_entity(formats=['markdown', 'docx'])
+        @filter_entity(formats=['markdown', 'docx'], tags=['quarterly-report'])
         def filter_by_timeframe(entities, context):
-            '''Include only Q1 entities in documents.'''
+            '''Include only Q1 entities in documents (when quarterly-report tag is active).'''
             return [e for e in entities if e.meta.get('timeframe', '').startswith('2025-Q1')]
     """
 
     def decorator(f: FilterEntityFunc) -> FilterEntityFunc:
-        _filter_entity_funcs.append((priority, formats, f))
+        _filter_entity_funcs.append(StylerRegistration(priority, formats, tags, f))
         return f
 
     if func is None:
@@ -896,19 +970,40 @@ def clear_registrations() -> None:
     _filter_entity_funcs.clear()
 
 
+def _tags_match(func_tags: list[str] | None, active_tags: set[str]) -> bool:
+    """Check if a function's tags match the active style tags.
+
+    Args:
+        func_tags: Tags specified on the function (None = always run)
+        active_tags: Currently active style tags
+
+    Returns:
+        True if the function should run, False otherwise
+    """
+    # None means no tag requirement - always run
+    if func_tags is None:
+        return True
+    # If tags specified, at least one must match (OR logic)
+    return bool(set(func_tags) & active_tags)
+
+
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
     """Apply all registered node styling functions in priority order."""
     # Sort by priority (lower numbers first)
-    stylers = sorted(_node_stylers, key=lambda x: x[0])
+    stylers = sorted(_node_stylers, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, formats, styler in stylers:
+    for reg in stylers:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
-        result = styler(entity, context)
+        result = reg.func(entity, context)
         if result:
             final_style.update(result)
 
@@ -920,16 +1015,20 @@ def apply_edge_styles(
 ) -> dict[str, Any]:
     """Apply all registered edge styling functions in priority order."""
     # Sort by priority (lower numbers first)
-    stylers = sorted(_edge_stylers, key=lambda x: x[0])
+    stylers = sorted(_edge_stylers, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, formats, styler in stylers:
+    for reg in stylers:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
-        result = styler(from_id, to_id, edge_type, context)
+        result = reg.func(from_id, to_id, edge_type, context)
         if result:
             final_style.update(result)
 
@@ -942,16 +1041,20 @@ def apply_label_styles(entity: Entity, context: StylingContext) -> str | None:
     Returns the last non-None result, or None if no stylers or all return None.
     """
     # Sort by priority (lower numbers first)
-    stylers = sorted(_label_stylers, key=lambda x: x[0])
+    stylers = sorted(_label_stylers, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Apply in order, keeping track of last non-None result
     label = None
-    for _priority, formats, styler in stylers:
+    for reg in stylers:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
-        result = styler(entity, context)
+        result = reg.func(entity, context)
         if result is not None:
             label = result
 
@@ -961,16 +1064,20 @@ def apply_label_styles(entity: Entity, context: StylingContext) -> str | None:
 def apply_task_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:
     """Apply all registered task styling functions in priority order."""
     # Sort by priority (lower numbers first)
-    stylers = sorted(_task_stylers, key=lambda x: x[0])
+    stylers = sorted(_task_stylers, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Merge results - later overrides earlier
     final_style: dict[str, Any] = {}
-    for _priority, formats, styler in stylers:
+    for reg in stylers:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
-        result = styler(entity, context)
+        result = reg.func(entity, context)
         if result:
             # Special handling for tags - merge lists instead of replacing
             if "tags" in result and "tags" in final_style:
@@ -1001,16 +1108,20 @@ def apply_metadata_styles(
         New metadata dict with styling functions applied
     """
     # Sort by priority (lower numbers first)
-    stylers = sorted(_metadata_stylers, key=lambda x: x[0])
+    stylers = sorted(_metadata_stylers, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Chain functions - output of one becomes input to next
     result = base_metadata
-    for _priority, formats, styler in stylers:
+    for reg in stylers:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
-        result = styler(entity, context, result)
+        result = reg.func(entity, context, result)
 
     return result
 
@@ -1029,17 +1140,21 @@ def apply_entity_filters(entities: Sequence[Entity], context: StylingContext) ->
         Filtered list of entities
     """
     # Sort by priority (lower numbers first - filters chain in order)
-    funcs = sorted(_filter_entity_funcs, key=lambda x: x[0])
+    funcs = sorted(_filter_entity_funcs, key=lambda x: x.priority)
+    active_tags = context.style_tags
 
     # Chain all matching filters
     result: list[Entity] = list(entities)
-    for _priority, formats, func in funcs:
+    for reg in funcs:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
         # Apply filter (output becomes input for next filter)
-        result = func(result, context)
+        result = reg.func(result, context)
 
     return result
 
@@ -1059,16 +1174,20 @@ def apply_task_grouping(
         Dict mapping section names (or None) to entity lists
     """
     # Sort by priority (higher numbers first for grouping - highest priority wins)
-    funcs = sorted(_group_tasks_funcs, key=lambda x: x[0], reverse=True)
+    funcs = sorted(_group_tasks_funcs, key=lambda x: x.priority, reverse=True)
+    active_tags = context.style_tags
 
-    # Find and apply highest priority function that matches format
-    for _priority, formats, func in funcs:
+    # Find and apply highest priority function that matches format and tags
+    for reg in funcs:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
         # Apply this function and return
-        return func(entities, context)
+        return reg.func(entities, context)
 
     # No grouping function registered or matched - return single group
     return {None: list(entities)}
@@ -1087,16 +1206,20 @@ def apply_task_sorting(entities: Sequence[Entity], context: StylingContext) -> l
         Sorted list of entities
     """
     # Sort by priority (higher numbers first for sorting - highest priority wins)
-    funcs = sorted(_sort_tasks_funcs, key=lambda x: x[0], reverse=True)
+    funcs = sorted(_sort_tasks_funcs, key=lambda x: x.priority, reverse=True)
+    active_tags = context.style_tags
 
-    # Find and apply highest priority function that matches format
-    for _priority, formats, func in funcs:
+    # Find and apply highest priority function that matches format and tags
+    for reg in funcs:
         # Skip if format filter is set and doesn't match
-        if formats is not None and context.output_format not in formats:
+        if reg.formats is not None and context.output_format not in reg.formats:
+            continue
+        # Skip if tags specified but none match active tags
+        if not _tags_match(reg.tags, active_tags):
             continue
 
         # Apply this function and return
-        return func(entities, context)
+        return reg.func(entities, context)
 
     # No sorting function registered or matched - return entities unchanged
     return list(entities)
@@ -1115,10 +1238,12 @@ class _StylingContextImpl:
         feature_map: FeatureMap,
         output_format: str | None = None,
         config: dict[str, Any] | None = None,
+        style_tags: set[str] | None = None,
     ):
         self._feature_map = feature_map
         self._output_format = output_format
         self._config = config or {}
+        self._style_tags = style_tags or set()
         self._metadata_cache: dict[str, list[str]] = {}
         self._transitive_requires_cache: dict[str, set[str]] = {}
         self._transitive_enables_cache: dict[str, set[str]] = {}
@@ -1129,6 +1254,11 @@ class _StylingContextImpl:
     def output_format(self) -> str | None:
         """Output format being generated ('markdown', 'docx', 'gantt', etc.)."""
         return self._output_format
+
+    @property
+    def style_tags(self) -> set[str]:
+        """Active style tags for filtering styling functions."""
+        return self._style_tags
 
     def get_entity(self, entity_id: str) -> Entity | None:
         """Get entity by ID, or None if not found."""
@@ -1221,6 +1351,7 @@ def create_styling_context(
     feature_map: FeatureMap,
     output_format: str | None = None,
     config: dict[str, Any] | None = None,
+    style_tags: set[str] | None = None,
 ) -> StylingContext:
     """Create a styling context for the given feature map.
 
@@ -1228,11 +1359,12 @@ def create_styling_context(
         feature_map: The feature map to create context for
         output_format: Optional output format identifier ('markdown', 'docx', 'gantt', etc.)
         config: Optional configuration dict (accessible to styling functions via context._config)
+        style_tags: Optional set of active style tags for filtering styling functions
 
     Returns:
         A StylingContext that can be used by styling functions
     """
-    return _StylingContextImpl(feature_map, output_format, config)  # type: ignore
+    return _StylingContextImpl(feature_map, output_format, config, style_tags)  # type: ignore
 
 
 # ============================================================================
