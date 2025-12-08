@@ -7,9 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2025-12-08
+
+### Added
+- Bounded rollout scheduling algorithm with CR-aware triggering
+
 ### Changed
-- Refactored scheduler into pluggable architecture with factories for algorithms and pre-processors
-- GanttScheduler now delegates to SchedulingService (unified scheduling path)
+- Refactored scheduler into pluggable architecture
 - Added `--algorithm` CLI flag to `schedule` and `gantt` commands
 
 ## [0.4.5] - 2025-12-08

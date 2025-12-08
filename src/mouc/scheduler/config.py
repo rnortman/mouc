@@ -9,8 +9,8 @@ class AlgorithmType(str, Enum):
     """Available scheduling algorithms."""
 
     PARALLEL_SGS = "parallel_sgs"
+    BOUNDED_ROLLOUT = "bounded_rollout"
     # Future algorithms:
-    # BOUNDED_ROLLOUT = "bounded_rollout"
     # OR_TOOLS = "or_tools"
     # TABU_SEARCH = "tabu_search"
 
@@ -34,6 +34,19 @@ class PreProcessorConfig(BaseModel):
     type: PreProcessorType = PreProcessorType.BACKWARD_PASS
 
 
+class RolloutConfig(BaseModel):
+    """Configuration for bounded rollout algorithm."""
+
+    # Priority threshold: only trigger rollout for tasks below this priority
+    priority_threshold: int = 70
+    # Minimum priority difference to consider rollout worthwhile
+    min_priority_gap: int = 20
+    # CR threshold: only trigger rollout for tasks with CR above this (relaxed tasks)
+    cr_relaxed_threshold: float = 5.0
+    # Minimum CR gap: upcoming task must have CR at least this much lower (more urgent)
+    min_cr_urgency_gap: float = 3.0
+
+
 class SchedulingConfig(BaseModel):
     """Configuration for task prioritization and algorithm selection."""
 
@@ -46,3 +59,6 @@ class SchedulingConfig(BaseModel):
     # Algorithm and pre-processor selection
     algorithm: AlgorithmConfig = AlgorithmConfig()
     preprocessor: PreProcessorConfig = PreProcessorConfig()
+
+    # Bounded rollout configuration
+    rollout: RolloutConfig = RolloutConfig()

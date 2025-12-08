@@ -222,6 +222,13 @@ scheduler:
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority
   default_cr: "median"      # Default CR for non-deadline tasks
+  algorithm:
+    type: parallel_sgs      # "parallel_sgs" or "bounded_rollout"
+  rollout:                  # Only used when algorithm is bounded_rollout
+    priority_threshold: 70
+    min_priority_gap: 20
+    cr_relaxed_threshold: 5.0
+    min_cr_urgency_gap: 3.0
 ```
 
 **`strategy`** (optional, default: `"weighted"`): How to prioritize tasks for scheduling.
@@ -240,6 +247,19 @@ Valid values:
 Valid values:
 - `"median"` - Use median CR of deadline tasks (adaptive)
 - Numeric value (e.g., `5.0`) - Fixed CR for all non-deadline tasks
+
+**`algorithm.type`** (optional, default: `"parallel_sgs"`): Scheduling algorithm to use.
+
+Valid values:
+- `"parallel_sgs"` - Standard greedy chronological scheduling
+- `"bounded_rollout"` - Lookahead simulation for better priority handling
+
+**Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
+
+- **`priority_threshold`** (default: `70`): Trigger rollout for tasks with priority below this
+- **`min_priority_gap`** (default: `20`): Upcoming task must have priority at least this much higher
+- **`cr_relaxed_threshold`** (default: `5.0`): Trigger rollout for tasks with CR above this (relaxed deadline)
+- **`min_cr_urgency_gap`** (default: `3.0`): Upcoming task must have CR at least this much lower to be considered more urgent
 
 **Strategy Examples:**
 
@@ -263,6 +283,19 @@ scheduler:
 # Priority-driven: high priority tasks scheduled first regardless of deadlines
 scheduler:
   strategy: "priority_first"
+```
+
+```yaml
+# Bounded rollout for better global decisions
+scheduler:
+  strategy: "priority_first"
+  algorithm:
+    type: bounded_rollout
+  rollout:
+    priority_threshold: 70
+    min_priority_gap: 20
+    cr_relaxed_threshold: 5.0
+    min_cr_urgency_gap: 3.0
 ```
 
 See [Scheduling Documentation](scheduling.md) for detailed algorithm behavior.

@@ -18,7 +18,7 @@ Configuration:
 
 # Core dataclasses
 # Algorithms
-from .algorithms import ParallelScheduler, create_algorithm
+from .algorithms import BoundedRolloutScheduler, ParallelScheduler, create_algorithm
 
 # Configuration
 from .config import (
@@ -26,6 +26,7 @@ from .config import (
     AlgorithmType,
     PreProcessorConfig,
     PreProcessorType,
+    RolloutConfig,
     SchedulingConfig,
 )
 from .core import (
@@ -69,6 +70,7 @@ __all__ = [
     "AlgorithmType",
     "PreProcessorConfig",
     "PreProcessorType",
+    "RolloutConfig",
     # Protocols
     "PreProcessor",
     "SchedulingAlgorithm",
@@ -82,6 +84,7 @@ __all__ = [
     "parse_timeframe",
     # Algorithms
     "ParallelScheduler",
+    "BoundedRolloutScheduler",
     "create_algorithm",
     # Pre-processors
     "BackwardPassPreProcessor",

@@ -29,6 +29,19 @@ class ResourceSchedule:
         )
         self.resource_name = resource_name
 
+    def copy(self) -> "ResourceSchedule":
+        """Create a copy of this schedule for rollout simulations.
+
+        Returns:
+            A new ResourceSchedule with copied busy periods
+        """
+        new_schedule = ResourceSchedule(
+            unavailable_periods=None,
+            resource_name=self.resource_name,
+        )
+        new_schedule.busy_periods = list(self.busy_periods)
+        return new_schedule
+
     def add_busy_period(self, start: date, end: date) -> None:
         """Add a busy period and maintain sorted order.
 

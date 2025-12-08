@@ -470,3 +470,113 @@ mouc gantt feature_map.yaml -v 3    # Full debug trace
 7. **Flexible**: Handles various constraints (dependencies, time windows, resources, priorities)
 8. **DNS-aware**: Accounts for DNS interruptions when choosing resources and calculating completion times
 9. **Debuggable**: Multiple verbosity levels help understand scheduling decisions
+
+## Bounded Rollout Algorithm
+
+The scheduler also supports an advanced **Bounded Rollout** algorithm that can make better global decisions by simulating the impact of scheduling decisions.
+
+### The Problem with Greedy Scheduling
+
+The standard Parallel SGS makes locally optimal decisions at each time step. This can lead to globally suboptimal schedules:
+
+**Example scenario:**
+- Resource Alice is free now
+- Task A (priority 30, no deadline) is eligible now and takes 10 days
+- Task B (priority 90, deadline in 3 weeks) becomes eligible in 2 days (blocked by a dependency)
+- Greedy scheduler assigns Task A to Alice immediately
+- When Task B becomes eligible on day 2, Alice is busy until day 10
+- Task B starts on day 10, finishes day 20, cutting it close on the deadline
+- **Better decision**: Leave Alice idle for 2 days, assign Task B on day 3, it finishes day 13 with margin. Then assign Task A.
+
+### How Bounded Rollout Works
+
+When about to schedule a low-priority task, the scheduler checks if a higher-priority task will become eligible before the current task would complete. If so, it runs a bounded simulation:
+
+1. **Scenario A**: Schedule the current task, run greedy until horizon
+2. **Scenario B**: Skip the current task (stay idle), run greedy until horizon
+3. **Compare** both scenarios using an objective function
+4. **Choose** the better option
+
+The "horizon" is when the current task would complete, keeping computation bounded.
+
+### Configuration
+
+Enable bounded rollout via CLI or config:
+
+```bash
+mouc gantt feature_map.yaml --algorithm bounded_rollout
+```
+
+Or in `mouc_config.yaml`:
+
+```yaml
+scheduler:
+  algorithm:
+    type: bounded_rollout
+  rollout:
+    priority_threshold: 70      # Trigger for tasks below this priority
+    min_priority_gap: 20        # Minimum priority gap to consider
+    cr_relaxed_threshold: 5.0   # Trigger for tasks with CR above this
+    min_cr_urgency_gap: 3.0     # Minimum CR gap to consider
+```
+
+**Parameters:**
+- `priority_threshold`: Trigger rollout for tasks with priority below this (default: 70)
+- `min_priority_gap`: The upcoming task must have priority at least this much higher (default: 20)
+- `cr_relaxed_threshold`: Trigger rollout for tasks with CR above this, even if priority is high (default: 5.0)
+- `min_cr_urgency_gap`: The upcoming task must have CR at least this much lower to be considered more urgent (default: 3.0)
+
+**Triggering Logic:**
+
+Rollout triggers when the current task is "relaxed" (low priority OR high CR) and a more urgent task is coming:
+
+1. **Relaxed task**: Either `priority < priority_threshold` OR `CR > cr_relaxed_threshold`
+2. **Urgent upcoming task**: Either `priority >= current + min_priority_gap` OR (`CR_diff >= min_cr_urgency_gap` AND `priority >= current - min_priority_gap`)
+
+### Objective Function
+
+The rollout compares scenarios using a score (lower is better):
+
+**For scheduled tasks:**
+- **Start time penalty**: `days_from_start × (priority / 100)` — earlier starts for high-priority tasks are better
+- **Tardiness penalty**: `days_late × priority × 10` — heavy penalty for missing deadlines
+
+**For unscheduled tasks (within the horizon):**
+- **Delay penalty**: `days_delayed × (priority / 100) × urgency_multiplier` — penalizes waiting, scaled by urgency
+- **Expected tardiness**: If the task has a deadline, calculates how late it would be if scheduled at the horizon, and applies the same heavy tardiness penalty
+
+The **expected tardiness** is key: if Task B (deadline Jan 12, duration 10 days) is unscheduled at horizon Jan 11, it would complete Jan 21 (9 days late). This adds a penalty of `9 × priority × 10`, making scenarios that leave urgent tasks unscheduled very costly.
+
+### Explainability
+
+Rollout decisions are logged and can be retrieved programmatically:
+
+```python
+scheduler = BoundedRolloutScheduler(tasks, current_date, config=config)
+result = scheduler.schedule()
+decisions = scheduler.get_rollout_decisions()
+
+for decision in decisions:
+    print(f"Task {decision.task_id} (pri={decision.task_priority}): "
+          f"{'skipped' if decision.decision == 'skip' else 'scheduled'} "
+          f"to wait for {decision.competing_task_id} (pri={decision.competing_priority})")
+```
+
+### When to Use Bounded Rollout
+
+Use bounded rollout when:
+- You have tasks with significantly different priorities
+- Lower-priority tasks might block higher-priority work
+- Schedule optimality is more important than scheduling speed
+
+Use standard Parallel SGS when:
+- All tasks have similar priorities
+- Scheduling speed is critical
+- The greedy solution is likely optimal
+
+### Limitations
+
+- **Not multi-level**: Rollout doesn't recurse (rollout within rollout)
+- **No preemption**: Can't interrupt running tasks
+- **Bounded horizon**: Only looks ahead to current task's completion time
+- **Performance overhead**: Runs simulations, so slower than pure greedy
