@@ -18,9 +18,9 @@ from .exceptions import MoucError
 from .gantt import GanttScheduler
 from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
+from .loader import load_feature_map
 from .logger import setup_logger
 from .models import FeatureMap
-from .parser import FeatureMapParser
 from .scheduler import (
     AlgorithmConfig,
     AlgorithmType,
@@ -28,7 +28,7 @@ from .scheduler import (
     SchedulingResult,
     SchedulingService,
 )
-from .unified_config import GanttConfig, WorkflowsConfig, load_unified_config
+from .unified_config import GanttConfig, load_unified_config
 
 app = typer.Typer(
     name="mouc",
@@ -41,32 +41,6 @@ app = typer.Typer(
 def get_config_path() -> Path | None:
     """Get the global config path."""
     return context.get_config_path()
-
-
-def _get_workflows_config(
-    feature_map_path: Path | None = None,
-) -> WorkflowsConfig | None:
-    """Get workflows config, trying various locations.
-
-    Args:
-        feature_map_path: Optional path to feature map (for directory lookup)
-
-    Returns:
-        WorkflowsConfig if found, None otherwise
-    """
-    config_path = get_config_path()
-    if not config_path and feature_map_path:
-        # Try feature map directory first, then current directory
-        feature_map_dir = Path(feature_map_path).parent
-        config_path = feature_map_dir / "mouc_config.yaml"
-        if not config_path.exists():
-            config_path = Path("mouc_config.yaml")
-
-    if config_path and config_path.exists():
-        unified = load_unified_config(config_path)
-        return unified.workflows
-
-    return None
 
 
 @app.callback()
@@ -143,9 +117,8 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
     if style_module or style_file:
         _load_styling(style_module, style_file)
 
-    # Parse the feature map
-    parser = FeatureMapParser(_get_workflows_config(file))
-    feature_map = parser.parse_file(file)
+    # Load the feature map
+    feature_map = load_feature_map(file)
 
     # Collect style tags from CLI and config
     active_style_tags = _collect_style_tags(style_tags, file)
@@ -225,9 +198,8 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     if style_module or style_file:
         _load_styling(style_module, style_file)
 
-    # Parse the feature map
-    parser = FeatureMapParser(_get_workflows_config(file))
-    feature_map = parser.parse_file(file)
+    # Load the feature map
+    feature_map = load_feature_map(file)
 
     # Load unified config if available
     unified_config = None
@@ -511,9 +483,8 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     parsed_start_date = _parse_date_option(start_date, "start-date")
     parsed_current_date = _parse_date_option(current_date, "current-date")
 
-    # Parse the feature map
-    parser = FeatureMapParser(_get_workflows_config(file))
-    feature_map = parser.parse_file(file)
+    # Load the feature map
+    feature_map = load_feature_map(file)
 
     # Resolve config path and load config
     resource_config_path = _resolve_gantt_config_path(resources)
@@ -675,9 +646,8 @@ def schedule(
     # Parse current date if provided
     parsed_current_date = _parse_date_option(current_date, "current-date")
 
-    # Parse the feature map
-    parser = FeatureMapParser(_get_workflows_config(file))
-    feature_map = parser.parse_file(file)
+    # Load the feature map
+    feature_map = load_feature_map(file)
 
     # Load resource and scheduler config if available
     config_path = get_config_path() or Path("mouc_config.yaml")

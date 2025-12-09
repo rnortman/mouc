@@ -1,4 +1,4 @@
-"""Tests for YAML parser."""
+"""Tests for YAML parser and feature map loading."""
 # pyright: reportPrivateUsage=false
 
 from pathlib import Path
@@ -12,7 +12,8 @@ from mouc.exceptions import (
     ParseError,
     ValidationError,
 )
-from mouc.parser import FeatureMapParser
+from mouc.loader import load_feature_map, validate_feature_map
+from mouc.parser import FeatureMapParser, resolve_graph_edges
 
 
 class TestFeatureMapParser:
@@ -28,10 +29,10 @@ class TestFeatureMapParser:
         """Get the fixtures directory."""
         return Path(__file__).parent / "fixtures"
 
-    def test_parse_simple_file(self, parser: FeatureMapParser, fixtures_dir: Path) -> None:
-        """Test parsing a simple valid file."""
+    def test_parse_simple_file(self, fixtures_dir: Path) -> None:
+        """Test loading a simple valid file with full processing."""
         file_path = fixtures_dir / "simple_feature_map.yaml"
-        feature_map = parser.parse_file(file_path)
+        feature_map = load_feature_map(file_path)
 
         assert feature_map.metadata.version == "1.0"
         assert feature_map.metadata.team == "test_team"
@@ -67,14 +68,12 @@ class TestFeatureMapParser:
         with pytest.raises(ParseError, match="File not found"):
             parser.parse_file("nonexistent.yaml")
 
-    def test_circular_dependency_detection(
-        self, parser: FeatureMapParser, fixtures_dir: Path
-    ) -> None:
+    def test_circular_dependency_detection(self, fixtures_dir: Path) -> None:
         """Test detection of circular dependencies."""
         file_path = fixtures_dir / "circular_dependency.yaml"
 
         with pytest.raises(CircularDependencyError, match="Circular dependency detected"):
-            parser.parse_file(file_path)
+            load_feature_map(file_path)
 
     def test_missing_reference_old_format(self, parser: FeatureMapParser) -> None:
         """Test detection of missing references in old format."""
@@ -88,8 +87,9 @@ class TestFeatureMapParser:
             }
         }
 
+        feature_map = parser._parse_data(data)
         with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
-            parser._parse_data(data)
+            validate_feature_map(feature_map)
 
     def test_missing_reference_new_format(self, parser: FeatureMapParser) -> None:
         """Test detection of missing references in new format."""
@@ -104,8 +104,9 @@ class TestFeatureMapParser:
             }
         }
 
+        feature_map = parser._parse_data(data)
         with pytest.raises(MissingReferenceError, match="unknown entity: nonexistent"):
-            parser._parse_data(data)
+            validate_feature_map(feature_map)
 
     def test_missing_type_in_entities_format(self, parser: FeatureMapParser) -> None:
         """Test that entities in 'entities' section must have type."""
@@ -283,6 +284,7 @@ class TestFeatureMapParser:
         }
 
         feature_map = parser._parse_data(data)
+        resolve_graph_edges(feature_map.entities)
 
         cap1 = feature_map.get_entity_by_id("cap1")
         story1 = feature_map.get_entity_by_id("story1")
@@ -319,6 +321,7 @@ class TestFeatureMapParser:
         }
 
         feature_map = parser._parse_data(data)
+        resolve_graph_edges(feature_map.entities)
 
         cap1 = feature_map.get_entity_by_id("cap1")
         cap2 = feature_map.get_entity_by_id("cap2")
@@ -359,6 +362,9 @@ class TestFeatureMapParser:
 
         # Check deprecation warning was emitted
         assert "WARNING: 'dependencies' field is deprecated" in captured.err
+
+        # Resolve edges for bidirectional check
+        resolve_graph_edges(feature_map.entities)
 
         # Check edges work correctly
         cap1 = feature_map.get_entity_by_id("cap1")

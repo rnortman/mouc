@@ -10,8 +10,8 @@ import pytest
 
 from mouc.exceptions import ValidationError
 from mouc.gantt import GanttScheduler
+from mouc.loader import load_feature_map
 from mouc.models import Dependency, Entity
-from mouc.parser import FeatureMapParser
 from mouc.resources import ResourceConfig
 from mouc.unified_config import WorkflowDefinition, WorkflowsConfig
 from mouc.workflows import expand_workflows, load_workflow
@@ -528,8 +528,7 @@ entities:
 """)
 
         config = WorkflowsConfig(stdlib=True)
-        parser = FeatureMapParser(config)
-        fm = parser.parse_file(feature_map)
+        fm = load_feature_map(feature_map, workflows_config=config)
 
         # Create a single resource
         resource_config = ResourceConfig.model_validate(
@@ -585,8 +584,7 @@ entities:
 """)
 
         config = WorkflowsConfig(stdlib=True)
-        parser = FeatureMapParser(config)
-        fm = parser.parse_file(feature_map)
+        fm = load_feature_map(feature_map, workflows_config=config)
 
         resource_config = ResourceConfig.model_validate(
             {
@@ -654,8 +652,7 @@ entities:
 """)
 
         config = WorkflowsConfig(stdlib=True)
-        parser = FeatureMapParser(config)
-        fm = parser.parse_file(feature_map)
+        fm = load_feature_map(feature_map, workflows_config=config)
 
         # Should have design and parent (impl)
         assert len(fm.entities) == 2
@@ -687,10 +684,10 @@ entities:
     workflow: design_impl
 """)
 
-        parser = FeatureMapParser(None)
-        fm = parser.parse_file(feature_map)
+        # No workflows config - should not expand
+        fm = load_feature_map(feature_map, workflows_config=None)
 
-        # Should have just the one entity
+        # Should have just the one entity (workflow not expanded)
         assert len(fm.entities) == 1
         assert fm.entities[0].id == "auth"
 
@@ -716,8 +713,7 @@ entities:
 """)
 
         config = WorkflowsConfig(stdlib=True)
-        parser = FeatureMapParser(config)
-        fm = parser.parse_file(feature_map)
+        fm = load_feature_map(feature_map, workflows_config=config)
 
         # prereq should enable the parent (design floats, parent requires prereq)
         prereq = fm.get_entity_by_id("prereq")

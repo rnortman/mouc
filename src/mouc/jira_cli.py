@@ -18,6 +18,7 @@ from .jira_client import JiraAuthError, JiraClient, JiraError
 from .jira_interactive import InteractiveResolver
 from .jira_report import ReportGenerator
 from .jira_sync import FieldConflict, JiraSynchronizer
+from .loader import load_feature_map
 from .logger import (
     VERBOSITY_CHANGES,
     changes_enabled,
@@ -28,7 +29,6 @@ from .logger import (
     setup_logger,
 )
 from .models import Entity, Link
-from .parser import FeatureMapParser
 from .unified_config import load_unified_config
 
 logger = get_logger()
@@ -242,9 +242,8 @@ def jira_list(
 ) -> None:
     """List all entities with Jira links."""
     try:
-        # Parse the feature map
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+        # Load the feature map
+        feature_map = load_feature_map(file)
 
         # Find entities with jira links
         entities_with_jira: list[tuple[str, Entity, list[Link]]] = []
@@ -484,8 +483,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
 
         if is_silent():
             typer.echo(f"Loading feature map from {file}...")
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+        feature_map = load_feature_map(file)
 
         # Create client and synchronizer
         if is_silent():
@@ -938,8 +936,7 @@ def jira_ignore_field(
     preventing any future Jira updates to that field.
     """
     try:
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+        feature_map = load_feature_map(file)
 
         entity = feature_map.get_entity_by_id(entity_id)
         if not entity:
@@ -983,8 +980,7 @@ def jira_ignore_value(
         mouc jira ignore-value my_feature start_date 2024-12-01
     """
     try:
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+        feature_map = load_feature_map(file)
 
         entity = feature_map.get_entity_by_id(entity_id)
         if not entity:
@@ -1027,8 +1023,7 @@ def jira_show_overrides(  # noqa: PLR0912 - CLI command displaying multiple over
     Otherwise, shows overrides for all entities.
     """
     try:
-        parser = FeatureMapParser()
-        feature_map = parser.parse_file(file)
+        feature_map = load_feature_map(file)
 
         entities_to_show: list[Entity] = []
         if entity_id:

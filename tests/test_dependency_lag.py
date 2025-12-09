@@ -285,7 +285,7 @@ class TestDependencyLagParser:
         assert dep.lag_days == 7.0  # 1 week
 
     def test_parser_handles_enables_with_lag(self) -> None:
-        """Test that parser correctly handles enables with lag."""
+        """Test that enables with lag are parsed and edge resolution creates reverse edges."""
         parser = FeatureMapParser()
         data = {
             "entities": {
@@ -312,6 +312,9 @@ class TestDependencyLagParser:
         dep = next(iter(cap1.enables))
         assert dep.entity_id == "cap2"
         assert dep.lag_days == 3.0
+
+        # Resolve edges to create reverse edges
+        resolve_graph_edges(feature_map.entities)
 
         # Check reverse edge was created with same lag
         cap2 = feature_map.get_entity_by_id("cap2")

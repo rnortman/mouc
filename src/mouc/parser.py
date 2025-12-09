@@ -1,19 +1,14 @@
-"""YAML parser and validator for Mouc."""
+"""YAML parser for Mouc feature maps."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
 
-from .exceptions import (
-    CircularDependencyError,
-    MissingReferenceError,
-    ParseError,
-    ValidationError,
-)
+from .exceptions import ParseError, ValidationError
 from .models import (
     Dependency,
     Entity,
@@ -21,10 +16,6 @@ from .models import (
     FeatureMapMetadata,
 )
 from .schemas import FeatureMapSchema
-from .workflows import expand_workflows
-
-if TYPE_CHECKING:
-    from .unified_config import WorkflowsConfig
 
 
 def resolve_graph_edges(entities: list[Entity]) -> None:
@@ -59,15 +50,12 @@ def resolve_graph_edges(entities: list[Entity]) -> None:
 
 
 class FeatureMapParser:
-    """Parser for feature map YAML files."""
+    """Parser for feature map YAML files.
 
-    def __init__(self, workflows_config: WorkflowsConfig | None = None) -> None:
-        """Initialize parser with optional workflows config.
-
-        Args:
-            workflows_config: Workflow configuration for expanding entities
-        """
-        self.workflows_config = workflows_config
+    This parser only handles YAML parsing and entity creation.
+    For full feature map loading with workflow expansion and validation,
+    use load_feature_map() from mouc.loader.
+    """
 
     def parse_file(self, file_path: Path | str) -> FeatureMap:
         """Parse a YAML file into a FeatureMap."""
@@ -151,74 +139,8 @@ class FeatureMapParser:
                 )
                 entities.append(entity)
 
-        # Expand workflows (before edge resolution)
-        entities = expand_workflows(entities, self.workflows_config)
-
-        # Resolve bidirectional edges
-        resolve_graph_edges(entities)
-
-        # Create feature map
-        feature_map = FeatureMap(
+        # Create feature map (no workflow expansion or edge resolution here)
+        return FeatureMap(
             metadata=metadata,
             entities=entities,
         )
-
-        # Validate references
-        self._validate_feature_map(feature_map)
-
-        return feature_map
-
-    def _validate_feature_map(self, feature_map: FeatureMap) -> None:
-        """Validate the entire feature map."""
-        all_ids = feature_map.get_all_ids()
-
-        # Validate all entity dependencies (requires and enables should both reference valid IDs)
-        for entity in feature_map.entities:
-            for dep_id in entity.requires_ids:
-                if dep_id not in all_ids:
-                    raise MissingReferenceError(
-                        f"{entity.type.title()} {entity.id} requires unknown entity: {dep_id}"
-                    )
-            for enabled_id in entity.enables_ids:
-                if enabled_id not in all_ids:
-                    raise MissingReferenceError(
-                        f"{entity.type.title()} {entity.id} enables unknown entity: {enabled_id}"
-                    )
-
-        # Check for circular dependencies
-        self._check_circular_dependencies(feature_map)
-
-    def _check_circular_dependencies(self, feature_map: FeatureMap) -> None:
-        """Check for circular dependencies in all entities."""
-        for entity in feature_map.entities:
-            visited: set[str] = set()
-            path: list[str] = []
-            if self._has_circular_dependency(feature_map, entity.id, visited, path):
-                cycle = " -> ".join(path[path.index(entity.id) :] + [entity.id])
-                raise CircularDependencyError(f"Circular dependency detected: {cycle}")
-
-    def _has_circular_dependency(
-        self,
-        feature_map: FeatureMap,
-        entity_id: str,
-        visited: set[str],
-        path: list[str],
-    ) -> bool:
-        """Recursively check for circular dependencies."""
-        if entity_id in path:
-            return True
-
-        if entity_id in visited:
-            return False
-
-        visited.add(entity_id)
-        path.append(entity_id)
-
-        entity = feature_map.get_entity_by_id(entity_id)
-        if entity:
-            for dep_id in entity.requires_ids:
-                if self._has_circular_dependency(feature_map, dep_id, visited, path):
-                    return True
-
-        path.pop()
-        return False
