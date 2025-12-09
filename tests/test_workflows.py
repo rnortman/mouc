@@ -543,3 +543,82 @@ class TestStdlibDiscovery:
         """STDLIB_WORKFLOWS should list all workflows."""
         expected = {"design_impl", "impl_pr", "full", "phased_rollout"}
         assert set(STDLIB_WORKFLOWS) == expected
+
+
+class TestDefaultWorkflows:
+    """Tests for type-based default workflows."""
+
+    def test_default_workflow_applied_by_type(self) -> None:
+        """Entities without workflow get type-specific default."""
+        config = WorkflowsConfig(
+            stdlib=True,
+            defaults={"capability": "design_impl"},
+        )
+        entities = [
+            make_entity("auth", entity_type="capability"),
+            make_entity("story", entity_type="user_story"),
+        ]
+        result = expand_workflows(entities, config)
+
+        # Capability should be expanded (design_impl = 3 entities)
+        # user_story should pass through unchanged
+        assert len(result) == 4
+        ids = {e.id for e in result}
+        assert "auth_design" in ids
+        assert "auth_impl" in ids
+        assert "auth" in ids
+        assert "story" in ids
+
+    def test_workflow_none_overrides_default(self) -> None:
+        """workflow: none should prevent expansion even with default."""
+        config = WorkflowsConfig(
+            stdlib=True,
+            defaults={"capability": "design_impl"},
+        )
+        entities = [
+            make_entity("no_expand", entity_type="capability", workflow="none"),
+        ]
+        result = expand_workflows(entities, config)
+
+        assert len(result) == 1
+        assert result[0].id == "no_expand"
+
+    def test_explicit_workflow_overrides_default(self) -> None:
+        """Explicit workflow takes precedence over type default."""
+        config = WorkflowsConfig(
+            stdlib=True,
+            defaults={"capability": "design_impl"},
+        )
+        entities = [
+            make_entity("feature", entity_type="capability", workflow="impl_pr"),
+        ]
+        result = expand_workflows(entities, config)
+
+        # impl_pr has impl, pr, milestone
+        assert len(result) == 3
+        ids = {e.id for e in result}
+        assert ids == {"feature_impl", "feature_pr", "feature"}
+
+    def test_no_default_for_type_passes_through(self) -> None:
+        """Entities with no default for their type pass through."""
+        config = WorkflowsConfig(
+            stdlib=True,
+            defaults={"capability": "design_impl"},
+        )
+        entities = [
+            make_entity("goal", entity_type="outcome"),
+        ]
+        result = expand_workflows(entities, config)
+
+        assert len(result) == 1
+        assert result[0].id == "goal"
+
+    def test_default_with_unknown_workflow_raises(self) -> None:
+        """Default referencing unknown workflow should raise."""
+        config = WorkflowsConfig(
+            stdlib=False,
+            defaults={"capability": "nonexistent"},
+        )
+        entities = [make_entity("test", entity_type="capability")]
+        with pytest.raises(ValidationError, match="unknown workflow"):
+            expand_workflows(entities, config)

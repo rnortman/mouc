@@ -86,11 +86,37 @@ Workflows are configured in `mouc_config.yaml`:
 ```yaml
 workflows:
   stdlib: true  # Enable standard library (default: false)
+  defaults:
+    capability: design_impl  # Default workflow for capabilities
+    user_story: design_impl  # Default workflow for user stories
+    # outcome not specified = no default
   definitions:
     my_workflow:
       handler: my_module.workflow_func  # Module path
       defaults:
         custom_default: "1w"
+```
+
+### Type-Based Defaults
+
+The `defaults` field maps entity types to workflow names. Entities without an explicit `workflow` field get the default for their type:
+
+```yaml
+workflows:
+  stdlib: true
+  defaults:
+    capability: design_impl
+    user_story: impl_pr
+```
+
+To disable a default for a specific entity, use `workflow: none`:
+
+```yaml
+entities:
+  simple_task:
+    type: capability
+    name: Simple Task
+    workflow: none  # Skip expansion even with default
 ```
 
 ### Custom Workflows

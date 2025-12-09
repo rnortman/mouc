@@ -140,39 +140,46 @@ def expand_workflows(  # noqa: PLR0912 - complex validation logic
     result: list[Entity] = []
 
     for entity in entities:
-        if entity.workflow is None:
+        workflow_name = entity.workflow
+
+        # Apply type-specific default if no explicit workflow
+        if workflow_name is None:
+            workflow_name = workflows_config.defaults.get(entity.type)
+
+        # Skip if no workflow or explicitly disabled
+        if workflow_name is None or workflow_name == "none":
             result.append(entity)
             continue
 
         # Validate workflow exists
-        if entity.workflow not in workflow_lookup:
+        if workflow_name not in workflow_lookup:
             available = ", ".join(sorted(workflow_lookup.keys())) or "(none)"
             raise ValidationError(
-                f"Entity '{entity.id}' references unknown workflow '{entity.workflow}'. "
+                f"Entity '{entity.id}' references unknown workflow '{workflow_name}'. "
                 f"Available workflows: {available}"
             )
 
-        factory, defaults = workflow_lookup[entity.workflow]
+        factory, defaults = workflow_lookup[workflow_name]
 
         # Expand the entity
         try:
             expanded = factory(entity, defaults, entity.phases)
         except Exception as e:
             raise ValidationError(
-                f"Workflow '{entity.workflow}' failed to expand entity '{entity.id}': {e}"
+                f"Workflow '{workflow_name}' failed to expand entity '{entity.id}': {e}"
             ) from e
 
         # Validate expansion result
         if not expanded:
             raise ValidationError(
-                f"Workflow '{entity.workflow}' returned empty list for entity '{entity.id}'"
+                f"Workflow '{workflow_name}' returned empty list for entity '{entity.id}'"
             )
 
         # Check that original ID is preserved
         expanded_ids = {e.id for e in expanded}
         if entity.id not in expanded_ids:
             raise ValidationError(
-                f"Workflow '{entity.workflow}' must return an entity with ID '{entity.id}' "
+                f"Workflow '{workflow_name}' must return an entity with ID '{entity.id}' "
                 f"to preserve dependency references. Got: {sorted(expanded_ids)}"
             )
 
@@ -180,7 +187,7 @@ def expand_workflows(  # noqa: PLR0912 - complex validation logic
         for exp_entity in expanded:
             if exp_entity.id != entity.id and exp_entity.id in existing_ids:
                 raise ValidationError(
-                    f"Workflow '{entity.workflow}' generated entity ID '{exp_entity.id}' "
+                    f"Workflow '{workflow_name}' generated entity ID '{exp_entity.id}' "
                     f"which already exists. Consider renaming the parent entity."
                 )
 
@@ -188,7 +195,7 @@ def expand_workflows(  # noqa: PLR0912 - complex validation logic
         for exp_entity in expanded:
             if exp_entity.workflow is not None and exp_entity.id != entity.id:
                 raise ValidationError(
-                    f"Workflow '{entity.workflow}' generated entity '{exp_entity.id}' "
+                    f"Workflow '{workflow_name}' generated entity '{exp_entity.id}' "
                     f"with workflow field set. Nested workflows are not supported."
                 )
 

@@ -28,6 +28,7 @@ class WorkflowsConfig(BaseModel):
     """Configuration for workflow expansion."""
 
     stdlib: bool = False  # Enable standard library workflows
+    defaults: dict[str, str] = Field(default_factory=dict)  # entity_type -> workflow_name
     definitions: dict[str, WorkflowDefinition] = Field(default_factory=dict)
 
 
