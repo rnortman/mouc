@@ -580,22 +580,23 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
             for entity_id, field_updates in conflict_resolutions.items():
                 entity = feature_map.get_entity_by_id(entity_id)
                 if entity:
-                    jira_sync_meta = entity.get_jira_sync_metadata()
                     for field, value in field_updates.items():
                         entity.meta[field] = value
-                        # Save the resolution choice for future syncs
-                        # Determine the choice based on the value selected
-                        for result in results:
-                            if result.entity_id == entity_id:
-                                for conflict in result.conflicts:
-                                    if conflict.field == field:
-                                        if value == conflict.jira_value:
-                                            jira_sync_meta.resolution_choices[field] = "jira"
-                                        elif value == conflict.mouc_value:
-                                            jira_sync_meta.resolution_choices[field] = "mouc"
-                                        break
-                                break
-                    entity.set_jira_sync_metadata(jira_sync_meta)
+                        # Save the resolution choice for future syncs if enabled
+                        if jira_config.defaults.save_resolution_choices:
+                            jira_sync_meta = entity.get_jira_sync_metadata()
+                            # Determine the choice based on the value selected
+                            for result in results:
+                                if result.entity_id == entity_id:
+                                    for conflict in result.conflicts:
+                                        if conflict.field == field:
+                                            if value == conflict.jira_value:
+                                                jira_sync_meta.resolution_choices[field] = "jira"
+                                            elif value == conflict.mouc_value:
+                                                jira_sync_meta.resolution_choices[field] = "mouc"
+                                            break
+                                    break
+                            entity.set_jira_sync_metadata(jira_sync_meta)
                     # Track conflict resolution fields too
                     if entity_id in sync_updates:
                         sync_updates[entity_id].update(field_updates)

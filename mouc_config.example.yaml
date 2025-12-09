@@ -129,3 +129,6 @@ defaults:
   conflict_resolution: "ask"
   skip_missing_fields: true
   timezone: "UTC"
+  # Save conflict resolution choices to YAML for automatic reuse in future syncs
+  # Set to false to avoid cluttering the YAML with jira_sync metadata
+  save_resolution_choices: true

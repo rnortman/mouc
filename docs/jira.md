@@ -305,6 +305,7 @@ defaults:
   conflict_resolution: "ask"
   skip_missing_fields: true
   timezone: "UTC"
+  save_resolution_choices: true
 ```
 
 ### Connection Settings
@@ -559,6 +560,24 @@ Timezone for date conversions.
 ```yaml
 defaults:
   timezone: "America/New_York"
+```
+
+#### `defaults.save_resolution_choices`
+
+Whether to save conflict resolution choices to the YAML file for automatic reuse in future syncs.
+
+**Options:** `true`, `false`
+
+**Default:** `true`
+
+When enabled, after you resolve a conflict (e.g., choosing "jira" for a start_date conflict), that choice is stored in the entity's `meta.jira_sync.resolution_choices` field. On subsequent syncs, the same choice is applied automatically without prompting.
+
+Set to `false` to disable this behavior and always prompt for conflicts.
+
+**Example:**
+```yaml
+defaults:
+  save_resolution_choices: false  # Don't remember conflict resolutions
 ```
 
 ## Jira Link Format

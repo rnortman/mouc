@@ -95,6 +95,10 @@ class Defaults(BaseModel):
         default=True, description="Skip fields that don't exist in Jira"
     )
     timezone: str = Field(default="UTC", description="Timezone for date conversions")
+    save_resolution_choices: bool = Field(
+        default=True,
+        description="Save conflict resolution choices to YAML for automatic reuse",
+    )
 
 
 class JiraConfig(BaseModel):

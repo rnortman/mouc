@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
+from typing import Any
 from unittest.mock import Mock, patch
 
 import pytest
+from ruamel.yaml import YAML
 from typer.testing import CliRunner
 
 from mouc.cli import app
@@ -182,3 +184,184 @@ field_mappings:
 
         assert result.exit_code == 0
         assert "No status transitions found in changelog" in result.stdout
+
+
+class TestSaveResolutionChoicesConfig:
+    """Test that save_resolution_choices config controls whether choices are persisted."""
+
+    @pytest.fixture
+    def mock_jira_client_with_conflict(self) -> Mock:
+        """Create a mock Jira client that returns data causing a conflict."""
+        mock_client = Mock()
+        mock_client.email = "test@example.com"
+        mock_client.fetch_issue.return_value = JiraIssueData(
+            key="TEST-123",
+            summary="Test issue",
+            status="In Progress",
+            fields={},
+            status_transitions={
+                "In Progress": datetime(2025, 1, 20, 10, 0, 0, tzinfo=timezone.utc)
+            },
+            assignee_email=None,
+        )
+        mock_client.get_custom_field_value = Mock(return_value=None)
+        return mock_client
+
+    def test_resolution_choices_saved_by_default(
+        self, tmp_path: Path, mock_jira_client_with_conflict: Mock
+    ) -> None:
+        """When save_resolution_choices is True (default), choices should be saved."""
+        # Create feature map with entity that has existing start_date (causes conflict)
+        feature_map_file = tmp_path / "feature_map.yaml"
+        feature_map_file.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  cap1:
+    type: capability
+    name: Cap 1
+    description: Test
+    links:
+      - jira:TEST-123
+    meta:
+      start_date: 2025-01-15
+""")
+
+        # Create config with save_resolution_choices=True (default)
+        config_file = tmp_path / "mouc_config.yaml"
+        config_file.write_text("""
+resources:
+  - name: test_user
+
+jira:
+  base_url: https://example.atlassian.net
+
+field_mappings:
+  start_date:
+    transition_to_status: "In Progress"
+    conflict_resolution: "ask"
+
+defaults:
+  save_resolution_choices: true
+""")
+
+        # Create answers file to resolve the conflict (choosing "jira")
+        answers_file = tmp_path / "answers.yaml"
+        answers_file.write_text("""
+conflicts:
+  - entity_id: cap1
+    field: start_date
+    choice: jira
+""")
+
+        with patch("mouc.jira_cli.JiraClient", return_value=mock_jira_client_with_conflict):
+            result = runner.invoke(
+                app,
+                [
+                    "jira",
+                    "sync",
+                    str(feature_map_file),
+                    "--config",
+                    str(config_file),
+                    "--answers",
+                    str(answers_file),
+                    "--apply",
+                ],
+            )
+
+        assert result.exit_code == 0, f"CLI failed: {result.stdout}"
+
+        # Read the feature map back and check if resolution_choices was saved
+        ruamel_yaml = YAML()
+        with feature_map_file.open() as f:
+            data: Any = ruamel_yaml.load(f)  # type: ignore[no-untyped-call]
+
+        # Resolution choices should be saved in jira_sync metadata
+        assert "meta" in data["entities"]["cap1"]
+        assert "jira_sync" in data["entities"]["cap1"]["meta"]
+        assert "resolution_choices" in data["entities"]["cap1"]["meta"]["jira_sync"]
+        assert (
+            data["entities"]["cap1"]["meta"]["jira_sync"]["resolution_choices"]["start_date"]
+            == "jira"
+        )
+
+    def test_resolution_choices_not_saved_when_disabled(
+        self, tmp_path: Path, mock_jira_client_with_conflict: Mock
+    ) -> None:
+        """When save_resolution_choices is False, choices should not be saved."""
+        # Create feature map with entity that has existing start_date (causes conflict)
+        feature_map_file = tmp_path / "feature_map.yaml"
+        feature_map_file.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  cap1:
+    type: capability
+    name: Cap 1
+    description: Test
+    links:
+      - jira:TEST-123
+    meta:
+      start_date: 2025-01-15
+""")
+
+        # Create config with save_resolution_choices=False
+        config_file = tmp_path / "mouc_config.yaml"
+        config_file.write_text("""
+resources:
+  - name: test_user
+
+jira:
+  base_url: https://example.atlassian.net
+
+field_mappings:
+  start_date:
+    transition_to_status: "In Progress"
+    conflict_resolution: "ask"
+
+defaults:
+  save_resolution_choices: false
+""")
+
+        # Create answers file to resolve the conflict (choosing "jira")
+        answers_file = tmp_path / "answers.yaml"
+        answers_file.write_text("""
+conflicts:
+  - entity_id: cap1
+    field: start_date
+    choice: jira
+""")
+
+        with patch("mouc.jira_cli.JiraClient", return_value=mock_jira_client_with_conflict):
+            result = runner.invoke(
+                app,
+                [
+                    "jira",
+                    "sync",
+                    str(feature_map_file),
+                    "--config",
+                    str(config_file),
+                    "--answers",
+                    str(answers_file),
+                    "--apply",
+                ],
+            )
+
+        assert result.exit_code == 0, f"CLI failed: {result.stdout}"
+
+        # Read the feature map back and check that resolution_choices was NOT saved
+        ruamel_yaml = YAML()
+        with feature_map_file.open() as f:
+            data: Any = ruamel_yaml.load(f)  # type: ignore[no-untyped-call]
+
+        # The meta should still be updated with the chosen value
+        assert "meta" in data["entities"]["cap1"]
+        assert data["entities"]["cap1"]["meta"]["start_date"] == date(2025, 1, 20)
+
+        # jira_sync with resolution_choices should NOT be present
+        assert "jira_sync" not in data["entities"]["cap1"]["meta"] or (
+            "resolution_choices" not in data["entities"]["cap1"]["meta"]["jira_sync"]
+            or not data["entities"]["cap1"]["meta"]["jira_sync"]["resolution_choices"]
+        ), "resolution_choices should not be saved when disabled"

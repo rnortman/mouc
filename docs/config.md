@@ -720,6 +720,7 @@ defaults:
   conflict_resolution: "ask"        # "jira_wins" | "mouc_wins" | "ask"
   skip_missing_fields: true         # Skip fields that don't exist in Jira
   timezone: "UTC"                   # Timezone for date conversions
+  save_resolution_choices: true     # Save choices to YAML for reuse
 ```
 
 ## Complete Example
@@ -844,6 +845,7 @@ defaults:
   conflict_resolution: "ask"
   skip_missing_fields: true
   timezone: "UTC"
+  save_resolution_choices: true
 ```
 
 ## See Also
