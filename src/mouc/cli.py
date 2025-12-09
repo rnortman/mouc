@@ -28,7 +28,7 @@ from .scheduler import (
     SchedulingResult,
     SchedulingService,
 )
-from .unified_config import GanttConfig, load_unified_config
+from .unified_config import GanttConfig, WorkflowsConfig, load_unified_config
 
 app = typer.Typer(
     name="mouc",
@@ -41,6 +41,32 @@ app = typer.Typer(
 def get_config_path() -> Path | None:
     """Get the global config path."""
     return context.get_config_path()
+
+
+def _get_workflows_config(
+    feature_map_path: Path | None = None,
+) -> WorkflowsConfig | None:
+    """Get workflows config, trying various locations.
+
+    Args:
+        feature_map_path: Optional path to feature map (for directory lookup)
+
+    Returns:
+        WorkflowsConfig if found, None otherwise
+    """
+    config_path = get_config_path()
+    if not config_path and feature_map_path:
+        # Try feature map directory first, then current directory
+        feature_map_dir = Path(feature_map_path).parent
+        config_path = feature_map_dir / "mouc_config.yaml"
+        if not config_path.exists():
+            config_path = Path("mouc_config.yaml")
+
+    if config_path and config_path.exists():
+        unified = load_unified_config(config_path)
+        return unified.workflows
+
+    return None
 
 
 @app.callback()
@@ -118,7 +144,7 @@ def graph(  # noqa: PLR0913 - CLI command needs multiple options
         _load_styling(style_module, style_file)
 
     # Parse the feature map
-    parser = FeatureMapParser()
+    parser = FeatureMapParser(_get_workflows_config(file))
     feature_map = parser.parse_file(file)
 
     # Collect style tags from CLI and config
@@ -200,7 +226,7 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         _load_styling(style_module, style_file)
 
     # Parse the feature map
-    parser = FeatureMapParser()
+    parser = FeatureMapParser(_get_workflows_config(file))
     feature_map = parser.parse_file(file)
 
     # Load unified config if available
@@ -486,7 +512,7 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
     parsed_current_date = _parse_date_option(current_date, "current-date")
 
     # Parse the feature map
-    parser = FeatureMapParser()
+    parser = FeatureMapParser(_get_workflows_config(file))
     feature_map = parser.parse_file(file)
 
     # Resolve config path and load config
@@ -650,7 +676,7 @@ def schedule(
     parsed_current_date = _parse_date_option(current_date, "current-date")
 
     # Parse the feature map
-    parser = FeatureMapParser()
+    parser = FeatureMapParser(_get_workflows_config(file))
     feature_map = parser.parse_file(file)
 
     # Load resource and scheduler config if available

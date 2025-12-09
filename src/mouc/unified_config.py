@@ -17,6 +17,20 @@ from .resources import DNSPeriod, ResourceConfig
 from .scheduler import SchedulingConfig
 
 
+class WorkflowDefinition(BaseModel):
+    """Configuration for a single workflow."""
+
+    handler: str  # "module.path.function" or "file/path.py:function"
+    defaults: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkflowsConfig(BaseModel):
+    """Configuration for workflow expansion."""
+
+    stdlib: bool = False  # Enable standard library workflows
+    definitions: dict[str, WorkflowDefinition] = Field(default_factory=dict)
+
+
 class GanttConfig(BaseModel):
     """Configuration for Gantt chart generation."""
 
@@ -96,6 +110,7 @@ class UnifiedConfig(BaseModel):
     scheduler: SchedulingConfig | None = None
     markdown: MarkdownConfig | None = None
     docx: DocxConfig | None = None
+    workflows: WorkflowsConfig | None = None
 
 
 def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0912
@@ -188,6 +203,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0
     # Parse style_tags if present
     style_tags: list[str] = data.get("style_tags", [])
 
+    # Build WorkflowsConfig if workflows section exists
+    workflows_config = None
+    if "workflows" in data:
+        workflows_config = WorkflowsConfig.model_validate(data["workflows"])
+
     return UnifiedConfig(
         resources=resource_config,
         global_dns_periods=global_dns_periods,
@@ -197,6 +217,7 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0
         scheduler=scheduler_config,
         markdown=markdown_config,
         docx=docx_config,
+        workflows=workflows_config,
     )
 
 

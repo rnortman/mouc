@@ -23,6 +23,8 @@ class EntitySchema(BaseModel):
     links: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     meta: dict[str, Any] = Field(default_factory=dict)
+    workflow: str | None = None  # Workflow name to expand this entity
+    phases: dict[str, dict[str, Any]] | None = None  # Per-phase overrides
 
     @model_validator(mode="after")
     def validate_entity_type(self) -> EntitySchema:

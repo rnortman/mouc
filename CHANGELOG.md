@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Dependency lag: `requires: [task_a + 1w]` delays start by 1 week after dependency completes
+- Workflows: expand entities into multiple phases via `workflow: design_impl` field
 
 ## [0.5.1] - 2025-12-09
 

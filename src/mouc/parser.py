@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
@@ -21,6 +21,10 @@ from .models import (
     FeatureMapMetadata,
 )
 from .schemas import FeatureMapSchema
+from .workflows import expand_workflows
+
+if TYPE_CHECKING:
+    from .unified_config import WorkflowsConfig
 
 
 def resolve_graph_edges(entities: list[Entity]) -> None:
@@ -56,6 +60,14 @@ def resolve_graph_edges(entities: list[Entity]) -> None:
 
 class FeatureMapParser:
     """Parser for feature map YAML files."""
+
+    def __init__(self, workflows_config: WorkflowsConfig | None = None) -> None:
+        """Initialize parser with optional workflows config.
+
+        Args:
+            workflows_config: Workflow configuration for expanding entities
+        """
+        self.workflows_config = workflows_config
 
     def parse_file(self, file_path: Path | str) -> FeatureMap:
         """Parse a YAML file into a FeatureMap."""
@@ -109,6 +121,8 @@ class FeatureMapParser:
                 links=entity_data.links,
                 tags=entity_data.tags,
                 meta=meta,
+                workflow=entity_data.workflow,
+                phases=entity_data.phases,
             )
             entities.append(entity)
 
@@ -132,8 +146,13 @@ class FeatureMapParser:
                     links=entity_data.links,
                     tags=entity_data.tags,
                     meta=meta,
+                    workflow=entity_data.workflow,
+                    phases=entity_data.phases,
                 )
                 entities.append(entity)
+
+        # Expand workflows (before edge resolution)
+        entities = expand_workflows(entities, self.workflows_config)
 
         # Resolve bidirectional edges
         resolve_graph_edges(entities)

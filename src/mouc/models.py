@@ -206,6 +206,9 @@ class Entity:
     tags: list[str] = field(default_factory=_default_list)
     meta: dict[str, Any] = field(default_factory=_default_dict)
     annotations: dict[str, Any] = field(default_factory=_default_dict)
+    workflow: str | None = None  # Workflow name to expand this entity
+    phases: dict[str, Any] | None = None  # Per-phase overrides for workflow
+    phase_of: tuple[str, str] | None = None  # (parent_id, phase_key) if this is a workflow phase
 
     @property
     def requires_ids(self) -> set[str]:

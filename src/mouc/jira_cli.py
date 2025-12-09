@@ -311,6 +311,102 @@ def _update_meta_in_place(yaml_entity: Any, new_meta: dict[str, Any]) -> None:
             existing_meta[key] = value
 
 
+def _find_entity_in_sections(
+    available_sections: dict[str, Any],
+    entity_id: str,
+    entity_type: str | None = None,
+) -> Any | None:
+    """Find an entity's YAML data in available sections.
+
+    Args:
+        available_sections: Dict mapping section names to their contents
+        entity_id: The entity ID to find
+        entity_type: Optional entity type for legacy section lookup
+
+    Returns:
+        The entity dict from YAML if found, None otherwise
+    """
+    # Map entity types to their legacy section names
+    type_to_legacy_section = {
+        "capability": "capabilities",
+        "user_story": "user_stories",
+        "outcome": "outcomes",
+    }
+
+    # Try unified 'entities' section first
+    if "entities" in available_sections and entity_id in available_sections["entities"]:
+        return available_sections["entities"][entity_id]
+
+    # Try legacy section if entity type provided
+    if entity_type:
+        legacy_section = type_to_legacy_section.get(entity_type)
+        if (
+            legacy_section
+            and legacy_section in available_sections
+            and entity_id in available_sections[legacy_section]
+        ):
+            return available_sections[legacy_section][entity_id]
+
+    # Try all legacy sections as fallback
+    for legacy_section in type_to_legacy_section.values():
+        if legacy_section in available_sections and entity_id in available_sections[legacy_section]:
+            return available_sections[legacy_section][entity_id]
+
+    return None
+
+
+def _update_phase_meta_in_place(
+    available_sections: dict[str, Any],
+    parent_id: str,
+    phase_key: str,
+    new_meta: dict[str, Any],
+    parent_type: str | None = None,
+) -> bool:
+    """Update meta in parent's phases section, creating if needed.
+
+    Args:
+        available_sections: Dict mapping section names to their contents
+        parent_id: ID of the parent entity (e.g., "auth_redesign")
+        phase_key: Phase key (e.g., "design")
+        new_meta: Meta dict to write
+        parent_type: Optional parent entity type for legacy section lookup
+
+    Returns:
+        True if updated successfully, False if parent not found
+    """
+    parent_data = _find_entity_in_sections(available_sections, parent_id, parent_type)
+    if not parent_data:
+        return False
+
+    # Create phases section if missing
+    if "phases" not in parent_data:
+        parent_data["phases"] = {}
+
+    # Create phase entry if missing
+    if phase_key not in parent_data["phases"]:
+        parent_data["phases"][phase_key] = {}
+
+    # Create meta section if missing
+    if "meta" not in parent_data["phases"][phase_key]:
+        parent_data["phases"][phase_key]["meta"] = {}
+
+    # Update meta fields using the same logic as _update_meta_in_place
+    existing_meta = parent_data["phases"][phase_key]["meta"]
+    if existing_meta is None:
+        parent_data["phases"][phase_key]["meta"] = new_meta
+    else:
+        # Clear keys that are in existing but not in new
+        keys_to_remove = [k for k in existing_meta if k not in new_meta]
+        for key in keys_to_remove:
+            del existing_meta[key]
+        # Update/add keys from new_meta
+        for key, value in new_meta.items():
+            if key not in existing_meta or existing_meta[key] != value:
+                existing_meta[key] = value
+
+    return True
+
+
 @jira_app.command("sync")
 def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multiple sync scenarios and options
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
@@ -526,7 +622,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
         raise typer.Exit(1) from None
 
 
-def write_feature_map(file_path: Path, feature_map: Any) -> None:
+def write_feature_map(file_path: Path, feature_map: Any) -> None:  # noqa: PLR0912
     """Write feature map back to YAML file with formatting preservation.
 
     Args:
@@ -541,7 +637,7 @@ def write_feature_map(file_path: Path, feature_map: Any) -> None:
         data: Any = yaml_rt.load(f)  # type: ignore[no-untyped-call]
 
     # Build list of all possible sections in the file (new and old format can coexist)
-    available_sections = {}
+    available_sections: dict[str, Any] = {}
     if "entities" in data:
         available_sections["entities"] = data["entities"]
     if "capabilities" in data:
@@ -570,8 +666,17 @@ def write_feature_map(file_path: Path, feature_map: Any) -> None:
     for entity in feature_map.entities:
         found = False
 
+        # Check if this is a workflow phase entity - redirect writes to parent's phases section
+        if entity.phase_of:
+            parent_id, phase_key = entity.phase_of
+            if _update_phase_meta_in_place(
+                available_sections, parent_id, phase_key, entity.meta, entity.type
+            ):
+                entities_updated += 1
+                found = True
+        # Standard entity - write to its own section
         # First, try the unified 'entities' section
-        if "entities" in available_sections and entity.id in available_sections["entities"]:
+        elif "entities" in available_sections and entity.id in available_sections["entities"]:
             _update_meta_in_place(available_sections["entities"][entity.id], entity.meta)
             entities_updated += 1
             found = True
