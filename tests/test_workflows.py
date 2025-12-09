@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from mouc.exceptions import ValidationError
+from mouc.gantt import GanttScheduler
 from mouc.models import Dependency, Entity
 from mouc.parser import FeatureMapParser
+from mouc.resources import ResourceConfig
 from mouc.unified_config import WorkflowDefinition, WorkflowsConfig
 from mouc.workflows import expand_workflows, load_workflow
 from mouc.workflows import stdlib as stdlib_module
@@ -256,6 +259,24 @@ class TestDesignImplWorkflow:
         assert design.id == "auth_design"
         assert parent.id == "auth"  # Parent keeps original ID
 
+    def test_design_uses_default_effort_not_parent(self) -> None:
+        """Design phase should use design_effort default, not inherit parent's effort."""
+        entity = make_entity("auth", meta={"effort": "2w", "resources": ["alice"]})
+        result = design_impl(entity, {}, None)
+        design = result[0]
+
+        # Design should have 3d default effort, not parent's 2w
+        assert design.meta.get("effort") == "3d"
+
+    def test_design_does_not_inherit_resources(self) -> None:
+        """Design phase should not inherit parent's resources."""
+        entity = make_entity("auth", meta={"effort": "2w", "resources": ["alice"]})
+        result = design_impl(entity, {}, None)
+        design = result[0]
+
+        # Design should not have resources (or have empty resources)
+        assert design.meta.get("resources") is None or design.meta.get("resources") == []
+
     def test_design_floats(self) -> None:
         """Design phase should have no requires (floats freely)."""
         entity = make_entity("auth", requires=["prereq_a", "prereq_b"])
@@ -451,6 +472,129 @@ class TestPhasedRolloutWorkflow:
 
         assert parent.enables_ids == set()
         assert rollout.enables_ids == {"next_task"}
+
+
+class TestWorkflowSchedulingIntegration:
+    """Tests for workflow entities going through the scheduler."""
+
+    def test_design_and_impl_not_scheduled_concurrently_on_same_resource(
+        self, tmp_path: Path
+    ) -> None:
+        """Design and impl should not overlap on the same resource."""
+        feature_map = tmp_path / "feature_map.yaml"
+        feature_map.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  auth:
+    type: capability
+    name: Auth
+    description: Auth system
+    workflow: design_impl
+    meta:
+      effort: "2w"
+""")
+
+        config = WorkflowsConfig(stdlib=True)
+        parser = FeatureMapParser(config)
+        fm = parser.parse_file(feature_map)
+
+        # Create a single resource
+        resource_config = ResourceConfig.model_validate(
+            {
+                "resources": [{"name": "alice", "capacity": 1.0}],
+                "groups": {},
+                "default_resource": "alice",
+            }
+        )
+
+        scheduler = GanttScheduler(
+            feature_map=fm,
+            resource_config=resource_config,
+            current_date=date(2025, 1, 1),
+        )
+        schedule = scheduler.schedule()
+
+        # Find the scheduled items
+        design_item = next(s for s in schedule.tasks if s.entity_id == "auth_design")
+        impl_item = next(s for s in schedule.tasks if s.entity_id == "auth")
+
+        # They should NOT overlap - design should finish before impl starts
+        # (impl requires design + 1w lag)
+        assert design_item.end_date <= impl_item.start_date, (
+            f"Design ({design_item.start_date} - {design_item.end_date}) "
+            f"overlaps with impl ({impl_item.start_date} - {impl_item.end_date})"
+        )
+
+        # Verify design has correct duration (3d default, not parent's 2w)
+        assert design_item.duration_days == 3.0, (
+            f"Design should be 3d, not {design_item.duration_days}d"
+        )
+        # Verify impl has correct duration (parent's 2w = 14d)
+        assert impl_item.duration_days == 14.0, (
+            f"Impl should be 14d, not {impl_item.duration_days}d"
+        )
+
+    def test_gantt_output_shows_correct_workflow_phases(self, tmp_path: Path) -> None:
+        """Gantt mermaid output should show workflow phases with correct dates."""
+        feature_map = tmp_path / "feature_map.yaml"
+        feature_map.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  auth:
+    type: capability
+    name: Auth
+    description: Auth system
+    workflow: design_impl
+    meta:
+      effort: "2w"
+""")
+
+        config = WorkflowsConfig(stdlib=True)
+        parser = FeatureMapParser(config)
+        fm = parser.parse_file(feature_map)
+
+        resource_config = ResourceConfig.model_validate(
+            {
+                "resources": [{"name": "alice", "capacity": 1.0}],
+                "groups": {},
+                "default_resource": "alice",
+            }
+        )
+
+        scheduler = GanttScheduler(
+            feature_map=fm,
+            resource_config=resource_config,
+            current_date=date(2025, 1, 1),
+        )
+        schedule = scheduler.schedule()
+
+        # Render to mermaid using the scheduler's generate_mermaid method
+        mermaid_output = scheduler.generate_mermaid(schedule, title="Workflow Test")
+
+        # Parse the mermaid output lines to find task definitions
+        lines = mermaid_output.strip().split("\n")
+        task_lines = [line.strip() for line in lines if line.strip().startswith("Auth")]
+
+        assert len(task_lines) == 2, f"Expected 2 task lines, got {len(task_lines)}: {task_lines}"
+
+        # Find design and impl lines
+        design_line = next((line for line in task_lines if "auth_design" in line), None)
+        impl_line = next((line for line in task_lines if ":auth," in line), None)
+
+        assert design_line is not None, f"Design task not found in: {task_lines}"
+        assert impl_line is not None, f"Impl task not found in: {task_lines}"
+
+        # Verify design: starts Jan 1, duration 3d
+        assert "2025-01-01" in design_line, f"Design should start 2025-01-01: {design_line}"
+        assert "3d" in design_line, f"Design should be 3d duration: {design_line}"
+
+        # Verify impl: starts Jan 12 (after design ends Jan 4 + 1w lag), duration 14d
+        assert "2025-01-12" in impl_line, f"Impl should start 2025-01-12: {impl_line}"
+        assert "14d" in impl_line, f"Impl should be 14d duration: {impl_line}"
 
 
 class TestParserIntegration:

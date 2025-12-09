@@ -59,8 +59,12 @@ def _create_phase_entity(  # noqa: PLR0913 - many optional params for flexibilit
     """Create a phase entity from parent with overrides applied."""
     override = _get_phase_override(phase_overrides, phase_key)
 
-    # Merge metadata
-    merged_meta = _merge_meta(parent.meta, override.get("meta"), defaults)
+    # Merge metadata, but exclude phase-specific fields from parent
+    # (effort and resources should come from defaults/overrides, not parent)
+    parent_meta_filtered = {
+        k: v for k, v in parent.meta.items() if k not in ("effort", "resources")
+    }
+    merged_meta = _merge_meta(parent_meta_filtered, override.get("meta"), defaults)
 
     # Build name
     name = override.get("name", f"{parent.name} - {name_suffix or phase_key.title()}")
