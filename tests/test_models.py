@@ -1,7 +1,106 @@
 """Tests for data models."""
 
-from mouc.models import Entity, FeatureMap, FeatureMapMetadata, JiraSyncMetadata, Link
+from mouc.models import (
+    DAYS_PER_MONTH,
+    DAYS_PER_WEEK,
+    Dependency,
+    Entity,
+    FeatureMap,
+    FeatureMapMetadata,
+    JiraSyncMetadata,
+    Link,
+)
 from mouc.parser import resolve_graph_edges
+
+
+class TestDependency:
+    """Test the Dependency model."""
+
+    def test_parse_simple(self) -> None:
+        """Test parsing a simple dependency without lag."""
+        dep = Dependency.parse("task_a")
+        assert dep.entity_id == "task_a"
+        assert dep.lag_days == 0.0
+
+    def test_parse_with_days_lag(self) -> None:
+        """Test parsing a dependency with days lag."""
+        dep = Dependency.parse("task_a + 5d")
+        assert dep.entity_id == "task_a"
+        assert dep.lag_days == 5.0
+
+    def test_parse_with_weeks_lag(self) -> None:
+        """Test parsing a dependency with weeks lag."""
+        dep = Dependency.parse("task_a + 2w")
+        assert dep.entity_id == "task_a"
+        assert dep.lag_days == 2 * DAYS_PER_WEEK
+
+    def test_parse_with_months_lag(self) -> None:
+        """Test parsing a dependency with months lag."""
+        dep = Dependency.parse("task_a + 1m")
+        assert dep.entity_id == "task_a"
+        assert dep.lag_days == DAYS_PER_MONTH
+
+    def test_parse_with_fractional_lag(self) -> None:
+        """Test parsing a dependency with fractional lag."""
+        dep = Dependency.parse("task_a + 1.5w")
+        assert dep.entity_id == "task_a"
+        assert dep.lag_days == 1.5 * DAYS_PER_WEEK
+
+    def test_parse_with_whitespace(self) -> None:
+        """Test parsing handles various whitespace."""
+        dep1 = Dependency.parse("  task_a  +  3d  ")
+        assert dep1.entity_id == "task_a"
+        assert dep1.lag_days == 3.0
+
+        dep2 = Dependency.parse("task_a+1w")
+        assert dep2.entity_id == "task_a"
+        assert dep2.lag_days == DAYS_PER_WEEK
+
+    def test_str_no_lag(self) -> None:
+        """Test string representation without lag."""
+        dep = Dependency(entity_id="task_a", lag_days=0.0)
+        assert str(dep) == "task_a"
+
+    def test_str_with_days(self) -> None:
+        """Test string representation with days."""
+        dep = Dependency(entity_id="task_a", lag_days=5.0)
+        assert str(dep) == "task_a + 5d"
+
+    def test_str_with_weeks(self) -> None:
+        """Test string representation with weeks."""
+        dep = Dependency(entity_id="task_a", lag_days=14.0)
+        assert str(dep) == "task_a + 2w"
+
+    def test_str_with_months(self) -> None:
+        """Test string representation with months."""
+        dep = Dependency(entity_id="task_a", lag_days=60.0)
+        assert str(dep) == "task_a + 2m"
+
+    def test_equality(self) -> None:
+        """Test Dependency equality."""
+        dep1 = Dependency(entity_id="task_a", lag_days=7.0)
+        dep2 = Dependency(entity_id="task_a", lag_days=7.0)
+        dep3 = Dependency(entity_id="task_a", lag_days=14.0)
+        dep4 = Dependency(entity_id="task_b", lag_days=7.0)
+
+        assert dep1 == dep2
+        assert dep1 != dep3
+        assert dep1 != dep4
+
+    def test_hashable(self) -> None:
+        """Test Dependency is hashable for use in sets."""
+        dep1 = Dependency(entity_id="task_a", lag_days=7.0)
+        dep2 = Dependency(entity_id="task_a", lag_days=7.0)
+        dep3 = Dependency(entity_id="task_b", lag_days=7.0)
+
+        deps = {dep1, dep2, dep3}
+        assert len(deps) == 2  # dep1 and dep2 are equal
+
+    def test_roundtrip(self) -> None:
+        """Test parsing and string conversion roundtrip."""
+        original = "my_task + 3w"
+        dep = Dependency.parse(original)
+        assert str(dep) == original
 
 
 class TestLink:
@@ -58,7 +157,7 @@ class TestEntity:
             id="test_cap",
             name="Test Capability",
             description="A test capability",
-            requires={"dep1", "dep2"},
+            requires={Dependency("dep1"), Dependency("dep2")},
             links=[
                 "[DD-123](https://example.com/doc)",
                 "jira:JIRA-456",
@@ -69,7 +168,7 @@ class TestEntity:
         assert cap.type == "capability"
         assert cap.id == "test_cap"
         assert cap.name == "Test Capability"
-        assert cap.requires == {"dep1", "dep2"}
+        assert cap.requires_ids == {"dep1", "dep2"}
         assert len(cap.parsed_links) == 2
         assert cap.parsed_links[0].label == "DD-123"
         assert cap.parsed_links[0].url == "https://example.com/doc"
@@ -144,7 +243,7 @@ class TestEntity:
             id="test_story",
             name="Test Story",
             description="A test story",
-            requires={"cap1", "cap2"},
+            requires={Dependency("cap1"), Dependency("cap2")},
             links=["jira:STORY-123"],
             tags=["urgent"],
             meta={"requestor": "test_team"},
@@ -152,7 +251,7 @@ class TestEntity:
 
         assert story.type == "user_story"
         assert story.id == "test_story"
-        assert story.requires == {"cap1", "cap2"}
+        assert story.requires_ids == {"cap1", "cap2"}
         assert story.meta["requestor"] == "test_team"
 
     def test_outcome_entity_creation(self) -> None:
@@ -162,7 +261,7 @@ class TestEntity:
             id="test_outcome",
             name="Test Outcome",
             description="A test outcome",
-            requires={"story1", "story2"},
+            requires={Dependency("story1"), Dependency("story2")},
             links=["jira:EPIC-123"],
             tags=["priority"],
             meta={"target_date": "2024-Q3"},
@@ -170,7 +269,7 @@ class TestEntity:
 
         assert outcome.type == "outcome"
         assert outcome.id == "test_outcome"
-        assert outcome.requires == {"story1", "story2"}
+        assert outcome.requires_ids == {"story1", "story2"}
         assert outcome.meta["target_date"] == "2024-Q3"
 
 
@@ -187,8 +286,8 @@ class TestFeatureMap:
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            requires={"cap1"},
-            enables={"story1"},
+            requires={Dependency("cap1")},
+            enables={Dependency("story1")},
         )
 
         story1 = Entity(
@@ -196,8 +295,8 @@ class TestFeatureMap:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2"},
-            enables={"outcome1"},
+            requires={Dependency("cap2")},
+            enables={Dependency("outcome1")},
         )
 
         outcome1 = Entity(
@@ -205,7 +304,7 @@ class TestFeatureMap:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            requires={"story1"},
+            requires={Dependency("story1")},
         )
 
         entities = [cap1, cap2, story1, outcome1]
@@ -230,22 +329,22 @@ class TestFeatureMap:
             id="cap1",
             name="Cap 1",
             description="Desc 1",
-            enables={"cap2", "cap3"},
+            enables={Dependency("cap2"), Dependency("cap3")},
         )
         cap2 = Entity(
             type="capability",
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            requires={"cap1"},
-            enables={"cap3"},
+            requires={Dependency("cap1")},
+            enables={Dependency("cap3")},
         )
         cap3 = Entity(
             type="capability",
             id="cap3",
             name="Cap 3",
             description="Desc 3",
-            requires={"cap1", "cap2"},
+            requires={Dependency("cap1"), Dependency("cap2")},
         )
 
         entities = [cap1, cap2, cap3]
@@ -268,14 +367,14 @@ class TestFeatureMap:
             id="story1",
             name="Story 1",
             description="Desc",
-            enables={"outcome1", "outcome2"},
+            enables={Dependency("outcome1"), Dependency("outcome2")},
         )
         story2 = Entity(
             type="user_story",
             id="story2",
             name="Story 2",
             description="Desc",
-            enables={"outcome2"},
+            enables={Dependency("outcome2")},
         )
 
         outcome1 = Entity(
@@ -283,14 +382,14 @@ class TestFeatureMap:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            requires={"story1"},
+            requires={Dependency("story1")},
         )
         outcome2 = Entity(
             type="outcome",
             id="outcome2",
             name="Outcome 2",
             description="Desc",
-            requires={"story1", "story2"},
+            requires={Dependency("story1"), Dependency("story2")},
         )
 
         entities = [story1, story2, outcome1, outcome2]

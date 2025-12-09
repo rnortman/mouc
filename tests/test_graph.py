@@ -6,6 +6,7 @@ import pytest
 from mouc.graph import GraphGenerator, GraphView
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
+from tests.conftest import deps
 
 
 class TestGraphGenerator:
@@ -24,11 +25,11 @@ class TestGraphGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            requires={"cap1"},
+            requires=deps("cap1"),
             tags=["infra"],
         )
         cap3 = Entity(
-            type="capability", id="cap3", name="Cap 3", description="Desc 3", requires={"cap2"}
+            type="capability", id="cap3", name="Cap 3", description="Desc 3", requires=deps("cap2")
         )
 
         story1 = Entity(
@@ -36,7 +37,7 @@ class TestGraphGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2"},
+            requires=deps("cap2"),
             tags=["urgent"],
         )
         story2 = Entity(
@@ -44,7 +45,7 @@ class TestGraphGenerator:
             id="story2",
             name="Story 2",
             description="Desc",
-            requires={"cap3"},
+            requires=deps("cap3"),
         )
 
         outcome1 = Entity(
@@ -52,7 +53,7 @@ class TestGraphGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            requires={"story1", "story2"},
+            requires=deps("story1", "story2"),
         )
 
         entities = [cap1, cap2, cap3, story1, story2, outcome1]
@@ -191,7 +192,7 @@ class TestGraphGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc 2",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"timeframe": "Q1 2025"},
         )
         cap3 = Entity(
@@ -199,7 +200,7 @@ class TestGraphGenerator:
             id="cap3",
             name="Cap 3",
             description="Desc 3",
-            requires={"cap2"},
+            requires=deps("cap2"),
             meta={"timeframe": "Q2 2025"},
         )
 
@@ -208,7 +209,7 @@ class TestGraphGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2"},
+            requires=deps("cap2"),
             meta={"timeframe": "Q2 2025"},
         )
         story2 = Entity(
@@ -216,7 +217,7 @@ class TestGraphGenerator:
             id="story2",
             name="Story 2",
             description="Desc",
-            requires={"cap3"},
+            requires=deps("cap3"),
             # No timeframe - should go to "Unscheduled"
         )
 
@@ -225,7 +226,7 @@ class TestGraphGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Desc",
-            requires={"story1", "story2"},
+            requires=deps("story1", "story2"),
             meta={"timeframe": "Q3 2025"},
         )
 

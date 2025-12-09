@@ -173,7 +173,7 @@ class SchedulerInputValidator:
             id=entity.id,
             duration_days=duration,
             resources=resources,
-            dependencies=list(entity.requires),
+            dependencies=list(entity.requires),  # Dependency objects with lag
             start_after=start_after,
             end_before=end_before,
             start_on=start_date,

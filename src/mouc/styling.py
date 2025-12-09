@@ -48,12 +48,12 @@ class Entity(Protocol):
         ...
 
     @property
-    def requires(self) -> set[str]:
+    def requires_ids(self) -> set[str]:
         """Set of entity IDs this entity directly depends on."""
         ...
 
     @property
-    def enables(self) -> set[str]:
+    def enables_ids(self) -> set[str]:
         """Set of entity IDs that directly depend on this entity."""
         ...
 
@@ -1287,7 +1287,7 @@ class _StylingContextImpl:
 
                 entity = self._feature_map.get_entity_by_id(current)
                 if entity:
-                    for req_id in entity.requires:
+                    for req_id in entity.requires_ids:
                         if req_id not in visited:
                             result.add(req_id)
                             to_visit.append(req_id)
@@ -1311,7 +1311,7 @@ class _StylingContextImpl:
 
                 entity = self._feature_map.get_entity_by_id(current)
                 if entity:
-                    for enabled_id in entity.enables:
+                    for enabled_id in entity.enables_ids:
                         if enabled_id not in visited:
                             result.add(enabled_id)
                             to_visit.append(enabled_id)
@@ -1324,7 +1324,7 @@ class _StylingContextImpl:
         """Get entity IDs that don't enable anything (graph leaves)."""
         if self._leaf_entities is None:
             self._leaf_entities = {
-                entity.id for entity in self._feature_map.entities if not entity.enables
+                entity.id for entity in self._feature_map.entities if not entity.enables_ids
             }
         return self._leaf_entities
 
@@ -1332,7 +1332,7 @@ class _StylingContextImpl:
         """Get entity IDs that don't require anything (graph roots)."""
         if self._root_entities is None:
             self._root_entities = {
-                entity.id for entity in self._feature_map.entities if not entity.requires
+                entity.id for entity in self._feature_map.entities if not entity.requires_ids
             }
         return self._root_entities
 

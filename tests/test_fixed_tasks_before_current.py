@@ -3,7 +3,7 @@
 from datetime import date
 
 from mouc.gantt import GanttScheduler
-from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.models import Dependency, Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
 
 
@@ -69,7 +69,7 @@ class TestFixedTasksBeforeCurrent:
             id="current_task",
             name="Current Task",
             description="Starts now",
-            requires={"past_task"},
+            requires={Dependency("past_task")},
             meta={"effort": "1w", "resources": ["alice"]},
         )
 

@@ -125,9 +125,9 @@ class ParallelScheduler:
         # Calculate in-degrees
         in_degree = dict.fromkeys(self.tasks, 0)
         for task in self.tasks.values():
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] += 1
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] += 1
 
         # Initialize queue with tasks that have no dependents
         queue: list[str] = [task_id for task_id, degree in in_degree.items() if degree == 0]
@@ -137,11 +137,11 @@ class ParallelScheduler:
             task_id = queue.pop(0)
             result.append(task_id)
             task = self.tasks[task_id]
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] -= 1
-                    if in_degree[dep_id] == 0:
-                        queue.append(dep_id)
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] -= 1
+                    if in_degree[dep.entity_id] == 0:
+                        queue.append(dep.entity_id)
 
         if len(result) != len(self.tasks):
             raise ValueError("Circular dependency detected in task graph")
@@ -184,7 +184,8 @@ class ParallelScheduler:
             task_deadline = latest[task_id] if has_deadline else None
             task_priority = priorities[task_id]
 
-            for dep_id in task.dependencies:
+            for dep in task.dependencies:
+                dep_id = dep.entity_id
                 if dep_id not in self.tasks or dep_id in self.completed_task_ids:
                     continue
 
@@ -193,7 +194,10 @@ class ParallelScheduler:
                 if task_deadline is None:
                     continue
 
-                dep_deadline = task_deadline - timedelta(days=self.tasks[dep_id].duration_days)
+                # Account for lag when propagating deadline backwards
+                dep_deadline = task_deadline - timedelta(
+                    days=self.tasks[dep_id].duration_days + dep.lag_days
+                )
                 if dep_id in latest:
                     latest[dep_id] = min(latest[dep_id], dep_deadline)
                 else:
@@ -528,12 +532,16 @@ class ParallelScheduler:
             for task_id in unscheduled:
                 task = self.tasks[task_id]
 
-                # Check dependencies - must be scheduled AND complete by current_time
+                # Check dependencies - must be scheduled AND complete (with lag) by current_time
                 # OR in the completed_task_ids set (done without dates)
                 all_deps_complete = all(
-                    (dep_id in scheduled and scheduled[dep_id][1] < current_time)
-                    or dep_id in self.completed_task_ids
-                    for dep_id in task.dependencies
+                    (
+                        dep.entity_id in scheduled
+                        and scheduled[dep.entity_id][1] + timedelta(days=dep.lag_days)
+                        < current_time
+                    )
+                    or dep.entity_id in self.completed_task_ids
+                    for dep in task.dependencies
                 )
                 if not all_deps_complete:
                     continue
@@ -541,13 +549,14 @@ class ParallelScheduler:
                 # Calculate earliest possible start
                 earliest = current_time
 
-                # Consider dependency completion
-                for dep_id in task.dependencies:
+                # Consider dependency completion (with lag)
+                for dep in task.dependencies:
                     # Skip completed tasks without dates - they're already done
-                    if dep_id in self.completed_task_ids:
+                    if dep.entity_id in self.completed_task_ids:
                         continue
-                    dep_end = scheduled[dep_id][1]
-                    earliest = max(earliest, dep_end + timedelta(days=1))
+                    dep_end = scheduled[dep.entity_id][1]
+                    # Add 1 day gap plus any lag
+                    earliest = max(earliest, dep_end + timedelta(days=1 + dep.lag_days))
 
                 # Consider start_after constraint
                 if task.start_after:
@@ -750,10 +759,16 @@ class ParallelScheduler:
             if not scheduled_any:
                 next_events: list[date] = []
 
-                # Task completions (including milestones that end on current_time)
-                for _, end in scheduled.values():
-                    if end >= current_time:
-                        next_events.append(end + timedelta(days=1))
+                # Task completions - consider lag for dependent tasks
+                for task_id in unscheduled:
+                    task = self.tasks[task_id]
+                    for dep in task.dependencies:
+                        if dep.entity_id in scheduled:
+                            dep_end = scheduled[dep.entity_id][1]
+                            # Task becomes eligible on dep_end + 1 + lag
+                            eligible_date = dep_end + timedelta(days=1 + dep.lag_days)
+                            if eligible_date > current_time:
+                                next_events.append(eligible_date)
 
                 # Start constraints becoming active
                 for task_id in unscheduled:

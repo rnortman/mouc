@@ -45,22 +45,22 @@ class TestFeatureMapParser:
         # Check specific entities
         cap2 = feature_map.get_entity_by_id("cap2")
         assert cap2 is not None
-        assert cap2.requires == {"cap1"}
+        assert cap2.requires_ids == {"cap1"}
 
         story1 = feature_map.get_entity_by_id("story1")
         assert story1 is not None
-        assert story1.requires == {"cap2"}
+        assert story1.requires_ids == {"cap2"}
 
         outcome1 = feature_map.get_entity_by_id("outcome1")
         assert outcome1 is not None
-        assert outcome1.requires == {"story1"}
+        assert outcome1.requires_ids == {"story1"}
 
         # Check bidirectional edges are resolved
         cap1 = feature_map.get_entity_by_id("cap1")
         assert cap1 is not None
-        assert cap1.enables == {"cap2"}
-        assert cap2.enables == {"story1"}
-        assert story1.enables == {"outcome1"}
+        assert cap1.enables_ids == {"cap2"}
+        assert cap2.enables_ids == {"story1"}
+        assert story1.enables_ids == {"outcome1"}
 
     def test_parse_nonexistent_file(self, parser: FeatureMapParser) -> None:
         """Test parsing a nonexistent file."""
@@ -291,8 +291,8 @@ class TestFeatureMapParser:
         assert story1 is not None
 
         # Check bidirectional edges are resolved
-        assert cap1.enables == {"story1"}
-        assert story1.requires == {"cap1"}
+        assert cap1.enables_ids == {"story1"}
+        assert story1.requires_ids == {"cap1"}
 
     def test_mixed_requires_and_enables(self, parser: FeatureMapParser) -> None:
         """Test using both requires and enables fields."""
@@ -329,10 +329,10 @@ class TestFeatureMapParser:
         assert story1 is not None
 
         # Check all edges are bidirectional
-        assert cap1.enables == {"cap2"}
-        assert cap2.requires == {"cap1"}
-        assert cap2.enables == {"story1"}
-        assert story1.requires == {"cap2"}
+        assert cap1.enables_ids == {"cap2"}
+        assert cap2.requires_ids == {"cap1"}
+        assert cap2.enables_ids == {"story1"}
+        assert story1.requires_ids == {"cap2"}
 
     def test_dependencies_backward_compatibility(
         self, parser: FeatureMapParser, capsys: pytest.CaptureFixture[str]
@@ -366,8 +366,8 @@ class TestFeatureMapParser:
 
         assert cap1 is not None
         assert story1 is not None
-        assert story1.requires == {"cap1"}
-        assert cap1.enables == {"story1"}
+        assert story1.requires_ids == {"cap1"}
+        assert cap1.enables_ids == {"story1"}
 
     def test_dependencies_and_requires_conflict(self, parser: FeatureMapParser) -> None:
         """Test that specifying both dependencies and requires raises an error."""

@@ -10,7 +10,7 @@ from datetime import date
 from mouc import styling
 from mouc.backends.markdown import MarkdownBackend
 from mouc.document import DocumentGenerator
-from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.models import Dependency, Entity, FeatureMap, FeatureMapMetadata
 from mouc.scheduler import ScheduleAnnotations
 
 
@@ -244,22 +244,22 @@ def test_styling_context_transitively_enables() -> None:
             id="cap1",
             name="Test Capability",
             description="Test",
-            enables={"us1"},
+            enables={Dependency("us1")},
         ),
         Entity(
             type="user_story",
             id="us1",
             name="Test Story",
             description="Test",
-            requires={"cap1"},
-            enables={"outcome1"},
+            requires={Dependency("cap1")},
+            enables={Dependency("outcome1")},
         ),
         Entity(
             type="outcome",
             id="outcome1",
             name="Test Outcome",
             description="Test",
-            requires={"us1"},
+            requires={Dependency("us1")},
         ),
     ]
     feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
@@ -547,22 +547,22 @@ def test_style_task_using_context() -> None:
             id="cap1",
             name="Blocking Capability",
             description="Test",
-            enables={"us1"},
+            enables={Dependency("us1")},
         ),
         Entity(
             type="user_story",
             id="us1",
             name="User Story",
             description="Test",
-            requires={"cap1"},
-            enables={"outcome1"},
+            requires={Dependency("cap1")},
+            enables={Dependency("outcome1")},
         ),
         Entity(
             type="outcome",
             id="outcome1",
             name="Outcome",
             description="Test",
-            requires={"us1"},
+            requires={Dependency("us1")},
         ),
         Entity(
             type="capability",

@@ -6,7 +6,7 @@ This document describes the resource-constrained project scheduling algorithm us
 
 The scheduler implements a variant of the **Parallel Schedule Generation Scheme (Parallel SGS)**, a standard algorithm for Resource-Constrained Project Scheduling Problems (RCPSP). The algorithm schedules tasks to:
 
-1. **Respect dependencies** - Tasks only start after their dependencies complete
+1. **Respect dependencies** - Tasks only start after their dependencies complete (including lag)
 2. **Respect constraints** - Honor `start_after` and `end_before` dates
 3. **Manage resources** - Prevent resource over-allocation
 4. **Minimize gaps** - Fill available time slots as early as possible
@@ -344,6 +344,56 @@ Resources can be partially allocated (e.g., `resources: [alice:0.5]` for 50% all
 ### Unassigned Work
 
 Tasks with no specified resources (or `resources: [unassigned]`) don't compete for resource slots and can be scheduled in parallel with other work.
+
+### Dependency Lag
+
+Dependencies can specify a **lag** — a minimum time that must pass after the dependency completes before the dependent task can start:
+
+```yaml
+entities:
+  design_doc:
+    type: capability
+    name: Auth Design Doc
+    meta:
+      effort: "3d"
+      resources: ["alice"]
+
+  implementation:
+    type: capability
+    name: Auth Implementation
+    requires:
+      - design_doc + 1w   # Must wait 1 week after design completes
+    meta:
+      effort: "2w"
+      resources: ["alice"]
+```
+
+**Lag syntax:** `entity_id + duration` where duration can be:
+- `Nd` — N days (e.g., `task_a + 5d`)
+- `Nw` — N weeks (e.g., `task_a + 2w` = 14 days)
+- `Nm` — N months (e.g., `task_a + 1m` = 30 days)
+
+**Use cases:**
+- Review/signoff periods between design and implementation
+- Deployment bake time before enabling dependents
+- Waiting for external team feedback
+- Compliance review periods
+
+**How it works:**
+- During forward scheduling, a task with lagged dependencies can only start after `dependency_end + 1 day + lag`
+- During backward deadline propagation, lag is subtracted from the dependent's deadline to compute the dependency's deadline
+
+Lag can be specified on both `requires` and `enables`:
+```yaml
+# These are equivalent:
+task_a:
+  enables: [task_b + 1w]
+
+task_b:
+  requires: [task_a + 1w]
+```
+
+When edges are made bidirectional, lag is preserved on both sides.
 
 ## Performance Characteristics
 

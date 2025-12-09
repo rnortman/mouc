@@ -64,9 +64,9 @@ class BackwardPassPreProcessor:
         # Calculate in-degrees
         in_degree = dict.fromkeys(tasks, 0)
         for task in tasks.values():
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] += 1
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] += 1
 
         # Initialize queue with tasks that have no dependents
         queue: list[str] = [task_id for task_id, degree in in_degree.items() if degree == 0]
@@ -79,11 +79,11 @@ class BackwardPassPreProcessor:
 
             # Reduce in-degree for dependencies
             task = tasks[task_id]
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] -= 1
-                    if in_degree[dep_id] == 0:
-                        queue.append(dep_id)
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] -= 1
+                    if in_degree[dep.entity_id] == 0:
+                        queue.append(dep.entity_id)
 
         if len(result) != len(tasks):
             raise ValueError("Circular dependency detected in task graph")
@@ -132,7 +132,8 @@ class BackwardPassPreProcessor:
             task_deadline = latest[task_id] if has_deadline else None
             task_priority = priorities[task_id]
 
-            for dep_id in task.dependencies:
+            for dep in task.dependencies:
+                dep_id = dep.entity_id
                 # Skip dependencies that aren't in our task list (e.g., fixed tasks, done without dates)
                 if dep_id not in tasks or dep_id in completed_task_ids:
                     continue
@@ -143,8 +144,10 @@ class BackwardPassPreProcessor:
                 if task_deadline is None:
                     continue
 
-                # Dependency must finish before this task can start
-                dep_deadline = task_deadline - timedelta(days=tasks[dep_id].duration_days)
+                # Dependency must finish before this task can start (accounting for lag)
+                dep_deadline = task_deadline - timedelta(
+                    days=tasks[dep_id].duration_days + dep.lag_days
+                )
 
                 if dep_id in latest:
                     latest[dep_id] = min(latest[dep_id], dep_deadline)

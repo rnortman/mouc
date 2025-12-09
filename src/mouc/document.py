@@ -188,7 +188,7 @@ class DocumentGenerator:
             if not entity_timeframe:
                 continue
 
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 dep_timeframe = timeframe_map.get(dep_id)
 
                 # If dependency has no timeframe (unscheduled), it's always backward
@@ -640,7 +640,7 @@ class DocumentGenerator:
 
         # Build requires references
         requires_refs: list[EntityReference] = []
-        for dep_id in sorted(entity.requires):
+        for dep_id in sorted(entity.requires_ids):
             dep = self.feature_map.get_entity_by_id(dep_id)
             if dep:
                 requires_refs.append(
@@ -665,7 +665,7 @@ class DocumentGenerator:
         # Build enables references
         enables_refs: list[EntityReference] = []
         sorted_dependents: list[tuple[str, str, Entity]] = []
-        for dep_id in sorted(entity.enables):
+        for dep_id in sorted(entity.enables_ids):
             dep = self.feature_map.get_entity_by_id(dep_id)
             if dep:
                 sorted_dependents.append((dep.type, dep_id, dep))

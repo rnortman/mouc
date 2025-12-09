@@ -13,6 +13,7 @@ from mouc.graph import GraphGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.styling import Entity as EntityProtocol
 from mouc.styling import StylingContext
+from tests.conftest import deps
 
 
 def test_filter_entity_decorator_basic() -> None:
@@ -136,7 +137,7 @@ def test_filter_entity_format_targeting() -> None:
             id="us1",
             name="User Story",
             description="Test",
-            requires={"cap1"},
+            requires=deps("cap1"),
         ),
     ]
     feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)

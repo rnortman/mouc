@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 
 from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
+from tests.conftest import dep_list
 
 
 def test_cr_computation_same_deadline_different_duration():
@@ -499,7 +500,7 @@ def test_zero_duration_task_with_dependencies():
         id="task_middle_zero",
         duration_days=0.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_first"],
+        dependencies=dep_list("task_first"),
         meta={"priority": 50},
     )
 
@@ -508,7 +509,7 @@ def test_zero_duration_task_with_dependencies():
         id="task_last",
         duration_days=3.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_middle_zero"],
+        dependencies=dep_list("task_middle_zero"),
         meta={"priority": 50},
     )
 
@@ -569,7 +570,7 @@ def test_zero_duration_cr_not_artificially_inflated():
         id="task_b_urgent",
         duration_days=5.0,
         resources=[("bob", 1.0)],  # Different resource
-        dependencies=["task_a_zero"],
+        dependencies=dep_list("task_a_zero"),
         end_before=date(2025, 1, 11),  # 10 days out
         meta={"priority": 50},
     )
@@ -653,7 +654,7 @@ def test_zero_duration_milestone_waits_for_dependencies():
         id="task_milestone",
         duration_days=0.0,
         resources=[("alice", 1.0)],  # Will be ignored for milestones
-        dependencies=["task_work"],
+        dependencies=dep_list("task_work"),
         meta={"priority": 50},
     )
 
@@ -909,7 +910,7 @@ def test_priority_propagation_linear_chain():
         id="task_a",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_b"],
+        dependencies=dep_list("task_b"),
         meta={"priority": 90},
     )
 
@@ -917,7 +918,7 @@ def test_priority_propagation_linear_chain():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 40},
     )
 
@@ -961,7 +962,7 @@ def test_priority_propagation_diamond():
         id="task_b",
         duration_days=5.0,
         resources=[("bob", 1.0)],
-        dependencies=["task_a"],
+        dependencies=dep_list("task_a"),
         meta={"priority": 50},
     )
 
@@ -969,7 +970,7 @@ def test_priority_propagation_diamond():
         id="task_c",
         duration_days=5.0,
         resources=[("charlie", 1.0)],
-        dependencies=["task_a"],
+        dependencies=dep_list("task_a"),
         meta={"priority": 50},
     )
 
@@ -977,7 +978,7 @@ def test_priority_propagation_diamond():
         id="task_d",
         duration_days=5.0,
         resources=[("dave", 1.0)],
-        dependencies=["task_b", "task_c"],
+        dependencies=dep_list("task_b", "task_c"),
         meta={"priority": 95},
     )
 
@@ -1001,7 +1002,7 @@ def test_priority_propagation_mixed_priorities():
         id="task_a",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_b"],
+        dependencies=dep_list("task_b"),
         meta={"priority": 85},  # Highest priority
     )
 
@@ -1009,7 +1010,7 @@ def test_priority_propagation_mixed_priorities():
         id="task_b",
         duration_days=5.0,
         resources=[("bob", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 30},  # Lower explicit priority
     )
 
@@ -1049,7 +1050,7 @@ def test_priority_propagation_no_lowering():
         id="task_low",
         duration_days=5.0,
         resources=[("bob", 1.0)],
-        dependencies=["task_high"],
+        dependencies=dep_list("task_high"),
         meta={"priority": 30},
     )
 
@@ -1093,7 +1094,7 @@ def test_priority_propagation_affects_scheduling():
         id="task_dependent",
         duration_days=5.0,
         resources=[("bob", 1.0)],  # Different resource so doesn't compete
-        dependencies=["task_low"],
+        dependencies=dep_list("task_low"),
         meta={"priority": 90},  # Very high priority
     )
 

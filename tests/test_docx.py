@@ -12,6 +12,7 @@ from mouc.document import DocumentGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
 from mouc.unified_config import DocxConfig, OrganizationConfig
+from tests.conftest import deps
 
 
 def create_docx_generator(feature_map: FeatureMap, config: DocxConfig | None = None) -> bytes:
@@ -70,7 +71,7 @@ class TestDocxGenerator:
             id="cap2",
             name="Cap 2",
             description="Description of capability 2.",
-            requires={"cap1"},
+            requires=deps("cap1"),
         )
 
         story1 = Entity(
@@ -78,7 +79,7 @@ class TestDocxGenerator:
             id="story1",
             name="Story 1",
             description="Description of story 1.",
-            requires={"cap2"},
+            requires=deps("cap2"),
             tags=["urgent"],
             meta={"requestor": "team_alpha"},
         )
@@ -88,7 +89,7 @@ class TestDocxGenerator:
             id="outcome1",
             name="Outcome 1",
             description="Description of outcome 1.",
-            requires={"story1"},
+            requires=deps("story1"),
             meta={"target_date": "2024-Q3"},
         )
 
@@ -170,17 +171,17 @@ class TestDocxGenerator:
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
         cap2 = Entity(
-            type="capability", id="cap2", name="Cap 2", description="Desc", requires={"cap1"}
+            type="capability", id="cap2", name="Cap 2", description="Desc", requires=deps("cap1")
         )
         cap3 = Entity(
-            type="capability", id="cap3", name="Cap 3", description="Desc", requires={"cap1"}
+            type="capability", id="cap3", name="Cap 3", description="Desc", requires=deps("cap1")
         )
         story1 = Entity(
             type="user_story",
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2", "cap3"},
+            requires=deps("cap2", "cap3"),
         )
 
         entities = [cap1, cap2, cap3, story1]
@@ -272,7 +273,7 @@ class TestDocxGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"timeframe": "2024-Q2"},
         )
         cap3 = Entity(
@@ -287,7 +288,7 @@ class TestDocxGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2"},
+            requires=deps("cap2"),
         )
 
         entities = [cap1, cap2, cap3, story1]
@@ -386,7 +387,7 @@ class TestDocxGenerator:
             id="cap1",
             name="Cap 1",
             description="Desc",
-            requires={"cap2"},  # Depends on something in the future
+            requires=deps("cap2"),  # Depends on something in the future
             meta={"timeframe": "2024-Q1"},
         )
         cap2 = Entity(
@@ -401,7 +402,7 @@ class TestDocxGenerator:
             id="story1",
             name="Story 1",
             description="Desc",
-            requires={"cap2"},
+            requires=deps("cap2"),
             meta={"timeframe": "2024-Q1"},  # Also backward dependency
         )
 
@@ -639,7 +640,7 @@ class TestDocxGenerator:
 
         cap1 = Entity(type="capability", id="cap1", name="Cap 1", description="Desc")
         cap2 = Entity(
-            type="capability", id="cap2", name="Cap 2", description="Desc", requires={"cap1"}
+            type="capability", id="cap2", name="Cap 2", description="Desc", requires=deps("cap1")
         )
 
         entities = [cap1, cap2]
@@ -708,7 +709,7 @@ class TestDocxGenerator:
             id="cap2",
             name="Cap 2",
             description="Desc",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"timeframe": "2024-Q1"},
         )
 

@@ -5,6 +5,7 @@ from io import StringIO
 
 from mouc.logger import reset_logger, setup_logger
 from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
+from tests.conftest import dep_list
 
 
 def test_verbosity_0_silent():
@@ -45,7 +46,7 @@ def test_verbosity_1_shows_date_and_assignments():
         id="task2",
         duration_days=3.0,
         resources=[("alice", 1.0)],
-        dependencies=["task1"],
+        dependencies=dep_list("task1"),
         meta={"priority": 50},
     )
 
@@ -85,7 +86,7 @@ def test_verbosity_2_shows_consideration_and_skipping():
         id="task2",
         duration_days=3.0,
         resources=[("bob", 1.0)],
-        dependencies=["task1"],  # Has dependency on task1
+        dependencies=dep_list("task1"),  # Has dependency on task1
         meta={"priority": 60},
     )
 

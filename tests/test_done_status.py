@@ -9,6 +9,7 @@ import pytest
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
+from tests.conftest import deps
 
 
 class TestDoneStatus:
@@ -41,7 +42,7 @@ class TestDoneStatus:
             id="future_task",
             name="Future Task",
             description="Depends on done task",
-            requires={"done_task"},
+            requires=deps("done_task"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
 
@@ -81,7 +82,7 @@ class TestDoneStatus:
             id="future_task",
             name="Future Task",
             description="Depends on done task",
-            requires={"done_task"},
+            requires=deps("done_task"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
 
@@ -121,7 +122,7 @@ class TestDoneStatus:
             id="dependent_task",
             name="Dependent Task",
             description="Depends on done task",
-            requires={"done_task"},
+            requires=deps("done_task"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
 
@@ -236,7 +237,7 @@ class TestDoneStatus:
             id="pending1",
             name="Pending Task 1",
             description="Depends on both done tasks",
-            requires={"done1", "done2"},
+            requires=deps("done1", "done2"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
         pending2 = Entity(
@@ -244,7 +245,7 @@ class TestDoneStatus:
             id="pending2",
             name="Pending Task 2",
             description="Depends on pending1",
-            requires={"pending1"},
+            requires=deps("pending1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
 

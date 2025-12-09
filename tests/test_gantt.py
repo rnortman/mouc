@@ -13,6 +13,7 @@ from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
 from mouc.scheduler import parse_timeframe
 from mouc.unified_config import GanttConfig
+from tests.conftest import deps
 
 
 class TestGanttScheduler:
@@ -41,7 +42,7 @@ class TestGanttScheduler:
             id="cap2",
             name="API Layer",
             description="Build API",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "2w", "resources": ["bob"]},
         )
         story1 = Entity(
@@ -49,7 +50,7 @@ class TestGanttScheduler:
             id="story1",
             name="User Authentication",
             description="Auth feature",
-            requires={"cap2"},
+            requires=deps("cap2"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
 
@@ -230,7 +231,7 @@ class TestGanttScheduler:
             id="cap2",
             name="Middle Layer 1",
             description="Mid 1",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
         cap3 = Entity(
@@ -238,7 +239,7 @@ class TestGanttScheduler:
             id="cap3",
             name="Middle Layer 2",
             description="Mid 2",
-            requires={"cap2"},
+            requires=deps("cap2"),
             meta={"effort": "1w", "resources": ["charlie"]},
         )
         story1 = Entity(
@@ -246,7 +247,7 @@ class TestGanttScheduler:
             id="story1",
             name="Final",
             description="End",
-            requires={"cap3"},
+            requires=deps("cap3"),
             meta={"effort": "1w", "resources": ["dave"], "end_before": "2025-02-01"},
         )
         # Competing task - ID comes before "cap2" alphabetically, shares resource with cap2
@@ -256,7 +257,7 @@ class TestGanttScheduler:
             id="cap1_other",  # Alphabetically before "cap2"
             name="Competing Work",
             description="Task that competes with cap2 for bob",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
 
@@ -386,7 +387,7 @@ class TestGanttScheduler:
             id="cap2",
             name="Deadline Task",
             description="Has tight deadline",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["alice"], "end_before": "2025-01-20"},
         )
 
@@ -423,7 +424,7 @@ class TestGanttScheduler:
             id="cap2",
             name="Left Branch",
             description="Left",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
         cap3 = Entity(
@@ -431,7 +432,7 @@ class TestGanttScheduler:
             id="cap3",
             name="Right Branch",
             description="Right",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["charlie"]},
         )
         story1 = Entity(
@@ -439,7 +440,7 @@ class TestGanttScheduler:
             id="story1",
             name="Convergence",
             description="Combines both",
-            requires={"cap2", "cap3"},
+            requires=deps("cap2", "cap3"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
 
@@ -512,7 +513,7 @@ class TestGanttScheduler:
             id="story1",
             name="Dependent 1",
             description="Depends on popular",
-            requires={"cap_popular"},
+            requires=deps("cap_popular"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
         story2 = Entity(
@@ -520,7 +521,7 @@ class TestGanttScheduler:
             id="story2",
             name="Dependent 2",
             description="Depends on popular",
-            requires={"cap_popular"},
+            requires=deps("cap_popular"),
             meta={"effort": "1w", "resources": ["charlie"]},
         )
         story3 = Entity(
@@ -528,7 +529,7 @@ class TestGanttScheduler:
             id="story3",
             name="Dependent 3",
             description="Depends on popular",
-            requires={"cap_popular"},
+            requires=deps("cap_popular"),
             meta={"effort": "1w", "resources": ["dave"]},
         )
 
@@ -623,7 +624,7 @@ class TestGanttScheduler:
             id="task2",
             name="Middle",
             description="Mid",
-            requires={"task1"},
+            requires=deps("task1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
         task3 = Entity(
@@ -631,7 +632,7 @@ class TestGanttScheduler:
             id="task3",
             name="Final",
             description="End",
-            requires={"task2"},
+            requires=deps("task2"),
             meta={"effort": "1w", "resources": ["charlie"], "end_before": "2025-02-01"},
         )
         # Competing task - shares resource with task2, becomes eligible at same time as task2
@@ -641,7 +642,7 @@ class TestGanttScheduler:
             id="task_other",
             name="Other Work",
             description="Independent task that also depends on task1",
-            requires={"task1"},
+            requires=deps("task1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
 
@@ -929,7 +930,7 @@ class TestMermaidGeneration:
             id="story1",
             name="User Login",
             description="Login feature",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "1w", "resources": ["bob"]},
         )
         outcome1 = Entity(
@@ -937,7 +938,7 @@ class TestMermaidGeneration:
             id="outcome1",
             name="Q1 Launch",
             description="Launch product",
-            requires={"story1"},
+            requires=deps("story1"),
             meta={"effort": "1d", "resources": ["charlie"]},
         )
 
@@ -1129,7 +1130,7 @@ class TestMermaidGeneration:
             id="api",
             name="API Service",
             description="Build API",
-            requires={"db"},
+            requires=deps("db"),
             meta={"effort": "2w", "resources": ["alice", "bob"]},
         )
         story1 = Entity(
@@ -1137,7 +1138,7 @@ class TestMermaidGeneration:
             id="auth",
             name="User Authentication",
             description="Auth feature",
-            requires={"api"},
+            requires=deps("api"),
             meta={"effort": "1w", "resources": ["alice"]},
         )
         outcome1 = Entity(
@@ -1145,7 +1146,7 @@ class TestMermaidGeneration:
             id="launch",
             name="Q1 Product Launch",
             description="Launch",
-            requires={"auth"},
+            requires=deps("auth"),
             meta={"effort": "1d", "resources": ["team"]},
         )
 
@@ -2092,7 +2093,7 @@ class TestFixedScheduleTasks:
             id="task2",
             name="Scheduled Task",
             description="Normal scheduling",
-            requires={"task1"},
+            requires=deps("task1"),
             meta={
                 "effort": "1w",
                 "resources": ["alice"],

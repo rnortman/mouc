@@ -9,6 +9,7 @@ from mouc.scheduler import (
     SchedulingConfig,
     Task,
 )
+from tests.conftest import dep_list
 
 
 def test_bounded_rollout_waits_for_higher_priority_task():
@@ -46,7 +47,7 @@ def test_bounded_rollout_waits_for_higher_priority_task():
         id="task_b",
         duration_days=10.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         end_before=date(2025, 1, 22),  # 3 weeks out
         meta={"priority": 90},
     )
@@ -108,7 +109,7 @@ def test_bounded_rollout_no_benefit_from_waiting():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_blocker"],
+        dependencies=dep_list("task_blocker"),
         meta={"priority": 90},
     )
 
@@ -158,7 +159,7 @@ def test_bounded_rollout_respects_priority_threshold():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 95},
     )
 
@@ -201,7 +202,7 @@ def test_bounded_rollout_respects_min_priority_gap():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 65},
     )
 
@@ -243,7 +244,7 @@ def test_bounded_rollout_zero_duration_tasks_no_rollout():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 90},
     )
 
@@ -288,7 +289,7 @@ def test_bounded_rollout_decisions_recorded():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 90},
     )
 
@@ -340,7 +341,7 @@ def test_bounded_rollout_multiple_resources():
         id="task_b",
         duration_days=5.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         meta={"priority": 90},
     )
 
@@ -405,7 +406,7 @@ def test_bounded_rollout_deterministic():
                 id="task_b",
                 duration_days=5.0,
                 resources=[("alice", 1.0)],
-                dependencies=["task_c"],
+                dependencies=dep_list("task_c"),
                 meta={"priority": 90},
             ),
             Task(
@@ -498,7 +499,7 @@ def test_bounded_rollout_cr_based_triggering():
         id="task_b",
         duration_days=10.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         end_before=date(2025, 1, 12),  # Very tight - CR = 11/10 = 1.1 (critical)
         meta={"priority": 60},  # Same priority as task_a
     )
@@ -675,7 +676,7 @@ def test_expected_tardiness_penalty_affects_rollout_decision():
         id="task_b",
         duration_days=10.0,
         resources=[("alice", 1.0)],
-        dependencies=["task_c"],
+        dependencies=dep_list("task_c"),
         end_before=date(2025, 1, 10),  # Very tight!
         meta={"priority": 80},
     )

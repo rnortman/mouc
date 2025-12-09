@@ -2,7 +2,10 @@
 
 from dataclasses import dataclass, field
 from datetime import date
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from mouc.models import Dependency
 
 
 def _default_str_list() -> list[str]:
@@ -20,7 +23,9 @@ class Task:
     id: str
     duration_days: float
     resources: list[tuple[str, float]]  # List of (resource_name, allocation) tuples
-    dependencies: list[str]  # Task IDs that must complete before this task
+    dependencies: (
+        "list[Dependency]"  # Dependencies (with optional lag) that must complete before this task
+    )
     start_after: date | None = None  # Constraint: earliest allowed start date
     end_before: date | None = None  # Constraint: latest allowed end date
     start_on: date | None = None  # Fixed: must start exactly on this date

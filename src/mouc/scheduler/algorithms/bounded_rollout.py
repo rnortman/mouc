@@ -132,9 +132,9 @@ class BoundedRolloutScheduler:
         """Compute topological ordering of tasks for backward pass."""
         in_degree = dict.fromkeys(self.tasks, 0)
         for task in self.tasks.values():
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] += 1
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] += 1
 
         queue: list[str] = [task_id for task_id, degree in in_degree.items() if degree == 0]
         result: list[str] = []
@@ -143,11 +143,11 @@ class BoundedRolloutScheduler:
             task_id = queue.pop(0)
             result.append(task_id)
             task = self.tasks[task_id]
-            for dep_id in task.dependencies:
-                if dep_id in in_degree:
-                    in_degree[dep_id] -= 1
-                    if in_degree[dep_id] == 0:
-                        queue.append(dep_id)
+            for dep in task.dependencies:
+                if dep.entity_id in in_degree:
+                    in_degree[dep.entity_id] -= 1
+                    if in_degree[dep.entity_id] == 0:
+                        queue.append(dep.entity_id)
 
         if len(result) != len(self.tasks):
             raise ValueError("Circular dependency detected in task graph")
@@ -180,7 +180,8 @@ class BoundedRolloutScheduler:
             task_deadline = latest[task_id] if has_deadline else None
             task_priority = priorities[task_id]
 
-            for dep_id in task.dependencies:
+            for dep in task.dependencies:
+                dep_id = dep.entity_id
                 if dep_id not in self.tasks or dep_id in self.completed_task_ids:
                     continue
 
@@ -189,7 +190,10 @@ class BoundedRolloutScheduler:
                 if task_deadline is None:
                     continue
 
-                dep_deadline = task_deadline - timedelta(days=self.tasks[dep_id].duration_days)
+                # Account for lag when propagating deadline backwards
+                dep_deadline = task_deadline - timedelta(
+                    days=self.tasks[dep_id].duration_days + dep.lag_days
+                )
                 if dep_id in latest:
                     latest[dep_id] = min(latest[dep_id], dep_deadline)
                 else:
@@ -383,10 +387,10 @@ class BoundedRolloutScheduler:
         dep_task = self.tasks[dep_id]
 
         # Check if dependency's dependencies are all met
-        for dep_dep_id in dep_task.dependencies:
-            if dep_dep_id in self.completed_task_ids:
+        for dep_dep in dep_task.dependencies:
+            if dep_dep.entity_id in self.completed_task_ids:
                 continue
-            if dep_dep_id not in state.scheduled:
+            if dep_dep.entity_id not in state.scheduled:
                 return None  # Can't estimate
 
         # Check start_after
@@ -394,11 +398,11 @@ class BoundedRolloutScheduler:
         if dep_task.start_after:
             earliest_start = max(earliest_start, dep_task.start_after)
 
-        for dep_dep_id in dep_task.dependencies:
-            if dep_dep_id in self.completed_task_ids:
+        for dep_dep in dep_task.dependencies:
+            if dep_dep.entity_id in self.completed_task_ids:
                 continue
-            dep_dep_end = state.scheduled[dep_dep_id][1]
-            earliest_start = max(earliest_start, dep_dep_end + timedelta(days=1))
+            dep_dep_end = state.scheduled[dep_dep.entity_id][1]
+            earliest_start = max(earliest_start, dep_dep_end + timedelta(days=1 + dep_dep.lag_days))
 
         # Estimate completion based on duration
         return earliest_start + timedelta(days=dep_task.duration_days)
@@ -459,17 +463,19 @@ class BoundedRolloutScheduler:
             can_estimate = True
 
             # Check dependencies
-            for dep_id in other_task.dependencies:
-                if dep_id in self.completed_task_ids:
+            for dep in other_task.dependencies:
+                if dep.entity_id in self.completed_task_ids:
                     continue
-                if dep_id in state.scheduled:
-                    dep_end = state.scheduled[dep_id][1]
-                    eligible_date = max(eligible_date, dep_end + timedelta(days=1))
+                if dep.entity_id in state.scheduled:
+                    dep_end = state.scheduled[dep.entity_id][1]
+                    eligible_date = max(eligible_date, dep_end + timedelta(days=1 + dep.lag_days))
                 else:
                     # Dependency not scheduled yet - try to estimate
-                    estimated_completion = self._estimate_task_completion(dep_id, state)
+                    estimated_completion = self._estimate_task_completion(dep.entity_id, state)
                     if estimated_completion is not None:
-                        eligible_date = max(eligible_date, estimated_completion + timedelta(days=1))
+                        eligible_date = max(
+                            eligible_date, estimated_completion + timedelta(days=1 + dep.lag_days)
+                        )
                     else:
                         can_estimate = False
                         break
@@ -565,10 +571,10 @@ class BoundedRolloutScheduler:
             # Check if this task was eligible during the simulation
             # (all dependencies complete and start_after satisfied)
             was_eligible = True
-            for dep_id in task.dependencies:
-                if dep_id in self.completed_task_ids:
+            for dep in task.dependencies:
+                if dep.entity_id in self.completed_task_ids:
                     continue
-                if dep_id not in state.scheduled:
+                if dep.entity_id not in state.scheduled:
                     was_eligible = False
                     break
 
@@ -665,22 +671,26 @@ class BoundedRolloutScheduler:
         for task_id in state.unscheduled:
             task = self.tasks[task_id]
 
-            # Check dependencies
+            # Check dependencies (with lag)
             all_deps_complete = all(
-                (dep_id in state.scheduled and state.scheduled[dep_id][1] < state.current_time)
-                or dep_id in self.completed_task_ids
-                for dep_id in task.dependencies
+                (
+                    dep.entity_id in state.scheduled
+                    and state.scheduled[dep.entity_id][1] + timedelta(days=dep.lag_days)
+                    < state.current_time
+                )
+                or dep.entity_id in self.completed_task_ids
+                for dep in task.dependencies
             )
             if not all_deps_complete:
                 continue
 
-            # Calculate earliest start
+            # Calculate earliest start (with lag)
             earliest = state.current_time
-            for dep_id in task.dependencies:
-                if dep_id in self.completed_task_ids:
+            for dep in task.dependencies:
+                if dep.entity_id in self.completed_task_ids:
                     continue
-                dep_end = state.scheduled[dep_id][1]
-                earliest = max(earliest, dep_end + timedelta(days=1))
+                dep_end = state.scheduled[dep.entity_id][1]
+                earliest = max(earliest, dep_end + timedelta(days=1 + dep.lag_days))
 
             if task.start_after:
                 earliest = max(earliest, task.start_after)
@@ -694,9 +704,16 @@ class BoundedRolloutScheduler:
         """Find next scheduling event time."""
         next_events: list[date] = []
 
-        for _, end in state.scheduled.values():
-            if end >= state.current_time:
-                next_events.append(end + timedelta(days=1))
+        # Task completions - consider lag for dependent tasks
+        for task_id in state.unscheduled:
+            task = self.tasks[task_id]
+            for dep in task.dependencies:
+                if dep.entity_id in state.scheduled:
+                    dep_end = state.scheduled[dep.entity_id][1]
+                    # Task becomes eligible on dep_end + 1 + lag
+                    eligible_date = dep_end + timedelta(days=1 + dep.lag_days)
+                    if eligible_date > state.current_time:
+                        next_events.append(eligible_date)
 
         for task_id in state.unscheduled:
             task = self.tasks[task_id]
@@ -865,19 +882,23 @@ class BoundedRolloutScheduler:
                 task = self.tasks[task_id]
 
                 all_deps_complete = all(
-                    (dep_id in scheduled and scheduled[dep_id][1] < current_time)
-                    or dep_id in self.completed_task_ids
-                    for dep_id in task.dependencies
+                    (
+                        dep.entity_id in scheduled
+                        and scheduled[dep.entity_id][1] + timedelta(days=dep.lag_days)
+                        < current_time
+                    )
+                    or dep.entity_id in self.completed_task_ids
+                    for dep in task.dependencies
                 )
                 if not all_deps_complete:
                     continue
 
                 earliest = current_time
-                for dep_id in task.dependencies:
-                    if dep_id in self.completed_task_ids:
+                for dep in task.dependencies:
+                    if dep.entity_id in self.completed_task_ids:
                         continue
-                    dep_end = scheduled[dep_id][1]
-                    earliest = max(earliest, dep_end + timedelta(days=1))
+                    dep_end = scheduled[dep.entity_id][1]
+                    earliest = max(earliest, dep_end + timedelta(days=1 + dep.lag_days))
 
                 if task.start_after:
                     earliest = max(earliest, task.start_after)
@@ -1170,9 +1191,16 @@ class BoundedRolloutScheduler:
             if not scheduled_any:
                 next_events: list[date] = []
 
-                for _, end in scheduled.values():
-                    if end >= current_time:
-                        next_events.append(end + timedelta(days=1))
+                # Task completions - consider lag for dependent tasks
+                for task_id in unscheduled:
+                    task = self.tasks[task_id]
+                    for dep in task.dependencies:
+                        if dep.entity_id in scheduled:
+                            dep_end = scheduled[dep.entity_id][1]
+                            # Task becomes eligible on dep_end + 1 + lag
+                            eligible_date = dep_end + timedelta(days=1 + dep.lag_days)
+                            if eligible_date > current_time:
+                                next_events.append(eligible_date)
 
                 for task_id in unscheduled:
                     task = self.tasks[task_id]

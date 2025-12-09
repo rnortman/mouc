@@ -11,6 +11,7 @@ from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.styling import Entity as EntityProtocol
 from mouc.styling import StylingContext
 from mouc.unified_config import GanttConfig
+from tests.conftest import deps
 
 
 def test_group_tasks_decorator_basic() -> None:
@@ -344,7 +345,7 @@ def test_config_sort_by_start() -> None:
             id="cap2",
             name="Second Task",
             description="Test",
-            requires={"cap1"},
+            requires=deps("cap1"),
             meta={"effort": "5d", "resources": ["alice"]},
         ),
     ]

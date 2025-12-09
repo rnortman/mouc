@@ -15,6 +15,7 @@ from .exceptions import (
     ValidationError,
 )
 from .models import (
+    Dependency,
     Entity,
     FeatureMap,
     FeatureMapMetadata,
@@ -29,6 +30,7 @@ def resolve_graph_edges(entities: list[Entity]) -> None:
     If it specifies 'enables', add those entities to this entity's 'requires'.
 
     This mutates the entities in place to ensure all edges are bidirectional.
+    Lag is preserved when creating the reverse edge.
     """
     # Build a map for quick lookups
     entity_map: dict[str, Entity] = {entity.id: entity for entity in entities}
@@ -36,16 +38,20 @@ def resolve_graph_edges(entities: list[Entity]) -> None:
     # Process each entity's explicitly specified edges
     for entity in entities:
         # For each entity this one requires, add this entity to their enables
-        for required_id in list(entity.requires):
-            required_entity = entity_map.get(required_id)
+        for dep in list(entity.requires):
+            required_entity = entity_map.get(dep.entity_id)
             if required_entity:
-                required_entity.enables.add(entity.id)
+                # Create reverse dependency with same lag
+                reverse_dep = Dependency(entity_id=entity.id, lag_days=dep.lag_days)
+                required_entity.enables.add(reverse_dep)
 
         # For each entity this one enables, add this entity to their requires
-        for enabled_id in list(entity.enables):
-            enabled_entity = entity_map.get(enabled_id)
+        for dep in list(entity.enables):
+            enabled_entity = entity_map.get(dep.entity_id)
             if enabled_entity:
-                enabled_entity.requires.add(entity.id)
+                # Create reverse dependency with same lag
+                reverse_dep = Dependency(entity_id=entity.id, lag_days=dep.lag_days)
+                enabled_entity.requires.add(reverse_dep)
 
 
 class FeatureMapParser:
@@ -98,8 +104,8 @@ class FeatureMapParser:
                 id=entity_id,
                 name=entity_data.name,
                 description=entity_data.description,
-                requires=set(entity_data.requires),
-                enables=set(entity_data.enables),
+                requires={Dependency.parse(s) for s in entity_data.requires},
+                enables={Dependency.parse(s) for s in entity_data.enables},
                 links=entity_data.links,
                 tags=entity_data.tags,
                 meta=meta,
@@ -121,8 +127,8 @@ class FeatureMapParser:
                     id=entity_id,
                     name=entity_data.name,
                     description=entity_data.description,
-                    requires=set(entity_data.requires),
-                    enables=set(entity_data.enables),
+                    requires={Dependency.parse(s) for s in entity_data.requires},
+                    enables={Dependency.parse(s) for s in entity_data.enables},
                     links=entity_data.links,
                     tags=entity_data.tags,
                     meta=meta,
@@ -149,12 +155,12 @@ class FeatureMapParser:
 
         # Validate all entity dependencies (requires and enables should both reference valid IDs)
         for entity in feature_map.entities:
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 if dep_id not in all_ids:
                     raise MissingReferenceError(
                         f"{entity.type.title()} {entity.id} requires unknown entity: {dep_id}"
                     )
-            for enabled_id in entity.enables:
+            for enabled_id in entity.enables_ids:
                 if enabled_id not in all_ids:
                     raise MissingReferenceError(
                         f"{entity.type.title()} {entity.id} enables unknown entity: {enabled_id}"
@@ -191,7 +197,7 @@ class FeatureMapParser:
 
         entity = feature_map.get_entity_by_id(entity_id)
         if entity:
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 if self._has_circular_dependency(feature_map, dep_id, visited, path):
                     return True
 

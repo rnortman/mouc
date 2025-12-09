@@ -4,8 +4,83 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from functools import total_ordering
 from typing import Any
 from urllib.parse import urlparse
+
+# Duration conversion constants
+DAYS_PER_WEEK = 7
+DAYS_PER_MONTH = 30
+
+
+@total_ordering
+@dataclass(frozen=True)
+class Dependency:
+    """A dependency on another entity with optional lag time.
+
+    The lag represents the minimum time that must pass after the dependency
+    completes before the dependent entity can start.
+    """
+
+    entity_id: str
+    lag_days: float = 0.0
+
+    @classmethod
+    def parse(cls, dep_str: str) -> Dependency:
+        """Parse a dependency string into a Dependency object.
+
+        Supported formats:
+        - "entity_id" - Simple dependency with no lag
+        - "entity_id + 1d" - Dependency with 1 day lag
+        - "entity_id + 2w" - Dependency with 2 weeks (14 days) lag
+        - "entity_id + 1.5m" - Dependency with 1.5 months (45 days) lag
+        """
+        dep_str = dep_str.strip()
+
+        # Check for lag syntax: "entity_id + duration"
+        match = re.match(r"^(.+?)\s*\+\s*([\d.]+)([dwm])$", dep_str)
+        if match:
+            entity_id, value, unit = match.groups()
+            entity_id = entity_id.strip()
+            num = float(value)
+
+            if unit == "d":
+                lag_days = num
+            elif unit == "w":
+                lag_days = num * DAYS_PER_WEEK
+            else:  # unit == "m"
+                lag_days = num * DAYS_PER_MONTH
+
+            return cls(entity_id=entity_id, lag_days=lag_days)
+
+        # Simple dependency with no lag
+        return cls(entity_id=dep_str, lag_days=0.0)
+
+    def __str__(self) -> str:
+        """Return string representation suitable for YAML output."""
+        if self.lag_days == 0.0:
+            return self.entity_id
+        # Convert to most natural unit
+        if self.lag_days % DAYS_PER_MONTH == 0 and self.lag_days >= DAYS_PER_MONTH:
+            return f"{self.entity_id} + {int(self.lag_days / DAYS_PER_MONTH)}m"
+        if self.lag_days % DAYS_PER_WEEK == 0 and self.lag_days >= DAYS_PER_WEEK:
+            return f"{self.entity_id} + {int(self.lag_days / DAYS_PER_WEEK)}w"
+        if self.lag_days == int(self.lag_days):
+            return f"{self.entity_id} + {int(self.lag_days)}d"
+        return f"{self.entity_id} + {self.lag_days}d"
+
+    def __hash__(self) -> int:
+        return hash((self.entity_id, self.lag_days))
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Dependency):
+            return NotImplemented
+        return self.entity_id == other.entity_id and self.lag_days == other.lag_days
+
+    def __lt__(self, other: object) -> bool:
+        if not isinstance(other, Dependency):
+            return NotImplemented
+        return (self.entity_id, self.lag_days) < (other.entity_id, other.lag_days)
 
 
 @dataclass
@@ -62,7 +137,7 @@ class Link:
 VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
 
 
-def _default_set() -> set[str]:
+def _default_dependency_set() -> set[Dependency]:
     return set()
 
 
@@ -125,12 +200,22 @@ class Entity:
     id: str
     name: str
     description: str
-    requires: set[str] = field(default_factory=_default_set)
-    enables: set[str] = field(default_factory=_default_set)
+    requires: set[Dependency] = field(default_factory=_default_dependency_set)
+    enables: set[Dependency] = field(default_factory=_default_dependency_set)
     links: list[str] = field(default_factory=_default_list)
     tags: list[str] = field(default_factory=_default_list)
     meta: dict[str, Any] = field(default_factory=_default_dict)
     annotations: dict[str, Any] = field(default_factory=_default_dict)
+
+    @property
+    def requires_ids(self) -> set[str]:
+        """Get just the entity IDs from requires dependencies."""
+        return {dep.entity_id for dep in self.requires}
+
+    @property
+    def enables_ids(self) -> set[str]:
+        """Get just the entity IDs from enables dependencies."""
+        return {dep.entity_id for dep in self.enables}
 
     @property
     def parsed_links(self) -> list[Link]:
@@ -185,5 +270,5 @@ class FeatureMap:
         """Get all entities that depend on the given entity (i.e., what this enables)."""
         entity = self.get_entity_by_id(entity_id)
         if entity:
-            return entity.enables
+            return entity.enables_ids
         return set()

@@ -87,7 +87,7 @@ class GraphGenerator:
         # Add edges (unblocks direction)
         lines.append("  // Dependencies (unblocks direction)")
         for entity in entities:
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
 
@@ -120,7 +120,7 @@ class GraphGenerator:
         for entity in entities:
             if entity.id not in dependencies:
                 continue
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 if dep_id in dependencies:
                     edge_def = self._format_edge(dep_id, entity.id, "requires")
                     lines.append(f"  {edge_def}")
@@ -162,7 +162,7 @@ class GraphGenerator:
         for entity in entities:
             if entity.id not in expanded_ids:
                 continue
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 if dep_id in expanded_ids:
                     edge_def = self._format_edge(dep_id, entity.id, "requires")
                     lines.append(f"  {edge_def}")
@@ -180,7 +180,7 @@ class GraphGenerator:
 
             entity = self.feature_map.get_entity_by_id(current)
             if entity:
-                for dep_id in entity.requires:
+                for dep_id in entity.requires_ids:
                     if dep_id not in dependencies:
                         dependencies.add(dep_id)
                         to_process.append(dep_id)
@@ -194,8 +194,8 @@ class GraphGenerator:
         # Find the entity and add its dependencies and dependents
         entity = self.feature_map.get_entity_by_id(node_id)
         if entity:
-            connections.update(entity.requires)
-            connections.update(entity.enables)
+            connections.update(entity.requires_ids)
+            connections.update(entity.enables_ids)
 
         return connections
 
@@ -329,7 +329,7 @@ class GraphGenerator:
         # Add all edges (dependencies)
         lines.append("  // Dependencies")
         for entity in entities:
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
 
@@ -383,7 +383,7 @@ class GraphGenerator:
         # Add edges (unblocks direction)
         lines.append("  // Dependencies")
         for entity in entities:
-            for dep_id in entity.requires:
+            for dep_id in entity.requires_ids:
                 edge_def = self._format_edge(dep_id, entity.id, "requires")
                 lines.append(f"  {edge_def}")
 
