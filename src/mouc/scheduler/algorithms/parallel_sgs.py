@@ -168,10 +168,11 @@ class ParallelScheduler:
                 latest[task_id] = task.end_before
 
         # Initialize priorities with base values
+        default_priority = self.config.default_priority
         for task_id, task in self.tasks.items():
-            base_priority = 50
+            base_priority = default_priority
             if task.meta:
-                priority_value = task.meta.get("priority", 50)
+                priority_value = task.meta.get("priority", default_priority)
                 if isinstance(priority_value, (int, float)):
                     base_priority = int(priority_value)
             priorities[task_id] = base_priority
@@ -291,38 +292,29 @@ class ParallelScheduler:
         unscheduled_task_ids: set[str],
         current_time: date,
     ) -> float:
-        """Compute median CR for tasks without deadlines.
+        """Compute default CR for tasks without deadlines.
 
-        Recomputed at each scheduling step to adapt to remaining work.
+        Uses max(max_cr * multiplier, floor) where max_cr is the highest CR
+        among deadline-driven tasks. Recomputed at each scheduling step.
 
         Args:
             unscheduled_task_ids: Set of task IDs not yet scheduled
             current_time: Current scheduling time
 
         Returns:
-            Median critical ratio or fallback value
+            Default critical ratio for tasks without deadlines
         """
-        # Handle explicit numeric default_cr
-        if isinstance(self.config.default_cr, (int, float)):
-            return float(self.config.default_cr)
-
-        # Compute CRs for all deadline tasks
-        crs: list[float] = []
+        max_cr = 0.0
         for task_id in unscheduled_task_ids:
             deadline = self._computed_deadlines.get(task_id)
             if deadline and deadline != date.max:
                 slack = (deadline - current_time).days
                 duration = self.tasks[task_id].duration_days
-                cr = slack / max(duration, 1.0)  # Avoid division by zero
-                crs.append(cr)
+                cr = slack / max(duration, 1.0)
+                max_cr = max(max_cr, cr)
 
-        # No deadline tasks left - use fallback
-        if not crs:
-            return 15.0
-
-        # Return median
-        sorted_crs = sorted(crs)
-        return sorted_crs[len(sorted_crs) // 2]
+        # Use multiplier * max CR, with floor as minimum
+        return max(max_cr * self.config.default_cr_multiplier, self.config.default_cr_floor)
 
     def _compute_sort_key(
         self,
@@ -344,8 +336,8 @@ class ParallelScheduler:
         """
         task = self.tasks[task_id]
 
-        # Get effective priority (default 50)
-        priority = self._computed_priorities.get(task_id, 50)
+        # Get effective priority
+        priority = self._computed_priorities.get(task_id, self.config.default_priority)
 
         # Compute critical ratio
         deadline = self._computed_deadlines.get(task_id)
@@ -585,7 +577,7 @@ class ParallelScheduler:
                 # Show all eligible tasks in sort order with their sort keys
                 for task_id in eligible:
                     task = self.tasks[task_id]
-                    priority = self._computed_priorities.get(task_id, 50)
+                    priority = self._computed_priorities.get(task_id, self.config.default_priority)
                     deadline = self._computed_deadlines.get(task_id)
 
                     # Calculate CR
@@ -608,7 +600,7 @@ class ParallelScheduler:
                 task = self.tasks[task_id]
 
                 # Show task being considered
-                priority = self._computed_priorities.get(task_id, 50)
+                priority = self._computed_priorities.get(task_id, self.config.default_priority)
                 deadline = self._computed_deadlines.get(task_id)
                 if deadline and deadline != date.max:
                     slack = (deadline - current_time).days

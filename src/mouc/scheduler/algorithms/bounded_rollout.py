@@ -165,10 +165,11 @@ class BoundedRolloutScheduler:
             if task.end_before:
                 latest[task_id] = task.end_before
 
+        default_priority = self.config.default_priority
         for task_id, task in self.tasks.items():
-            base_priority = 50
+            base_priority = default_priority
             if task.meta:
-                priority_value = task.meta.get("priority", 50)
+                priority_value = task.meta.get("priority", default_priority)
                 if isinstance(priority_value, (int, float)):
                     base_priority = int(priority_value)
             priorities[task_id] = base_priority
@@ -261,12 +262,9 @@ class BoundedRolloutScheduler:
     ) -> float:
         """Compute CR for tasks without deadlines (higher than any deadline-driven task).
 
-        Returns 2x the max CR of deadline-driven tasks, ensuring no-deadline tasks
+        Returns multiplier * max CR of deadline-driven tasks, ensuring no-deadline tasks
         always sort after deadline-driven tasks of equal priority.
         """
-        if isinstance(self.config.default_cr, (int, float)):
-            return float(self.config.default_cr)
-
         max_cr = 0.0
         for task_id in unscheduled_task_ids:
             deadline = self._computed_deadlines.get(task_id)
@@ -276,8 +274,8 @@ class BoundedRolloutScheduler:
                 cr = slack / max(duration, 1.0)
                 max_cr = max(max_cr, cr)
 
-        # Use 2x the max CR, with a floor of 10.0 for projects with no/tight deadlines
-        return max(max_cr * 2.0, 10.0)
+        # Use multiplier * max CR, with floor as minimum
+        return max(max_cr * self.config.default_cr_multiplier, self.config.default_cr_floor)
 
     def _compute_sort_key(
         self,
@@ -293,7 +291,7 @@ class BoundedRolloutScheduler:
             relaxed_cr: CR to use for tasks without deadlines (from _compute_relaxed_cr)
         """
         task = self.tasks[task_id]
-        priority = self._computed_priorities.get(task_id, 50)
+        priority = self._computed_priorities.get(task_id, self.config.default_priority)
 
         deadline = self._computed_deadlines.get(task_id)
         if deadline and deadline != date.max:
@@ -412,8 +410,8 @@ class BoundedRolloutScheduler:
         if deadline and deadline != date.max:
             slack = (deadline - current_time).days
             return slack / max(task.duration_days, 1.0)
-        # No deadline - use a high default CR (relaxed)
-        return 15.0
+        # No deadline - use floor as default CR (relaxed)
+        return self.config.default_cr_floor
 
     def _find_upcoming_urgent_tasks(
         self,
@@ -427,7 +425,7 @@ class BoundedRolloutScheduler:
 
         Returns list of (task_id, priority, cr, eligible_date) tuples.
         """
-        task_priority = self._computed_priorities.get(task_id, 50)
+        task_priority = self._computed_priorities.get(task_id, self.config.default_priority)
         task_cr = self._compute_task_cr(task_id, state.current_time)
         min_priority_gap = self.config.rollout.min_priority_gap
         min_cr_urgency_gap = self.config.rollout.min_cr_urgency_gap
@@ -438,7 +436,7 @@ class BoundedRolloutScheduler:
             if other_id == task_id:
                 continue
 
-            other_priority = self._computed_priorities.get(other_id, 50)
+            other_priority = self._computed_priorities.get(other_id, self.config.default_priority)
             other_cr = self._compute_task_cr(other_id, state.current_time)
 
             # Check if this task is more urgent overall
@@ -498,7 +496,7 @@ class BoundedRolloutScheduler:
         state: SchedulerState,
     ) -> tuple[bool, list[tuple[str, int, float, date]]]:
         """Determine if we should trigger rollout for this scheduling decision."""
-        task_priority = self._computed_priorities.get(task_id, 50)
+        task_priority = self._computed_priorities.get(task_id, self.config.default_priority)
         task_cr = self._compute_task_cr(task_id, state.current_time)
 
         # Check if this task is "relaxed" enough to consider skipping
@@ -538,7 +536,9 @@ class BoundedRolloutScheduler:
         scheduled_ids = {st.task_id for st in state.result}
 
         for scheduled_task in state.result:
-            priority = self._computed_priorities.get(scheduled_task.task_id, 50)
+            priority = self._computed_priorities.get(
+                scheduled_task.task_id, self.config.default_priority
+            )
 
             # Reward earlier starts for high-priority tasks
             # Normalize by horizon to keep scores comparable
@@ -559,7 +559,7 @@ class BoundedRolloutScheduler:
                 continue
 
             task = self.tasks[task_id]
-            priority = self._computed_priorities.get(task_id, 50)
+            priority = self._computed_priorities.get(task_id, self.config.default_priority)
             cr = self._compute_task_cr(task_id, self.current_date)
 
             # Check if this task was eligible during the simulation
@@ -898,7 +898,7 @@ class BoundedRolloutScheduler:
 
                 task = self.tasks[task_id]
 
-                priority = self._computed_priorities.get(task_id, 50)
+                priority = self._computed_priorities.get(task_id, self.config.default_priority)
                 deadline = self._computed_deadlines.get(task_id)
                 if deadline and deadline != date.max:
                     slack = (deadline - current_time).days

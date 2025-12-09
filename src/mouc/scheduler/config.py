@@ -54,7 +54,11 @@ class SchedulingConfig(BaseModel):
     strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted"
     cr_weight: float = 10.0
     priority_weight: float = 1.0
-    default_cr: float | str = "median"
+
+    # Default values for tasks without explicit priority/deadline
+    default_priority: int = 50  # Priority for tasks without explicit priority (0-100)
+    default_cr_multiplier: float = 2.0  # Multiplier for computing default CR (max_cr * multiplier)
+    default_cr_floor: float = 10.0  # Minimum CR for tasks without deadlines
 
     # Algorithm and pre-processor selection
     algorithm: AlgorithmConfig = AlgorithmConfig()

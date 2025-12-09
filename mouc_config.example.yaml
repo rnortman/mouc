@@ -50,6 +50,28 @@ markdown:
     secondary: null                                  # or "by_timeframe", "by_type"
     entity_type_order: [capability, user_story, outcome]
 
+# Scheduler settings
+scheduler:
+  # Prioritization strategy: "priority_first", "cr_first", or "weighted"
+  strategy: "weighted"
+  cr_weight: 10.0
+  priority_weight: 1.0
+
+  # Default priority for tasks without explicit priority (0-100)
+  default_priority: 50
+
+  # Default CR for tasks without deadlines: max_cr * multiplier, with floor as minimum
+  default_cr_multiplier: 2.0
+  default_cr_floor: 10.0
+
+  # Algorithm selection: "parallel_sgs" or "bounded_rollout"
+  algorithm:
+    type: "parallel_sgs"
+
+  # Pre-processor selection: "backward_pass" or "none"
+  preprocessor:
+    type: "backward_pass"
+
 # Jira integration settings
 jira:
   base_url: "https://example.atlassian.net"

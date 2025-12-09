@@ -168,11 +168,21 @@ def _builtin_sort_by_name(entities: Sequence[Entity], _context: StylingContext) 
     return sorted(entities, key=lambda e: e.name.lower())
 
 
-def _builtin_sort_by_priority(entities: Sequence[Entity], _context: StylingContext) -> list[Entity]:
+def _builtin_sort_by_priority(entities: Sequence[Entity], context: StylingContext) -> list[Entity]:
     """Sort entities by priority metadata descending (higher priority first)."""
+    # Get default priority from scheduler config
+    default_priority = 50
+    config: dict[str, object] | None = getattr(context, "_config", None)
+    if config is not None:
+        scheduler_config = config.get("scheduler")
+        if isinstance(scheduler_config, dict):
+            sched_dict: dict[str, object] = scheduler_config  # type: ignore[assignment]
+            config_priority = sched_dict.get("default_priority")
+            if isinstance(config_priority, int):
+                default_priority = config_priority
 
     def get_priority(entity: Entity) -> int:
-        return -entity.meta.get("priority", 50)  # Negative for descending sort
+        return -entity.meta.get("priority", default_priority)  # Negative for descending sort
 
     return sorted(entities, key=get_priority)
 

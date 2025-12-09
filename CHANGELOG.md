@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] - 2025-12-09
+
+### Added
+- Configurable `default_priority`, `default_cr_multiplier`, and `default_cr_floor` in scheduler config
+
+### Changed
+- **Breaking**: Unified default CR calculation for tasks without deadlines uses `max(max_cr * multiplier, floor)` formula
+- **Breaking**: Removed `default_cr` config option (replaced by `default_cr_multiplier` and `default_cr_floor`)
+
 ## [0.5.0] - 2025-12-08
 
 ### Added

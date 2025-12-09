@@ -167,10 +167,20 @@ task_id:
 
 **No-Deadline Tasks:**
 
-Tasks without `end_before` constraints get assigned the **median CR** of all deadline tasks at each scheduling step. This median adapts as work progresses:
-- Tight project (median CR=2): No-deadline work waits for urgent deadline work
-- Relaxed project (median CR=20): No-deadline work gets scheduled sooner
-- If no deadline tasks exist, fallback CR of 15.0 is used
+Tasks without `end_before` constraints get assigned a **default CR** calculated as:
+```
+default_cr = max(max_cr × multiplier, floor)
+```
+
+Where:
+- `max_cr` = highest CR among deadline-driven tasks
+- `multiplier` = configurable (default 2.0)
+- `floor` = configurable minimum (default 10.0)
+
+This ensures no-deadline tasks are scheduled after deadline-driven work of similar priority:
+- If max deadline CR is 5.0: default CR = max(5.0 × 2.0, 10.0) = 10.0
+- If max deadline CR is 8.0: default CR = max(8.0 × 2.0, 10.0) = 16.0
+- If no deadline tasks exist: default CR = floor (10.0)
 
 ### Scheduling Strategies
 
@@ -267,7 +277,7 @@ task_C:
 - Compute CRs:
   - task_A: CR = 30/20 = 1.5 (tight! needs to start soon)
   - task_B: CR = 30/5 = 6.0 (relaxed, can wait)
-- Median CR for no-deadline tasks: 3.75 (median of [1.5, 6.0])
+- Default CR for no-deadline tasks: max(6.0 × 2.0, 10.0) = 12.0
 - Compute weighted scores (cr_weight=10, priority_weight=1):
   - task_A: 10×1.5 + 1×50 = 65
   - task_B: 10×6.0 + 1×50 = 110
@@ -287,7 +297,7 @@ task_C:
 
 *Time = 2025-02-01:*
 - Eligible: task_C (start_after satisfied)
-- No deadline tasks left, so task_C gets fallback CR = 15.0
+- No deadline tasks left, so task_C gets default CR = floor (10.0)
 - Schedule: task_C from Feb 1-6
 
 **Result:** CR-based scheduling correctly prioritized the long-duration task (task_A) over the short-duration task (task_B) even though they had the same deadline. The old deadline-only approach would have scheduled them arbitrarily or by task ID, potentially missing the Jan 31 deadline for task_A.
@@ -354,14 +364,18 @@ scheduler:
   strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
   cr_weight: 10.0           # Weight for critical ratio in weighted strategy
   priority_weight: 1.0      # Weight for priority in weighted strategy
-  default_cr: "median"      # Default CR for tasks without deadlines ("median" | numeric value)
+  default_priority: 50      # Default priority for tasks without metadata (0-100)
+  default_cr_multiplier: 2.0  # Multiplier for computing default CR
+  default_cr_floor: 10.0    # Minimum default CR for no-deadline tasks
 ```
 
 **Default values** (if not specified):
 - `strategy: "weighted"`
 - `cr_weight: 10.0`
 - `priority_weight: 1.0`
-- `default_cr: "median"`
+- `default_priority: 50`
+- `default_cr_multiplier: 2.0`
+- `default_cr_floor: 10.0`
 
 These parameters control how CR and Priority are combined to determine task urgency.
 
@@ -464,7 +478,7 @@ mouc gantt feature_map.yaml -v 3    # Full debug trace
 1. **No gaps**: The algorithm naturally fills available time slots
 2. **Duration-aware**: CR accounts for task duration when prioritizing deadlines
 3. **User control**: Priority metadata allows manual urgency adjustments
-4. **Adaptive**: Median CR for no-deadline tasks adjusts to project urgency
+4. **Adaptive**: Default CR for no-deadline tasks adjusts based on deadline task urgency
 5. **Predictable**: Chronological processing is intuitive
 6. **Optimal**: Follows proven RCPSP scheduling approaches
 7. **Flexible**: Handles various constraints (dependencies, time windows, resources, priorities)

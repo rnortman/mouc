@@ -62,7 +62,8 @@ class SchedulingService:
 
         # Run pre-processor if configured
         preprocess_result = None
-        preprocessor = create_preprocessor(self.config.preprocessor.type)
+        preprocessor_config = {"default_priority": self.config.default_priority}
+        preprocessor = create_preprocessor(self.config.preprocessor.type, preprocessor_config)
         if preprocessor:
             preprocess_result = preprocessor.process(tasks, done_without_dates)
 

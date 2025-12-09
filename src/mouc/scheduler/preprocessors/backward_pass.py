@@ -115,10 +115,11 @@ class BackwardPassPreProcessor:
                 latest[task_id] = task.end_before
 
         # Initialize priorities with base values
+        default_priority = self.config.get("default_priority", 50)
         for task_id, task in tasks.items():
-            base_priority = 50
+            base_priority = default_priority
             if task.meta:
-                priority_value = task.meta.get("priority", 50)
+                priority_value = task.meta.get("priority", default_priority)
                 if isinstance(priority_value, (int, float)):
                     base_priority = int(priority_value)
             priorities[task_id] = base_priority

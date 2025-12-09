@@ -70,7 +70,9 @@ scheduler:
   strategy: "weighted"
   cr_weight: 10.0
   priority_weight: 1.0
-  default_cr: "median"
+  default_priority: 50
+  default_cr_multiplier: 2.0
+  default_cr_floor: 10.0
 
 # OPTIONAL: Style tags for filtering styler functions
 style_tags:
@@ -221,7 +223,9 @@ scheduler:
   strategy: "weighted"       # Prioritization strategy
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority
-  default_cr: "median"      # Default CR for non-deadline tasks
+  default_priority: 50      # Default priority for tasks without priority metadata
+  default_cr_multiplier: 2.0  # Multiplier for computing default CR
+  default_cr_floor: 10.0    # Minimum default CR
   algorithm:
     type: parallel_sgs      # "parallel_sgs" or "bounded_rollout"
   rollout:                  # Only used when algorithm is bounded_rollout
@@ -242,11 +246,11 @@ Valid values:
 
 **`priority_weight`** (optional, default: `1.0`): Weight multiplier for priority in weighted strategy.
 
-**`default_cr`** (optional, default: `"median"`): Critical ratio to assign tasks without deadlines.
+**`default_priority`** (optional, default: `50`): Default priority (0-100) for tasks without explicit priority metadata.
 
-Valid values:
-- `"median"` - Use median CR of deadline tasks (adaptive)
-- Numeric value (e.g., `5.0`) - Fixed CR for all non-deadline tasks
+**`default_cr_multiplier`** (optional, default: `2.0`): Multiplier for computing default CR for tasks without deadlines. The default CR is calculated as `max(max_cr × multiplier, floor)` where `max_cr` is the highest CR among deadline-driven tasks.
+
+**`default_cr_floor`** (optional, default: `10.0`): Minimum CR for tasks without deadlines. Ensures no-deadline tasks aren't scheduled too aggressively when all deadline tasks are urgent.
 
 **`algorithm.type`** (optional, default: `"parallel_sgs"`): Scheduling algorithm to use.
 
@@ -761,7 +765,9 @@ scheduler:
   strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority
-  default_cr: "median"      # "median" or numeric value
+  default_priority: 50      # Default priority for tasks without metadata
+  default_cr_multiplier: 2.0  # Multiplier for default CR calculation
+  default_cr_floor: 10.0    # Minimum default CR
 
 # ============================================================================
 # STYLE TAGS (Optional)

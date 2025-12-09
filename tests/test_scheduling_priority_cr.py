@@ -161,8 +161,8 @@ def test_weighted_strategy_default_weights():
     assert task_a_result.start_date > task_b_result.end_date
 
 
-def test_no_deadline_tasks_use_median_cr():
-    """Test that tasks without deadlines get median CR of deadline tasks."""
+def test_no_deadline_tasks_use_max_cr_multiplier():
+    """Test that tasks without deadlines get max_cr * multiplier as default CR."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
     # Deadline task with CR = 30/20 = 1.5
@@ -176,8 +176,10 @@ def test_no_deadline_tasks_use_median_cr():
     )
 
     # No deadline task with priority 90
-    # Should get median CR = 1.5 (only one deadline task)
-    # Score = 10*1.5 + 1*(100-90) = 15 + 10 = 25
+    # Should get default CR = max(1.5 * 2.0, 10.0) = 10.0 (floor wins)
+    # Score = 10*10.0 + 1*(100-90) = 100 + 10 = 110
+    # Deadline task score = 10*1.5 + 1*50 = 65
+    # Deadline task has lower score, goes first
     task_no_deadline = Task(
         id="task_no_deadline",
         duration_days=5.0,
@@ -193,22 +195,21 @@ def test_no_deadline_tasks_use_median_cr():
 
     assert len(result) == 2
 
-    # No-deadline task with high priority should be scheduled first
-    # (score 25 vs deadline task score = 10*1.5 + 1*50 = 65)
+    # Deadline task has lower weighted score, so goes first
     task_no_deadline_result = next(r for r in result if r.task_id == "task_no_deadline")
     task_deadline_result = next(r for r in result if r.task_id == "task_deadline")
 
-    assert task_no_deadline_result.start_date == date(2025, 1, 1)
-    assert task_deadline_result.start_date > task_no_deadline_result.end_date
+    assert task_deadline_result.start_date == date(2025, 1, 1)
+    assert task_no_deadline_result.start_date > task_deadline_result.end_date
 
 
-def test_median_cr_with_multiple_deadline_tasks():
-    """Test median CR computation with multiple deadline tasks."""
+def test_max_multiplier_cr_with_multiple_deadline_tasks():
+    """Test default CR computation using max*multiplier with multiple deadline tasks."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
-    # Setup: Three deadline tasks with different deadlines but same duration (2 days)
-    # This creates different CRs: [1.0, 1.5, 3.0], median = 1.5
-    # task_low_cr: slack=2, duration=2, CR=2/2=1.0, score=10*1.0+1*50=60 (most urgent)
+    # Setup: Three deadline tasks with different CRs: [1.0, 1.5, 3.0]
+    # Max CR = 3.0, so default CR = max(3.0 * 2.0, 10.0) = 10.0 (floor wins)
+    # task_low_cr: CR=1.0, score=10*1.0+1*50=60 (most urgent)
     task_low_cr = Task(
         id="task_low_cr",
         duration_days=2.0,
@@ -218,7 +219,7 @@ def test_median_cr_with_multiple_deadline_tasks():
         meta={"priority": 50},
     )
 
-    # task_mid_cr: slack=3, duration=2, CR=3/2=1.5, score=10*1.5+1*50=65
+    # task_mid_cr: CR=1.5, score=10*1.5+1*50=65
     task_mid_cr = Task(
         id="task_mid_cr",
         duration_days=2.0,
@@ -228,7 +229,7 @@ def test_median_cr_with_multiple_deadline_tasks():
         meta={"priority": 50},
     )
 
-    # task_high_cr: slack=6, duration=2, CR=6/2=3.0, score=10*3.0+1*50=80
+    # task_high_cr: CR=3.0, score=10*3.0+1*50=80
     task_high_cr = Task(
         id="task_high_cr",
         duration_days=2.0,
@@ -238,15 +239,12 @@ def test_median_cr_with_multiple_deadline_tasks():
         meta={"priority": 50},
     )
 
-    # No deadline task with priority 55 (slightly better than default)
-    # If it uses median CR=1.5: score = 10*1.5 + 1*(100-55) = 15 + 45 = 60
-    # This ties with task_low_cr! Tiebreaker is task_id: "task_low_cr" < "task_no_deadline"
-    # So task_low_cr should go first, then task_no_deadline should go second
-    #
-    # If it incorrectly uses fallback CR=15.0: score = 10*15 + 1*45 = 195 (would go last!)
+    # No deadline task gets default CR = 10.0 (floor)
+    # Score = 10*10.0 + 1*(100-55) = 100 + 45 = 145
+    # This should go last since all deadline tasks have lower scores
     task_no_deadline = Task(
         id="task_no_deadline",
-        duration_days=2.0,  # Same duration as others
+        duration_days=2.0,
         resources=[("alice", 1.0)],
         dependencies=[],
         meta={"priority": 55},
@@ -263,18 +261,22 @@ def test_median_cr_with_multiple_deadline_tasks():
     task_high_cr_result = next(r for r in result if r.task_id == "task_high_cr")
     task_no_deadline_result = next(r for r in result if r.task_id == "task_no_deadline")
 
-    # If task_no_deadline uses median CR correctly, it competes with deadline tasks
-    # If it incorrectly uses fallback CR=15.0, it would have score=195 and go last
-    # So we verify it does NOT go last (task_high_cr should go last due to having highest CR)
+    # With max*multiplier strategy, no-deadline task gets high CR (10.0)
+    # So deadline tasks (with lower CRs) should all go before it
     assert task_low_cr_result.start_date == date(2025, 1, 1)
-    assert task_high_cr_result.start_date > task_no_deadline_result.start_date
-    # This proves task_no_deadline went before task_high_cr, so it's using median CR, not fallback
+    # task_no_deadline should go after task_high_cr since it has higher CR
+    assert task_no_deadline_result.start_date > task_high_cr_result.start_date
 
 
-def test_numeric_default_cr():
-    """Test explicit numeric default_cr instead of median."""
+def test_configurable_default_cr_floor():
+    """Test that default_cr_floor config affects scheduling."""
+    # Set a low floor so multiplier result is used instead
     config = SchedulingConfig(
-        strategy="weighted", cr_weight=10.0, priority_weight=1.0, default_cr=5.0
+        strategy="weighted",
+        cr_weight=10.0,
+        priority_weight=1.0,
+        default_cr_multiplier=2.0,
+        default_cr_floor=1.0,  # Low floor, so multiplier wins
     )
 
     # Deadline task: CR = 30/10 = 3.0, score = 10*3.0 + 1*50 = 80
@@ -287,8 +289,8 @@ def test_numeric_default_cr():
         meta={"priority": 50},
     )
 
-    # No deadline task should use fixed CR = 5.0 (NOT median = 3.0)
-    # Score = 10*5.0 + 1*50 = 100
+    # No deadline task: default CR = max(3.0 * 2.0, 1.0) = 6.0
+    # Score = 10*6.0 + 1*50 = 110
     # Higher score = less urgent, so should wait
     task_no_deadline = Task(
         id="task_no_deadline",
@@ -305,8 +307,7 @@ def test_numeric_default_cr():
 
     assert len(result) == 2
 
-    # Deadline task should go first (score 80 < 100)
-    # This proves no-deadline uses fixed CR=5.0, not median CR=3.0
+    # Deadline task should go first (score 80 < 110)
     task_deadline_result = next(r for r in result if r.task_id == "task_deadline")
     task_no_deadline_result = next(r for r in result if r.task_id == "task_no_deadline")
 
@@ -805,6 +806,42 @@ def test_default_priority_is_50():
 
     assert task_high_result.start_date == date(2025, 1, 1)
     assert task_default_result.start_date > task_high_result.end_date
+
+
+def test_configurable_default_priority():
+    """Test that default_priority config affects scheduling."""
+    # Set default priority to 90 (high)
+    config = SchedulingConfig(strategy="priority_first", default_priority=90)
+
+    # Task with explicit priority 80
+    task_explicit = Task(
+        id="task_explicit",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 80},
+    )
+
+    # Task without priority (should default to 90 due to config)
+    task_default = Task(
+        id="task_default",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={},
+    )
+
+    scheduler = ParallelScheduler([task_explicit, task_default], date(2025, 1, 1), config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # Default priority task (90) should beat explicit (80)
+    task_explicit_result = next(r for r in result if r.task_id == "task_explicit")
+    task_default_result = next(r for r in result if r.task_id == "task_default")
+
+    assert task_default_result.start_date == date(2025, 1, 1)
+    assert task_explicit_result.start_date > task_default_result.end_date
 
 
 def test_all_no_deadline_tasks_use_fallback():
