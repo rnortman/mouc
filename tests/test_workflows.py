@@ -268,14 +268,45 @@ class TestDesignImplWorkflow:
         # Design should have 3d default effort, not parent's 2w
         assert design.meta.get("effort") == "3d"
 
-    def test_design_does_not_inherit_resources(self) -> None:
-        """Design phase should not inherit parent's resources."""
+    def test_design_inherits_resources(self) -> None:
+        """Design phase should inherit parent's resources."""
         entity = make_entity("auth", meta={"effort": "2w", "resources": ["alice"]})
         result = design_impl(entity, {}, None)
         design = result[0]
 
-        # Design should not have resources (or have empty resources)
-        assert design.meta.get("resources") is None or design.meta.get("resources") == []
+        # Design should inherit resources - same person handles all phases
+        assert design.meta.get("resources") == ["alice"]
+
+    def test_design_resources_can_be_overridden(self) -> None:
+        """Design phase resources can be overridden via phases config."""
+        entity = make_entity("auth", meta={"effort": "2w", "resources": ["alice"]})
+        phases = {"design": {"meta": {"resources": ["bob"]}}}
+        result = design_impl(entity, {}, phases)
+        design = result[0]
+
+        # Override should take precedence
+        assert design.meta.get("resources") == ["bob"]
+
+    def test_design_does_not_inherit_scheduling_dates(self) -> None:
+        """Design phase should not inherit parent's manual scheduling dates."""
+        entity = make_entity(
+            "auth",
+            meta={
+                "effort": "2w",
+                "start_date": "2025-03-01",
+                "end_date": "2025-03-15",
+                "start_after": "2025-02-01",
+                "end_before": "2025-04-01",
+            },
+        )
+        result = design_impl(entity, {}, None)
+        design = result[0]
+
+        # Design should not inherit any scheduling dates from parent
+        assert design.meta.get("start_date") is None
+        assert design.meta.get("end_date") is None
+        assert design.meta.get("start_after") is None
+        assert design.meta.get("end_before") is None
 
     def test_design_floats(self) -> None:
         """Design phase should have no requires (floats freely)."""

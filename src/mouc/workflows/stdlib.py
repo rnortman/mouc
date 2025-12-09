@@ -60,10 +60,20 @@ def _create_phase_entity(  # noqa: PLR0913 - many optional params for flexibilit
     override = _get_phase_override(phase_overrides, phase_key)
 
     # Merge metadata, but exclude phase-specific fields from parent
-    # (effort and resources should come from defaults/overrides, not parent)
-    parent_meta_filtered = {
-        k: v for k, v in parent.meta.items() if k not in ("effort", "resources")
+    # These fields should come from defaults/overrides, not be inherited:
+    # - effort: each phase has its own work estimate
+    # - start_date, end_date, start_after, end_before: scheduling constraints
+    #   are specific to each phase, not inherited from parent
+    # Note: resources IS inherited - if you assign someone to a task, they
+    # should handle all phases of it
+    excluded_meta_keys = {
+        "effort",
+        "start_date",
+        "end_date",
+        "start_after",
+        "end_before",
     }
+    parent_meta_filtered = {k: v for k, v in parent.meta.items() if k not in excluded_meta_keys}
     merged_meta = _merge_meta(parent_meta_filtered, override.get("meta"), defaults)
 
     # Build name
