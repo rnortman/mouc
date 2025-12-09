@@ -2,14 +2,21 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 from ruamel.yaml import YAML
 
 from mouc.jira_cli import write_feature_map
+from mouc.jira_client import JiraIssueData
+from mouc.jira_config import FieldMapping, FieldMappings, JiraConfig, JiraConnection
+from mouc.jira_sync import JiraSynchronizer
+from mouc.loader import load_feature_map
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.unified_config import WorkflowsConfig
 
 
 def make_entity(
@@ -360,3 +367,122 @@ entities:
         assert phase_data["meta"]["effort"] == "5d"
         # Note: custom_field is removed because it's not in new_meta
         # This matches the behavior of _update_meta_in_place
+
+
+class TestJiraSyncWithWorkflowPhases:
+    """Tests for Jira sync interaction with workflow-expanded phase entities.
+
+    BUG REPRODUCTION: Phase entities get meta.effort from workflow defaults.
+    When Jira sync runs, it should only write back fields that actually came
+    from Jira. Currently it writes back the entire entity.meta, which includes
+    workflow-assigned effort even when Jira didn't provide effort data.
+    """
+
+    @pytest.fixture
+    def jira_config(self) -> JiraConfig:
+        """Create Jira config with start_date mapping only (no effort mapping)."""
+        return JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock Jira client that returns start_date but not effort."""
+        client = Mock()
+        client.get_custom_field_value = Mock(return_value=None)
+        return client
+
+    def test_jira_sync_only_writes_jira_sourced_fields_for_phases(
+        self,
+        tmp_path: Path,
+        jira_config: JiraConfig,
+        mock_client: Mock,
+    ) -> None:
+        """Jira sync should only write fields that came from Jira, not workflow defaults.
+
+        The workflow assigns effort: "3d" to the design phase.
+        Jira sync gets start_date from Jira but NOT effort.
+        When writing back with sync_updates, only start_date should be written,
+        NOT the workflow-assigned effort.
+        """
+        # Create feature map with entity that has a workflow
+        yaml_file = tmp_path / "feature_map.yaml"
+        yaml_file.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  auth_redesign:
+    type: capability
+    name: Auth Redesign
+    description: Redesign authentication system
+    workflow: design_impl
+    meta:
+      effort: "2w"
+""")
+
+        # Load feature map with workflow expansion
+        # This will create auth_redesign_design with meta.effort = "3d" from workflow defaults
+        workflows_config = WorkflowsConfig(stdlib=True)
+        fm = load_feature_map(yaml_file, workflows_config=workflows_config)
+
+        # Verify workflow expansion worked and design phase has effort
+        design_entity = fm.get_entity_by_id("auth_redesign_design")
+        assert design_entity is not None
+        assert design_entity.phase_of == ("auth_redesign", "design")
+        assert design_entity.meta.get("effort") == "3d"  # From workflow defaults
+
+        # Add a Jira link to the design phase entity
+        design_entity.links = ["jira:TEST-123"]
+
+        # Mock Jira to return start_date but NOT effort
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Auth Redesign - Design",
+                status="In Progress",
+                fields={},  # No effort field
+                status_transitions={"In Progress": datetime(2025, 1, 15, tzinfo=timezone.utc)},
+                assignee_email=None,
+            )
+        )
+
+        # Run sync
+        synchronizer = JiraSynchronizer(jira_config, fm, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        # Verify sync got start_date from Jira but not effort
+        assert len(results) == 1
+        result = results[0]
+        assert result.entity_id == "auth_redesign_design"
+        assert "start_date" in result.updated_fields
+        assert "effort" not in result.updated_fields  # Jira didn't provide effort
+
+        # Apply updates (like jira_sync --apply does)
+        for field, value in result.updated_fields.items():
+            design_entity.meta[field] = value
+
+        # Build sync_updates like jira_sync command does
+        sync_updates = {result.entity_id: dict(result.updated_fields)}
+
+        # Write back to YAML with sync_updates
+        write_feature_map(yaml_file, fm, sync_updates=sync_updates)
+
+        # Read the file and check what was written
+        yaml = YAML()
+        with yaml_file.open() as f:
+            data: Any = yaml.load(f)  # type: ignore[no-untyped-call]
+
+        # Verify the phases section was created
+        assert "phases" in data["entities"]["auth_redesign"]
+        assert "design" in data["entities"]["auth_redesign"]["phases"]
+        phase_meta = data["entities"]["auth_redesign"]["phases"]["design"]["meta"]  # type: ignore[index]
+
+        # Only start_date should be written, NOT effort (which came from workflow, not Jira)
+        assert "start_date" in phase_meta
+        assert "effort" not in phase_meta, (
+            "effort should NOT be written - it came from workflow defaults, not Jira"
+        )

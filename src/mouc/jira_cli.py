@@ -560,12 +560,18 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
             if changes_enabled():
                 typer.echo("\nApplying changes to feature map...")
 
+            # Build sync_updates to track which fields came from Jira for each entity
+            # This is used by write_feature_map to avoid writing workflow defaults
+            sync_updates: dict[str, dict[str, Any]] = {}
+
             for result in results:
                 if result.updated_fields:
                     entity = feature_map.get_entity_by_id(result.entity_id)
                     if entity:
                         for field, value in result.updated_fields.items():
                             entity.meta[field] = value
+                        # Track the fields that came from Jira
+                        sync_updates[result.entity_id] = dict(result.updated_fields)
                         if changes_enabled():
                             typer.echo(
                                 f"  Updated {result.entity_id}: {', '.join(result.updated_fields.keys())}"
@@ -574,7 +580,7 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
             for entity_id, field_updates in conflict_resolutions.items():
                 entity = feature_map.get_entity_by_id(entity_id)
                 if entity:
-                    jira_sync = entity.get_jira_sync_metadata()
+                    jira_sync_meta = entity.get_jira_sync_metadata()
                     for field, value in field_updates.items():
                         entity.meta[field] = value
                         # Save the resolution choice for future syncs
@@ -584,16 +590,21 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
                                 for conflict in result.conflicts:
                                     if conflict.field == field:
                                         if value == conflict.jira_value:
-                                            jira_sync.resolution_choices[field] = "jira"
+                                            jira_sync_meta.resolution_choices[field] = "jira"
                                         elif value == conflict.mouc_value:
-                                            jira_sync.resolution_choices[field] = "mouc"
+                                            jira_sync_meta.resolution_choices[field] = "mouc"
                                         break
                                 break
-                    entity.set_jira_sync_metadata(jira_sync)
+                    entity.set_jira_sync_metadata(jira_sync_meta)
+                    # Track conflict resolution fields too
+                    if entity_id in sync_updates:
+                        sync_updates[entity_id].update(field_updates)
+                    else:
+                        sync_updates[entity_id] = dict(field_updates)
                     if changes_enabled():
                         typer.echo(f"  Updated {entity_id}: {', '.join(field_updates.keys())}")
 
-            write_feature_map(file, feature_map)
+            write_feature_map(file, feature_map, sync_updates=sync_updates)
             typer.echo(f"\n✓ Changes written to {file}")
 
         elif dry_run:
@@ -620,12 +631,20 @@ def jira_sync(  # noqa: PLR0912, PLR0913, PLR0915 - CLI command handling multipl
         raise typer.Exit(1) from None
 
 
-def write_feature_map(file_path: Path, feature_map: Any) -> None:  # noqa: PLR0912
+def write_feature_map(  # noqa: PLR0912
+    file_path: Path,
+    feature_map: Any,
+    sync_updates: dict[str, dict[str, Any]] | None = None,
+) -> None:
     """Write feature map back to YAML file with formatting preservation.
 
     Args:
         file_path: Path to feature map file
         feature_map: FeatureMap object to write
+        sync_updates: Optional dict mapping entity_id -> fields to write.
+            When provided, phase entities will only write these specific fields
+            instead of their full meta dict. This prevents writing workflow-assigned
+            values that didn't come from Jira sync.
     """
     yaml_rt = YAML()
     yaml_rt.preserve_quotes = False  # type: ignore[assignment]
@@ -667,10 +686,20 @@ def write_feature_map(file_path: Path, feature_map: Any) -> None:  # noqa: PLR09
         # Check if this is a workflow phase entity - redirect writes to parent's phases section
         if entity.phase_of:
             parent_id, phase_key = entity.phase_of
-            if _update_phase_meta_in_place(
-                available_sections, parent_id, phase_key, entity.meta, entity.type
+            # When sync_updates is provided, only write fields that came from Jira sync
+            # This prevents writing workflow-assigned defaults (like effort) that weren't
+            # actually synced from Jira
+            if sync_updates is not None:
+                meta_to_write = sync_updates.get(entity.id, {})
+            else:
+                meta_to_write = entity.meta
+            if meta_to_write and _update_phase_meta_in_place(
+                available_sections, parent_id, phase_key, meta_to_write, entity.type
             ):
                 entities_updated += 1
+                found = True
+            elif not meta_to_write:
+                # No updates for this phase entity, but that's not an error
                 found = True
         # Standard entity - write to its own section
         # First, try the unified 'entities' section
