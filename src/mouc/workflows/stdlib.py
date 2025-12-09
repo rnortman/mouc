@@ -5,8 +5,8 @@ These workflows are bundled with mouc but must be explicitly enabled via config:
     workflows:
       stdlib: true
 
-Each workflow expands a single entity into multiple phase entities while
-preserving the original entity ID as a milestone/summary entity.
+Each workflow expands a single entity by adding phase entities. The parent
+entity is preserved as the main work task (typically implementation).
 """
 
 from __future__ import annotations
@@ -86,50 +86,33 @@ def _create_phase_entity(  # noqa: PLR0913 - many optional params for flexibilit
     )
 
 
-def _create_milestone_entity(
-    parent: Entity,
-    requires_phase_id: str,
-) -> Entity:
-    """Create a milestone entity with 0d effort that requires a phase."""
-    meta = deepcopy(parent.meta)
-    meta["effort"] = "0d"
-
-    return Entity(
-        type=parent.type,
-        id=parent.id,  # Same ID as parent
-        name=parent.name,
-        description=parent.description,
-        requires={Dependency(entity_id=requires_phase_id)},
-        enables=parent.enables,  # Inherit parent's enables
-        links=parent.links,
-        tags=[*parent.tags, "phase:milestone"],
-        meta=meta,
-    )
-
-
 def design_impl(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
 ) -> list[Entity]:
-    """Expand entity into: design -> [signoff lag] -> impl -> milestone.
+    """Expand entity into: design (floats) -> [signoff lag] -> parent (impl).
+
+    The design phase floats freely (no requires). The parent entity becomes
+    the implementation phase, requiring design + signoff_lag in addition to
+    its original requires.
 
     Default values (can be overridden in config or per-entity phases):
     - design_effort: "3d"
     - signoff_lag: "1w"
 
-    Phase keys: design, impl
+    Phase keys: design
     """
     signoff_lag = defaults.get("signoff_lag", "1w")
 
-    # Check for phase-level lag override
+    # Check for phase-level lag override on parent (impl)
     if phase_overrides:
         impl_override = phase_overrides.get("impl", {})
         impl_meta = impl_override.get("meta", {})
         if "lag" in impl_meta:
             signoff_lag = impl_meta["lag"]
 
-    # Create design phase
+    # Create design phase (floats - no requires)
     design = _create_phase_entity(
         parent=entity,
         phase_key="design",
@@ -137,21 +120,13 @@ def design_impl(
         defaults={"effort": defaults.get("design_effort", "3d")},
         name_suffix="Design",
     )
-    design.requires = entity.requires  # Inherit parent's requires
+    # design.requires stays empty - it floats
 
-    # Create impl phase
-    impl = _create_phase_entity(
-        parent=entity,
-        phase_key="impl",
-        phase_overrides=phase_overrides,
-        name_suffix="Implementation",
-    )
-    impl.requires = {Dependency.parse(f"{design.id} + {signoff_lag}")}
+    # Parent entity becomes impl, add design dependency to its existing requires
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + {signoff_lag}")}
 
-    # Create milestone (same ID as parent)
-    milestone = _create_milestone_entity(entity, impl.id)
-
-    return [design, impl, milestone]
+    return [design, parent]
 
 
 def impl_pr(
@@ -159,13 +134,16 @@ def impl_pr(
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
 ) -> list[Entity]:
-    """Expand entity into: impl -> [review lag] -> pr -> milestone.
+    """Expand entity into: parent (impl) -> [review lag] -> pr.
+
+    The parent entity is the implementation phase. A PR phase is added
+    that requires the parent + review_lag.
 
     Default values (can be overridden in config or per-entity phases):
     - pr_effort: "2d"
     - review_lag: "3d"
 
-    Phase keys: impl, pr
+    Phase keys: pr
     """
     review_lag = defaults.get("review_lag", "3d")
 
@@ -176,16 +154,10 @@ def impl_pr(
         if "lag" in pr_meta:
             review_lag = pr_meta["lag"]
 
-    # Create impl phase
-    impl = _create_phase_entity(
-        parent=entity,
-        phase_key="impl",
-        phase_overrides=phase_overrides,
-        name_suffix="Implementation",
-    )
-    impl.requires = entity.requires  # Inherit parent's requires
+    # Parent entity stays as impl (unchanged)
+    parent = deepcopy(entity)
 
-    # Create PR phase
+    # Create PR phase that requires parent
     pr = _create_phase_entity(
         parent=entity,
         phase_key="pr",
@@ -193,12 +165,13 @@ def impl_pr(
         defaults={"effort": defaults.get("pr_effort", "2d")},
         name_suffix="PR Review",
     )
-    pr.requires = {Dependency.parse(f"{impl.id} + {review_lag}")}
+    pr.requires = {Dependency.parse(f"{entity.id} + {review_lag}")}
+    pr.enables = entity.enables  # PR phase takes over parent's enables
 
-    # Create milestone
-    milestone = _create_milestone_entity(entity, pr.id)
+    # Parent no longer enables downstream - PR does
+    parent.enables = set()
 
-    return [impl, pr, milestone]
+    return [parent, pr]
 
 
 def full(
@@ -206,7 +179,11 @@ def full(
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
 ) -> list[Entity]:
-    """Expand entity into: design -> signoff -> impl -> review -> pr -> milestone.
+    """Expand entity into: design (floats) -> [signoff] -> parent (impl) -> [review] -> pr.
+
+    The design phase floats freely. The parent entity becomes the implementation
+    phase, requiring design + signoff_lag AND its original requires. The PR phase
+    requires the parent + review_lag and takes over the parent's enables.
 
     Default values (can be overridden in config or per-entity phases):
     - design_effort: "3d"
@@ -214,7 +191,7 @@ def full(
     - pr_effort: "2d"
     - review_lag: "3d"
 
-    Phase keys: design, impl, pr
+    Phase keys: design, pr
     """
     signoff_lag = defaults.get("signoff_lag", "1w")
     review_lag = defaults.get("review_lag", "3d")
@@ -231,7 +208,7 @@ def full(
         if "lag" in pr_meta:
             review_lag = pr_meta["lag"]
 
-    # Create design phase
+    # Create design phase (floats - no requires)
     design = _create_phase_entity(
         parent=entity,
         phase_key="design",
@@ -239,18 +216,14 @@ def full(
         defaults={"effort": defaults.get("design_effort", "3d")},
         name_suffix="Design",
     )
-    design.requires = entity.requires  # Inherit parent's requires
+    # design.requires stays empty - it floats
 
-    # Create impl phase
-    impl = _create_phase_entity(
-        parent=entity,
-        phase_key="impl",
-        phase_overrides=phase_overrides,
-        name_suffix="Implementation",
-    )
-    impl.requires = {Dependency.parse(f"{design.id} + {signoff_lag}")}
+    # Parent entity becomes impl, add design dependency to its existing requires
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + {signoff_lag}")}
+    parent.enables = set()  # PR takes over enables
 
-    # Create PR phase
+    # Create PR phase that requires parent
     pr = _create_phase_entity(
         parent=entity,
         phase_key="pr",
@@ -258,12 +231,10 @@ def full(
         defaults={"effort": defaults.get("pr_effort", "2d")},
         name_suffix="PR Review",
     )
-    pr.requires = {Dependency.parse(f"{impl.id} + {review_lag}")}
+    pr.requires = {Dependency.parse(f"{entity.id} + {review_lag}")}
+    pr.enables = entity.enables  # PR phase takes over parent's enables
 
-    # Create milestone
-    milestone = _create_milestone_entity(entity, pr.id)
-
-    return [design, impl, pr, milestone]
+    return [design, parent, pr]
 
 
 def phased_rollout(
@@ -271,14 +242,17 @@ def phased_rollout(
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
 ) -> list[Entity]:
-    """Expand entity into: impl -> canary -> [bake] -> rollout -> milestone.
+    """Expand entity into: parent (impl) -> canary -> [bake] -> rollout.
+
+    The parent entity is the implementation phase. Canary and rollout phases
+    are added after it. The rollout phase takes over the parent's enables.
 
     Default values (can be overridden in config or per-entity phases):
     - canary_effort: "1d"
     - bake_time: "1w"
     - rollout_effort: "1d"
 
-    Phase keys: impl, canary, rollout
+    Phase keys: canary, rollout
     """
     bake_time = defaults.get("bake_time", "1w")
 
@@ -289,16 +263,11 @@ def phased_rollout(
         if "lag" in rollout_meta:
             bake_time = rollout_meta["lag"]
 
-    # Create impl phase
-    impl = _create_phase_entity(
-        parent=entity,
-        phase_key="impl",
-        phase_overrides=phase_overrides,
-        name_suffix="Implementation",
-    )
-    impl.requires = entity.requires  # Inherit parent's requires
+    # Parent entity stays as impl
+    parent = deepcopy(entity)
+    parent.enables = set()  # Rollout takes over enables
 
-    # Create canary phase
+    # Create canary phase that requires parent
     canary = _create_phase_entity(
         parent=entity,
         phase_key="canary",
@@ -306,7 +275,7 @@ def phased_rollout(
         defaults={"effort": defaults.get("canary_effort", "1d")},
         name_suffix="Canary Deploy",
     )
-    canary.requires = {Dependency(entity_id=impl.id)}
+    canary.requires = {Dependency(entity_id=entity.id)}
 
     # Create rollout phase
     rollout = _create_phase_entity(
@@ -317,8 +286,6 @@ def phased_rollout(
         name_suffix="Full Rollout",
     )
     rollout.requires = {Dependency.parse(f"{canary.id} + {bake_time}")}
+    rollout.enables = entity.enables  # Rollout takes over parent's enables
 
-    # Create milestone
-    milestone = _create_milestone_entity(entity, rollout.id)
-
-    return [impl, canary, rollout, milestone]
+    return [parent, canary, rollout]

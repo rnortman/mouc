@@ -26,9 +26,8 @@ entities:
 ```
 
 3. The entity expands into phases:
-   - `auth_redesign_design` - Design phase (3d default)
-   - `auth_redesign_impl` - Implementation phase (inherits 2w effort)
-   - `auth_redesign` - Milestone (0d, requires impl)
+   - `auth_redesign_design` - Design phase (3d default, floats freely)
+   - `auth_redesign` - Parent entity (impl, now requires design + signoff lag)
 
 ## Standard Library Workflows
 
@@ -36,27 +35,33 @@ Enable with `workflows.stdlib: true` in config.
 
 ### design_impl
 
-Expands into: design -> [signoff lag] -> impl -> milestone
+Expands into: design (floats) -> [signoff lag] -> parent (impl)
+
+The design phase has no dependencies (floats freely). The parent entity becomes the implementation, requiring the design phase plus signoff lag.
 
 **Defaults:**
 - `design_effort`: "3d"
 - `signoff_lag`: "1w"
 
-**Phase keys:** `design`, `impl`
+**Phase keys:** `design`
 
 ### impl_pr
 
-Expands into: impl -> [review lag] -> pr -> milestone
+Expands into: parent (impl) -> [review lag] -> pr
+
+The parent entity stays as the implementation. A PR phase is added that requires the parent plus review lag.
 
 **Defaults:**
 - `pr_effort`: "2d"
 - `review_lag`: "3d"
 
-**Phase keys:** `impl`, `pr`
+**Phase keys:** `pr`
 
 ### full
 
-Expands into: design -> [signoff lag] -> impl -> [review lag] -> pr -> milestone
+Expands into: design (floats) -> [signoff lag] -> parent (impl) -> [review lag] -> pr
+
+Combines design_impl and impl_pr patterns.
 
 **Defaults:**
 - `design_effort`: "3d"
@@ -64,18 +69,20 @@ Expands into: design -> [signoff lag] -> impl -> [review lag] -> pr -> milestone
 - `pr_effort`: "2d"
 - `review_lag`: "3d"
 
-**Phase keys:** `design`, `impl`, `pr`
+**Phase keys:** `design`, `pr`
 
 ### phased_rollout
 
-Expands into: impl -> canary -> [bake time] -> rollout -> milestone
+Expands into: parent (impl) -> canary -> [bake time] -> rollout
+
+The parent entity stays as the implementation. Canary and rollout phases are added after it.
 
 **Defaults:**
 - `canary_effort`: "1d"
 - `bake_time`: "1w"
 - `rollout_effort`: "1d"
 
-**Phase keys:** `impl`, `canary`, `rollout`
+**Phase keys:** `canary`, `rollout`
 
 ## Configuration
 
@@ -184,21 +191,22 @@ entities:
 
 ### What Gets Inherited
 
-- First phase inherits parent's `requires`
-- Last phase (milestone) inherits parent's `enables`
-- All phases inherit parent's `type`, `description`, `tags`, and `meta`
+- Phase entities inherit parent's `type`, `description`, `tags`, and `meta`
+- Design phases float freely (no `requires`)
+- Parent entity keeps its original `requires` plus gains design dependency
+- Last phase (e.g., pr, rollout) takes over parent's `enables`
 - Phase overrides take precedence over inherited values
 
 ## Dependency Wiring
 
 When an entity uses a workflow:
 
-1. **Parent's `requires`** → First phase's `requires`
-2. **Inter-phase dependencies** → Created by the workflow (with lag)
-3. **Milestone** → Requires last work phase, has `effort: 0d`
-4. **Parent's `enables`** → Milestone's `enables`
+1. **Design phases** → Float freely, can start immediately
+2. **Parent entity** → Keeps original `requires` AND gains design dependency (with lag)
+3. **Later phases** (pr, rollout) → Require parent/preceding phase
+4. **Last phase** → Takes over parent's `enables`
 
-This means other entities can still reference the original entity ID, and they'll wait for the entire workflow to complete.
+Other entities can still reference the original entity ID, and the workflow ensures proper sequencing.
 
 ## Gantt Display
 

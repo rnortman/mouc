@@ -118,10 +118,10 @@ class TestExpandWorkflows:
         ]
         result = expand_workflows(entities, config)
 
-        # Should have design, impl, and milestone
-        assert len(result) == 3
+        # Should have design and parent
+        assert len(result) == 2
         ids = {e.id for e in result}
-        assert ids == {"auth_design", "auth_impl", "auth"}
+        assert ids == {"auth_design", "auth"}
 
     def test_custom_workflow_expands(self, tmp_path: Path) -> None:
         """Should expand with custom workflow from file."""
@@ -246,64 +246,54 @@ class TestDesignImplWorkflow:
     """Tests for design_impl stdlib workflow."""
 
     def test_basic_expansion(self) -> None:
-        """Should expand into design, impl, and milestone."""
+        """Should expand into design and parent (impl)."""
         entity = make_entity("auth", meta={"effort": "2w", "resources": ["alice"]})
         result = design_impl(entity, {}, None)
 
-        assert len(result) == 3
-        design, impl, milestone = result
+        assert len(result) == 2
+        design, parent = result
 
         assert design.id == "auth_design"
-        assert impl.id == "auth_impl"
-        assert milestone.id == "auth"
+        assert parent.id == "auth"  # Parent keeps original ID
 
-    def test_design_inherits_parent_requires(self) -> None:
-        """Design phase should inherit parent's requires."""
+    def test_design_floats(self) -> None:
+        """Design phase should have no requires (floats freely)."""
         entity = make_entity("auth", requires=["prereq_a", "prereq_b"])
         result = design_impl(entity, {}, None)
         design = result[0]
 
-        assert design.requires_ids == {"prereq_a", "prereq_b"}
+        assert design.requires_ids == set()  # Floats
 
-    def test_impl_requires_design_with_lag(self) -> None:
-        """Impl should require design with signoff lag."""
-        entity = make_entity("auth")
+    def test_parent_requires_design_and_original(self) -> None:
+        """Parent should require design + lag AND its original requires."""
+        entity = make_entity("auth", requires=["prereq_a"])
         result = design_impl(entity, {"signoff_lag": "2w"}, None)
-        impl = result[1]
+        parent = result[1]
 
-        assert len(impl.requires) == 1
-        dep = next(iter(impl.requires))
-        assert dep.entity_id == "auth_design"
-        assert dep.lag_days == 14  # 2 weeks
+        # Should have both original prereq and design dependency
+        assert "prereq_a" in parent.requires_ids
+        assert "auth_design" in parent.requires_ids
 
-    def test_milestone_requires_impl(self) -> None:
-        """Milestone should require impl phase."""
-        entity = make_entity("auth")
-        result = design_impl(entity, {}, None)
-        milestone = result[2]
+        # Check design dependency has lag
+        design_dep = next(d for d in parent.requires if d.entity_id == "auth_design")
+        assert design_dep.lag_days == 14  # 2 weeks
 
-        assert milestone.requires_ids == {"auth_impl"}
-
-    def test_milestone_inherits_enables(self) -> None:
-        """Milestone should inherit parent's enables."""
+    def test_parent_keeps_enables(self) -> None:
+        """Parent should keep its enables."""
         entity = make_entity("auth", enables=["next_task"])
         result = design_impl(entity, {}, None)
-        milestone = result[2]
+        parent = result[1]
 
-        assert milestone.enables_ids == {"next_task"}
+        assert parent.enables_ids == {"next_task"}
 
-    def test_phase_of_set_on_phases(self) -> None:
-        """Phase entities should have phase_of set, milestone should not."""
+    def test_phase_of_set_on_design_only(self) -> None:
+        """Only design phase should have phase_of set."""
         entity = make_entity("auth")
         result = design_impl(entity, {}, None)
-        design, impl, milestone = result
+        design, parent = result
 
-        # Phase entities should have phase_of set
         assert design.phase_of == ("auth", "design")
-        assert impl.phase_of == ("auth", "impl")
-
-        # Milestone (same ID as parent) should NOT have phase_of
-        assert milestone.phase_of is None
+        assert parent.phase_of is None  # Parent unchanged
 
     def test_default_design_effort(self) -> None:
         """Should use default design effort from defaults."""
@@ -336,90 +326,104 @@ class TestDesignImplWorkflow:
         entity = make_entity("auth")
         phases = {"impl": {"meta": {"lag": "3w"}}}
         result = design_impl(entity, {"signoff_lag": "1w"}, phases)
-        impl = result[1]
+        parent = result[1]
 
-        dep = next(iter(impl.requires))
-        assert dep.lag_days == 21  # 3 weeks
+        design_dep = next(d for d in parent.requires if d.entity_id == "auth_design")
+        assert design_dep.lag_days == 21  # 3 weeks
 
     def test_phase_tags(self) -> None:
-        """Each phase should have phase: tag."""
+        """Design phase should have phase:design tag."""
         entity = make_entity("auth")
         result = design_impl(entity, {}, None)
 
         assert "phase:design" in result[0].tags
-        assert "phase:impl" in result[1].tags
-        assert "phase:milestone" in result[2].tags
 
 
 class TestImplPrWorkflow:
     """Tests for impl_pr stdlib workflow."""
 
     def test_basic_expansion(self) -> None:
-        """Should expand into impl, pr, and milestone."""
+        """Should expand into parent (impl) and pr."""
         entity = make_entity("feature")
         result = impl_pr(entity, {}, None)
 
-        assert len(result) == 3
-        impl, pr, milestone = result
+        assert len(result) == 2
+        parent, pr = result
 
-        assert impl.id == "feature_impl"
+        assert parent.id == "feature"  # Parent keeps original ID
         assert pr.id == "feature_pr"
-        assert milestone.id == "feature"
 
-    def test_pr_requires_impl_with_lag(self) -> None:
-        """PR should require impl with review lag."""
+    def test_pr_requires_parent_with_lag(self) -> None:
+        """PR should require parent with review lag."""
         entity = make_entity("feature")
         result = impl_pr(entity, {"review_lag": "5d"}, None)
         pr = result[1]
 
         dep = next(iter(pr.requires))
-        assert dep.entity_id == "feature_impl"
+        assert dep.entity_id == "feature"
         assert dep.lag_days == 5
+
+    def test_pr_takes_over_enables(self) -> None:
+        """PR phase should take over parent's enables."""
+        entity = make_entity("feature", enables=["next_task"])
+        result = impl_pr(entity, {}, None)
+        parent, pr = result
+
+        assert parent.enables_ids == set()  # Parent no longer enables
+        assert pr.enables_ids == {"next_task"}  # PR takes over
 
 
 class TestFullWorkflow:
     """Tests for full stdlib workflow."""
 
     def test_basic_expansion(self) -> None:
-        """Should expand into design, impl, pr, and milestone."""
+        """Should expand into design, parent (impl), and pr."""
         entity = make_entity("feature")
         result = full(entity, {}, None)
 
-        assert len(result) == 4
+        assert len(result) == 3
         ids = [e.id for e in result]
-        assert ids == ["feature_design", "feature_impl", "feature_pr", "feature"]
+        assert ids == ["feature_design", "feature", "feature_pr"]
 
     def test_chained_dependencies(self) -> None:
         """Phases should be properly chained."""
         entity = make_entity("feature")
         result = full(entity, {"signoff_lag": "1w", "review_lag": "3d"}, None)
-        _design, impl, pr, milestone = result
+        design, parent, pr = result
 
-        # impl requires design + signoff_lag
-        impl_dep = next(iter(impl.requires))
-        assert impl_dep.entity_id == "feature_design"
-        assert impl_dep.lag_days == 7
+        # design floats (no requires)
+        assert design.requires_ids == set()
 
-        # pr requires impl + review_lag
+        # parent requires design + signoff_lag
+        design_dep = next(d for d in parent.requires if d.entity_id == "feature_design")
+        assert design_dep.lag_days == 7
+
+        # pr requires parent + review_lag
         pr_dep = next(iter(pr.requires))
-        assert pr_dep.entity_id == "feature_impl"
+        assert pr_dep.entity_id == "feature"
         assert pr_dep.lag_days == 3
 
-        # milestone requires pr
-        assert milestone.requires_ids == {"feature_pr"}
+    def test_pr_takes_over_enables(self) -> None:
+        """PR phase should take over parent's enables."""
+        entity = make_entity("feature", enables=["next_task"])
+        result = full(entity, {}, None)
+        _design, parent, pr = result
+
+        assert parent.enables_ids == set()
+        assert pr.enables_ids == {"next_task"}
 
 
 class TestPhasedRolloutWorkflow:
     """Tests for phased_rollout stdlib workflow."""
 
     def test_basic_expansion(self) -> None:
-        """Should expand into impl, canary, rollout, and milestone."""
+        """Should expand into parent (impl), canary, and rollout."""
         entity = make_entity("deploy")
         result = phased_rollout(entity, {}, None)
 
-        assert len(result) == 4
+        assert len(result) == 3
         ids = [e.id for e in result]
-        assert ids == ["deploy_impl", "deploy_canary", "deploy_rollout", "deploy"]
+        assert ids == ["deploy", "deploy_canary", "deploy_rollout"]
 
     def test_rollout_has_bake_lag(self) -> None:
         """Rollout should wait for canary bake time."""
@@ -430,6 +434,23 @@ class TestPhasedRolloutWorkflow:
         dep = next(iter(rollout.requires))
         assert dep.entity_id == "deploy_canary"
         assert dep.lag_days == 14
+
+    def test_canary_requires_parent(self) -> None:
+        """Canary should require parent."""
+        entity = make_entity("deploy")
+        result = phased_rollout(entity, {}, None)
+        canary = result[1]
+
+        assert canary.requires_ids == {"deploy"}
+
+    def test_rollout_takes_over_enables(self) -> None:
+        """Rollout phase should take over parent's enables."""
+        entity = make_entity("deploy", enables=["next_task"])
+        result = phased_rollout(entity, {}, None)
+        parent, _canary, rollout = result
+
+        assert parent.enables_ids == set()
+        assert rollout.enables_ids == {"next_task"}
 
 
 class TestParserIntegration:
@@ -461,20 +482,20 @@ entities:
         parser = FeatureMapParser(config)
         fm = parser.parse_file(feature_map)
 
-        # Should have design, impl, and milestone
-        assert len(fm.entities) == 3
+        # Should have design and parent (impl)
+        assert len(fm.entities) == 2
         ids = {e.id for e in fm.entities}
-        assert ids == {"auth_redesign_design", "auth_redesign_impl", "auth_redesign"}
+        assert ids == {"auth_redesign_design", "auth_redesign"}
 
         # Design should have overridden effort
         design = fm.get_entity_by_id("auth_redesign_design")
         assert design is not None
         assert design.meta.get("effort") == "5d"
 
-        # Impl should have inherited effort from parent
-        impl = fm.get_entity_by_id("auth_redesign_impl")
-        assert impl is not None
-        assert impl.meta.get("effort") == "2w"
+        # Parent should keep its effort
+        parent = fm.get_entity_by_id("auth_redesign")
+        assert parent is not None
+        assert parent.meta.get("effort") == "2w"
 
     def test_parser_without_config_ignores_workflow(self, tmp_path: Path) -> None:
         """Parser without config should ignore workflow field."""
@@ -523,10 +544,10 @@ entities:
         parser = FeatureMapParser(config)
         fm = parser.parse_file(feature_map)
 
-        # prereq should enable the design phase (first phase inherits requires)
+        # prereq should enable the parent (design floats, parent requires prereq)
         prereq = fm.get_entity_by_id("prereq")
         assert prereq is not None
-        assert "feature_design" in prereq.enables_ids
+        assert "feature" in prereq.enables_ids
 
 
 class TestStdlibDiscovery:
@@ -560,12 +581,11 @@ class TestDefaultWorkflows:
         ]
         result = expand_workflows(entities, config)
 
-        # Capability should be expanded (design_impl = 3 entities)
+        # Capability should be expanded (design_impl = 2 entities)
         # user_story should pass through unchanged
-        assert len(result) == 4
+        assert len(result) == 3
         ids = {e.id for e in result}
         assert "auth_design" in ids
-        assert "auth_impl" in ids
         assert "auth" in ids
         assert "story" in ids
 
@@ -594,10 +614,10 @@ class TestDefaultWorkflows:
         ]
         result = expand_workflows(entities, config)
 
-        # impl_pr has impl, pr, milestone
-        assert len(result) == 3
+        # impl_pr has parent and pr
+        assert len(result) == 2
         ids = {e.id for e in result}
-        assert ids == {"feature_impl", "feature_pr", "feature"}
+        assert ids == {"feature", "feature_pr"}
 
     def test_no_default_for_type_passes_through(self) -> None:
         """Entities with no default for their type pass through."""
