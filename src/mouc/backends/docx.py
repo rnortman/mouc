@@ -600,8 +600,11 @@ class DocxBackend:
         current_entity_type: str,  # type: ignore[name-defined]
     ) -> None:
         """Add an entity reference with hyperlink to a paragraph."""
-        # Add hyperlink to entity
-        self._add_hyperlink(paragraph, ref.anchor_id, ref.entity_name)
+        # Only create link if anchor exists (filtered/missing refs have empty anchor)
+        if ref.anchor_id:
+            self._add_hyperlink(paragraph, ref.anchor_id, ref.entity_name)
+        else:
+            paragraph.add_run(ref.entity_name)
 
         # Add ID in parentheses
         paragraph.add_run(f" ({ref.entity_id})")

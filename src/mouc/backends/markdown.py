@@ -61,7 +61,7 @@ class MarkdownBackend:
         self.lines.append("")
         return self._make_anchor_from_text(text)
 
-    def add_entity(  # noqa: PLR0913 - Entity rendering requires multiple structured parameters
+    def add_entity(  # noqa: PLR0913, PLR0912 - Entity rendering requires multiple parameters and branches
         self,
         entity: Entity,
         anchor_id: str,
@@ -127,9 +127,12 @@ class MarkdownBackend:
                     if ref.entity_type != entity.type
                     else ""
                 )
-                self.lines.append(
-                    f"- [{ref.entity_name}](#{ref.anchor_id}) (`{ref.entity_id}`){type_label}"
-                )
+                # Only create link if anchor exists (filtered/missing refs have empty anchor)
+                if ref.anchor_id:
+                    name_part = f"[{ref.entity_name}](#{ref.anchor_id})"
+                else:
+                    name_part = ref.entity_name
+                self.lines.append(f"- {name_part} (`{ref.entity_id}`){type_label}")
 
         # Enables section - use heading
         if enables_refs:
@@ -141,9 +144,12 @@ class MarkdownBackend:
                     if ref.entity_type != entity.type
                     else ""
                 )
-                self.lines.append(
-                    f"- [{ref.entity_name}](#{ref.anchor_id}) (`{ref.entity_id}`){type_label}"
-                )
+                # Only create link if anchor exists (filtered/missing refs have empty anchor)
+                if ref.anchor_id:
+                    name_part = f"[{ref.entity_name}](#{ref.anchor_id})"
+                else:
+                    name_part = ref.entity_name
+                self.lines.append(f"- {name_part} (`{ref.entity_id}`){type_label}")
 
     def add_toc_entry(
         self, text: str, anchor_id: str, level: int, suffix: str | None = None

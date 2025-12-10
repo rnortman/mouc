@@ -368,8 +368,11 @@ def test_filtered_entity_references_marked_in_document() -> None:
     assert "### Cap 2" in doc_output or "#### Cap 2" in doc_output
     # Reference to Cap 1 should be marked as filtered (no link, marked text)
     assert "Cap 1 (filtered)" in doc_output
-    # Should NOT have a link to cap1 anchor
-    assert "[Cap 1](#cap-1)" not in doc_output
+    # Should NOT have a link to cap1 anchor - verify it's plain text, not a link
+    assert "[Cap 1 (filtered)](" not in doc_output
+    assert "(#cap-1)" not in doc_output
+    # The filtered reference should appear as plain text with the entity ID
+    assert "Cap 1 (filtered) (`cap1`)" in doc_output
 
 
 def test_filtered_entity_references_omitted_when_configured() -> None:
@@ -463,8 +466,11 @@ def test_filtered_entity_enables_marked_in_document() -> None:
     assert "### Cap 2" not in doc_output
     # Reference to Cap 2 in Cap 1's Enables section should be marked as filtered
     assert "Cap 2 (filtered)" in doc_output
-    # Should NOT have a link to cap2 anchor
-    assert "[Cap 2](#cap-2)" not in doc_output
+    # Should NOT have a link to cap2 anchor - verify it's plain text, not a link
+    assert "[Cap 2 (filtered)](" not in doc_output
+    assert "(#cap-2)" not in doc_output
+    # The filtered reference should appear as plain text with the entity ID
+    assert "Cap 2 (filtered) (`cap2`)" in doc_output
 
 
 def test_graph_edges_omitted_for_filtered_entities() -> None:
