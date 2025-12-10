@@ -147,9 +147,10 @@ class TestDependencyLagScheduling:
         deadlines = scheduler.get_computed_deadlines()
 
         # task_b deadline is Jan 25
-        # task_a deadline = Jan 25 - task_a_duration(5) - lag(7) = Jan 13
+        # task_b must start by Jan 25 - task_b_duration(3) = Jan 22
+        # task_a must finish 7 days before task_b starts: Jan 22 - 7 = Jan 15
         assert deadlines["task_b"] == date(2025, 1, 25)
-        expected_task_a_deadline = date(2025, 1, 25) - timedelta(days=5 + 7)
+        expected_task_a_deadline = date(2025, 1, 25) - timedelta(days=3 + 7)
         assert deadlines["task_a"] == expected_task_a_deadline
 
 

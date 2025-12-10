@@ -7,7 +7,13 @@ from typing import TYPE_CHECKING
 from mouc.logger import get_logger
 
 from ..config import SchedulingConfig
-from ..core import AlgorithmResult, PreProcessResult, ScheduledTask, Task
+from ..core import (
+    AlgorithmResult,
+    PreProcessResult,
+    ScheduledTask,
+    Task,
+    compute_dependency_deadline,
+)
 from ..resources import ResourceSchedule
 
 logger = get_logger()
@@ -191,8 +197,8 @@ class BoundedRolloutScheduler:
                     continue
 
                 # Account for lag when propagating deadline backwards
-                dep_deadline = task_deadline - timedelta(
-                    days=self.tasks[dep_id].duration_days + dep.lag_days
+                dep_deadline = compute_dependency_deadline(
+                    task_deadline, task.duration_days, dep.lag_days
                 )
                 if dep_id in latest:
                     latest[dep_id] = min(latest[dep_id], dep_deadline)

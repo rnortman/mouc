@@ -1,7 +1,7 @@
 """Core dataclasses for the scheduling system."""
 
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -89,3 +89,22 @@ class AlgorithmResult:
 
     scheduled_tasks: list[ScheduledTask]
     algorithm_metadata: dict[str, Any] = field(default_factory=_default_dict)
+
+
+def compute_dependency_deadline(
+    dependent_deadline: date, dependent_duration_days: float, lag_days: float
+) -> date:
+    """Compute when a dependency must finish for its dependent to meet its deadline.
+
+    If task B depends on task A (A blocks B), this computes A's deadline given B's.
+    The dependency (A) must finish before the dependent (B) can start, accounting for lag.
+
+    Args:
+        dependent_deadline: When the dependent task (B) must finish
+        dependent_duration_days: How long the dependent task (B) takes
+        lag_days: Gap required between dependency finish and dependent start
+
+    Returns:
+        Latest date the dependency (A) can finish
+    """
+    return dependent_deadline - timedelta(days=dependent_duration_days + lag_days)

@@ -1,9 +1,9 @@
 """Backward pass pre-processor for deadline and priority propagation."""
 
-from datetime import date, timedelta
+from datetime import date
 from typing import Any
 
-from ..core import PreProcessResult, Task
+from ..core import PreProcessResult, Task, compute_dependency_deadline
 
 
 class BackwardPassPreProcessor:
@@ -145,8 +145,8 @@ class BackwardPassPreProcessor:
                     continue
 
                 # Dependency must finish before this task can start (accounting for lag)
-                dep_deadline = task_deadline - timedelta(
-                    days=tasks[dep_id].duration_days + dep.lag_days
+                dep_deadline = compute_dependency_deadline(
+                    task_deadline, task.duration_days, dep.lag_days
                 )
 
                 if dep_id in latest:
