@@ -7,23 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2025-12-10
+
 ### Added
-- Negated style tags: use `tags=["!detailed"]` to run only when tag is NOT active
+- Negated style tags: `tags=["!detailed"]` runs only when tag is NOT active
 - User-configurable entity types via `entity_types` config section
-- `mouc convert-format` command to convert old 3-section YAML to unified `entities` format
-- Dependency lag: `requires: [task_a + 1w]` delays start by 1 week after dependency completes
-- Workflows: expand entities into multiple phases via `workflow: design_impl` field
-- Type-based default workflows: set `workflows.defaults.capability: design_impl` to apply to all capabilities
+- `mouc convert-format` command for migrating to unified `entities` format
+- Dependency lag: `requires: [task_a + 1w]` delays start after dependency completes
+- Workflows: expand entities into phases via `workflow: design_impl` field
+- Type-based default workflows: `workflows.defaults.capability: design_impl`
 - `workflow: none` to override default and prevent expansion
-- New save_resolution_choices config to control whether Jira sync remembers the conflict resolution decisions (default True which is the existing behavior)
-- `transition_to_status` now accepts a list of statuses; uses earliest date from any matching status
-- Ignored dates are now filtered before selecting the earliest transition date
+- `save_resolution_choices` config for Jira sync conflict resolution persistence
+- `transition_to_status` accepts list of statuses, uses earliest matching date
 
 ### Changed
-- Entity types now validated against configured types (supports custom types like `milestone`)
-- Old 3-section YAML format (capabilities/user_stories/outcomes) now emits deprecation warning
-- Graph nodes now default to white fill color; type-specific colors should be set via styling functions
-- Backward dependency warnings now use scheduler data for entities without manual timeframes
+- Entity types validated against configured types (supports custom types)
+- Old 3-section YAML format emits deprecation warning
+- Graph nodes default to white fill; use styling functions for type colors
+- Backward dependency warnings use scheduler data for entities without manual timeframes
 
 ## [0.5.1] - 2025-12-09
 
