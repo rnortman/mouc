@@ -133,10 +133,6 @@ class Link:
         return cls(type=link_type, label=link_str, url=None, raw=link_str)
 
 
-# Valid entity types - can be extended in the future!
-VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
-
-
 def _default_dependency_set() -> set[Dependency]:
     return set()
 

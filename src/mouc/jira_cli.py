@@ -318,6 +318,19 @@ def _update_meta_in_place(yaml_entity: Any, new_meta: dict[str, Any]) -> None:
             existing_meta[key] = value
 
 
+def _pluralize_type_name(entity_type: str) -> str:
+    """Convert entity type name to its plural form for legacy section names.
+
+    Examples:
+        capability -> capabilities
+        user_story -> user_stories
+        outcome -> outcomes
+    """
+    if entity_type.endswith("y") and len(entity_type) > 1 and entity_type[-2] not in "aeiou":
+        return entity_type[:-1] + "ies"
+    return entity_type + "s"
+
+
 def _find_entity_in_sections(
     available_sections: dict[str, Any],
     entity_id: str,
@@ -333,31 +346,24 @@ def _find_entity_in_sections(
     Returns:
         The entity dict from YAML if found, None otherwise
     """
-    # Map entity types to their legacy section names
-    type_to_legacy_section = {
-        "capability": "capabilities",
-        "user_story": "user_stories",
-        "outcome": "outcomes",
-    }
-
     # Try unified 'entities' section first
     if "entities" in available_sections and entity_id in available_sections["entities"]:
         return available_sections["entities"][entity_id]
 
     # Try legacy section if entity type provided
     if entity_type:
-        legacy_section = type_to_legacy_section.get(entity_type)
-        if (
-            legacy_section
-            and legacy_section in available_sections
-            and entity_id in available_sections[legacy_section]
-        ):
-            return available_sections[legacy_section][entity_id]
-
-    # Try all legacy sections as fallback
-    for legacy_section in type_to_legacy_section.values():
+        legacy_section = _pluralize_type_name(entity_type)
         if legacy_section in available_sections and entity_id in available_sections[legacy_section]:
             return available_sections[legacy_section][entity_id]
+
+    # Try all sections as fallback (except 'entities' and 'metadata')
+    for section_name, section_content in available_sections.items():
+        if (
+            section_name not in ("entities", "metadata")
+            and isinstance(section_content, dict)
+            and entity_id in section_content
+        ):
+            return section_content[entity_id]  # type: ignore[no-any-return]
 
     return None
 
@@ -679,13 +685,6 @@ def write_feature_map(  # noqa: PLR0912
             "Expected 'entities' or legacy keys 'capabilities', 'user_stories', 'outcomes'"
         )
 
-    # Map entity types to their legacy section names
-    type_to_legacy_section = {
-        "capability": "capabilities",
-        "user_story": "user_stories",
-        "outcome": "outcomes",
-    }
-
     entities_updated = 0
     entities_not_found: list[str] = []
 
@@ -718,10 +717,9 @@ def write_feature_map(  # noqa: PLR0912
             found = True
         else:
             # Fall back to legacy section based on entity type
-            legacy_section = type_to_legacy_section.get(entity.type)
+            legacy_section = _pluralize_type_name(entity.type)
             if (
-                legacy_section
-                and legacy_section in available_sections
+                legacy_section in available_sections
                 and entity.id in available_sections[legacy_section]
             ):
                 _update_meta_in_place(available_sections[legacy_section][entity.id], entity.meta)

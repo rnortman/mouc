@@ -7,9 +7,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-# Valid entity types that we currently support
-VALID_ENTITY_TYPES = {"capability", "user_story", "outcome"}
-
 
 class EntitySchema(BaseModel):
     """Schema for unified entity YAML data."""
@@ -25,16 +22,6 @@ class EntitySchema(BaseModel):
     meta: dict[str, Any] = Field(default_factory=dict)
     workflow: str | None = None  # Workflow name to expand this entity
     phases: dict[str, dict[str, Any]] | None = None  # Per-phase overrides
-
-    @model_validator(mode="after")
-    def validate_entity_type(self) -> EntitySchema:
-        """Validate that the entity type is valid."""
-        if self.type and self.type not in VALID_ENTITY_TYPES:
-            raise ValueError(
-                f"Invalid entity type '{self.type}'. "
-                f"Must be one of: {', '.join(sorted(VALID_ENTITY_TYPES))}"
-            )
-        return self
 
     @model_validator(mode="after")
     def handle_dependencies_alias(self) -> EntitySchema:

@@ -263,7 +263,7 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
         backend = MarkdownBackend(feature_map, styling_context)
         doc_config = unified_config.markdown if unified_config else None
 
-    generator = DocumentGenerator(feature_map, backend, doc_config)
+    generator = DocumentGenerator(feature_map, backend, doc_config, unified_config)
     doc_output = generator.generate()
 
     # Output the result
@@ -721,6 +721,93 @@ def audit(
     """Run audit checks on the feature map."""
     typer.echo(f"Audit check '{check}' not yet implemented", err=True)
     raise typer.Exit(1)
+
+
+@app.command(name="convert-format")
+def convert_format(
+    file: Annotated[
+        Path, typer.Argument(help="Path to the old-format feature map YAML file")
+    ] = Path("feature_map.yaml"),
+) -> None:
+    """Convert old 3-section format to unified entities format.
+
+    Outputs converted YAML to stdout. Use redirection to save:
+
+        mouc convert-format feature_map.yaml > feature_map_new.yaml
+    """
+    import yaml  # noqa: PLC0415
+
+    if not file.exists():
+        typer.echo(f"Error: File not found: {file}", err=True)
+        raise typer.Exit(1)
+
+    with file.open(encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+
+    if not isinstance(data, dict):
+        typer.echo("Error: YAML must contain a dictionary at the root level", err=True)
+        raise typer.Exit(1)
+
+    # Check if already in new format
+    if "entities" in data and not any(
+        k in data for k in ("capabilities", "user_stories", "outcomes")
+    ):
+        typer.echo("File is already in unified entities format.", err=True)
+        raise typer.Exit(0)
+
+    # Mapping from section name to entity type
+    section_to_type = {
+        "capabilities": "capability",
+        "user_stories": "user_story",
+        "outcomes": "outcome",
+    }
+
+    from typing import Any, cast  # noqa: PLC0415
+
+    from .unified_config import load_unified_config  # noqa: PLC0415
+
+    # Get default type from config (if available)
+    default_type: str | None = None
+    config_path = get_config_path()
+    if config_path and config_path.exists():
+        with suppress(Exception):
+            config = load_unified_config(config_path)
+            if config.entity_types and config.entity_types.default_type:
+                default_type = config.entity_types.default_type
+
+    # Build unified entities section
+    entities: dict[str, dict[str, Any]] = {}
+
+    # Preserve existing entities if any
+    if "entities" in data:
+        entities.update(cast(dict[str, dict[str, Any]], data["entities"]))
+
+    # Convert old sections
+    for section_name, entity_type in section_to_type.items():
+        if section_name in data and isinstance(data[section_name], dict):
+            section_data = cast(dict[str, dict[str, Any]], data[section_name])
+            for entity_id, entity_data in section_data.items():
+                converted: dict[str, Any] = {}
+                # Only add type field if it differs from default
+                if entity_type != default_type:
+                    converted["type"] = entity_type
+                converted.update(entity_data)
+                entities[entity_id] = converted
+
+    # Build output data
+    output_data: dict[str, Any] = {}
+
+    # Preserve metadata if present
+    if "metadata" in data:
+        output_data["metadata"] = data["metadata"]
+
+    # Add unified entities
+    output_data["entities"] = entities
+
+    # Output YAML
+    typer.echo(
+        yaml.dump(output_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    )
 
 
 # Register Jira subcommands (defined in jira_cli.py)

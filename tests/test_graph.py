@@ -71,13 +71,12 @@ class TestGraphGenerator:
 
         assert "digraph FeatureMap" in dot
 
-        # Check nodes with colors (now includes shape attribute)
+        # Check nodes are present with labels
         assert 'cap1 [label="Cap 1"' in dot
-        assert 'fillcolor="lightblue"' in dot
         assert 'story1 [label="Story 1"' in dot
-        assert 'fillcolor="lightgreen"' in dot
         assert 'outcome1 [label="Outcome 1"' in dot
-        assert 'fillcolor="lightyellow"' in dot
+        # Default fill color is now white (type-specific colors via styling functions)
+        assert 'fillcolor="white"' in dot
 
         # Check edges (unblocks direction)
         assert "cap1 -> cap2" in dot
@@ -127,8 +126,8 @@ class TestGraphGenerator:
         assert "cap3" in dot  # depends on cap2
         assert "story1" in dot  # requires cap2
 
-        # All nodes should have styling applied
-        assert 'fillcolor="lightblue"' in dot or "fillcolor=lightblue" in dot
+        # All nodes should have default styling applied
+        assert 'fillcolor="white"' in dot or "fillcolor=white" in dot
 
     def test_filtered_view_requires_tags(self, simple_feature_map: FeatureMap) -> None:
         """Test that filtered view requires tags."""
@@ -284,10 +283,9 @@ class TestGraphGenerator:
         assert "story1 -> outcome1" in dot
         assert "story2 -> outcome1" in dot
 
-        # Check colors are preserved (quotes may or may not be present)
-        assert 'fillcolor="lightblue"' in dot or "fillcolor=lightblue" in dot  # capabilities
-        assert 'fillcolor="lightgreen"' in dot or "fillcolor=lightgreen" in dot  # user stories
-        assert 'fillcolor="lightyellow"' in dot or "fillcolor=lightyellow" in dot  # outcomes
+        # Check default color is applied (quotes may or may not be present)
+        # Type-specific colors can be set via styling functions
+        assert 'fillcolor="white"' in dot or "fillcolor=white" in dot
 
     def test_generate_timeline_view_no_timeframes(self, simple_feature_map: FeatureMap) -> None:
         """Test timeline view when no entities have timeframe metadata."""

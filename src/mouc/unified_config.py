@@ -16,6 +16,26 @@ from .jira_config import JiraConfig
 from .resources import DNSPeriod, ResourceConfig
 from .scheduler import SchedulingConfig
 
+DEFAULT_ENTITY_TYPES = [
+    ("capability", "Capability"),
+    ("user_story", "User Story"),
+    ("outcome", "Outcome"),
+]
+
+
+class EntityTypeDefinition(BaseModel):
+    """Definition of a single entity type."""
+
+    name: str  # ID used in YAML, e.g., "milestone"
+    display_name: str  # Human-readable, e.g., "Milestone"
+
+
+class EntityTypesConfig(BaseModel):
+    """Configuration for entity types."""
+
+    types: list[EntityTypeDefinition] = Field(default_factory=list[EntityTypeDefinition])
+    default_type: str | None = None  # Type used when 'type' field is omitted
+
 
 class WorkflowDefinition(BaseModel):
     """Configuration for a single workflow."""
@@ -40,7 +60,9 @@ class GanttConfig(BaseModel):
     sort_by: str | None = (
         None  # "start", "end", "deadline", "name", "priority", "yaml_order", or None (default: yaml_order)
     )
-    entity_type_order: list[str] = ["capability", "user_story", "outcome"]  # For group_by: type
+    entity_type_order: list[str] = Field(
+        default_factory=list
+    )  # For group_by: type; empty = use config order
 
 
 class TimelineConfig(BaseModel):
@@ -74,7 +96,7 @@ class OrganizationConfig(BaseModel):
 
     primary: str = "by_type"  # "alpha_by_id", "yaml_order", "by_type", "by_timeframe"
     secondary: str | None = None  # "by_timeframe" or "by_type"
-    entity_type_order: list[str] = ["capability", "user_story", "outcome"]
+    entity_type_order: list[str] = Field(default_factory=list)  # Empty = use config order
     timeline: TimelineConfig | None = None  # Timeline inference config for body organization
 
 
@@ -106,6 +128,7 @@ class UnifiedConfig(BaseModel):
     style_tags: list[str] = Field(
         default_factory=list
     )  # Tags for enabling/disabling styler functions
+    entity_types: EntityTypesConfig | None = None
     jira: JiraConfig | None = None
     gantt: GanttConfig | None = None
     scheduler: SchedulingConfig | None = None
@@ -204,6 +227,11 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0
     # Parse style_tags if present
     style_tags: list[str] = data.get("style_tags", [])
 
+    # Build EntityTypesConfig if entity_types section exists
+    entity_types_config = None
+    if "entity_types" in data:
+        entity_types_config = EntityTypesConfig.model_validate(data["entity_types"])
+
     # Build WorkflowsConfig if workflows section exists
     workflows_config = None
     if "workflows" in data:
@@ -213,6 +241,7 @@ def load_unified_config(config_path: Path | str) -> UnifiedConfig:  # noqa: PLR0
         resources=resource_config,
         global_dns_periods=global_dns_periods,
         style_tags=style_tags,
+        entity_types=entity_types_config,
         jira=jira_config,
         gantt=gantt_config,
         scheduler=scheduler_config,
@@ -274,3 +303,47 @@ def map_jira_user_to_resource(
 
     # Priority 3: Use full email as fallback
     return [jira_email]
+
+
+def get_valid_entity_types(config: UnifiedConfig | None) -> set[str]:
+    """Get the set of valid entity type names from config.
+
+    Falls back to default types (capability, user_story, outcome) if no config.
+    """
+    if config and config.entity_types and config.entity_types.types:
+        return {t.name for t in config.entity_types.types}
+    return {name for name, _ in DEFAULT_ENTITY_TYPES}
+
+
+def get_entity_type_order(config: UnifiedConfig | None) -> list[str]:
+    """Get the ordered list of entity type names from config.
+
+    Falls back to default types if no config.
+    """
+    if config and config.entity_types and config.entity_types.types:
+        return [t.name for t in config.entity_types.types]
+    return [name for name, _ in DEFAULT_ENTITY_TYPES]
+
+
+def get_display_name(entity_type: str, config: UnifiedConfig | None) -> str:
+    """Get display name for an entity type.
+
+    Checks config first, falls back to title-casing the type name.
+    """
+    if config and config.entity_types:
+        for type_def in config.entity_types.types:
+            if type_def.name == entity_type:
+                return type_def.display_name
+    # Check default types
+    for name, display in DEFAULT_ENTITY_TYPES:
+        if name == entity_type:
+            return display
+    # Fallback: "user_story" -> "User Story"
+    return entity_type.replace("_", " ").title()
+
+
+def get_default_entity_type(config: UnifiedConfig | None) -> str | None:
+    """Get the default entity type from config, if configured."""
+    if config and config.entity_types:
+        return config.entity_types.default_type
+    return None

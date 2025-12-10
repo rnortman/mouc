@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 # Import registries directly (not through public API since this is internal)
 from . import styling
 from .scheduler import parse_timeframe
+from .unified_config import DEFAULT_ENTITY_TYPES
 
 if TYPE_CHECKING:
     from .styling import Entity, StylingContext
@@ -36,7 +37,10 @@ def _builtin_group_by_type(
     # Get entity type order from config (or use default)
     config = getattr(context, "_config", {})
     gantt_config = config.get("gantt", {})
-    type_order = gantt_config.get("entity_type_order", ["capability", "user_story", "outcome"])
+    type_order = gantt_config.get("entity_type_order", [])
+    # Fall back to default entity types if not specified or empty
+    if not type_order:
+        type_order = [name for name, _ in DEFAULT_ENTITY_TYPES]
 
     # Initialize groups in order
     groups: dict[str, list[Entity]] = {t: [] for t in type_order}

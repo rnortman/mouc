@@ -262,14 +262,8 @@ class GraphGenerator:
 
     def _get_default_node_style(self, entity: Entity) -> dict[str, Any]:
         """Get default style for an entity based on type."""
-        # Default colors by type
-        color_map = {
-            "capability": "lightblue",
-            "user_story": "lightgreen",
-            "outcome": "lightyellow",
-        }
-
-        return {"shape": "oval", "fill_color": color_map.get(entity.type, "white")}
+        # Use a neutral default color; type-specific colors should be set via styling functions
+        return {"shape": "oval", "fill_color": "white"}
 
     def _generate_timeline(self, entities: list[Entity]) -> str:
         """Generate a timeline graph grouped by timeframe."""

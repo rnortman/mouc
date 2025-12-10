@@ -7,6 +7,7 @@ Mouc uses a single unified configuration file (`mouc_config.yaml`) that contains
 - [Quick Start](#quick-start)
 - [Configuration File Location](#configuration-file-location)
 - [File Structure](#file-structure)
+- [Entity Types Section](#entity-types-section)
 - [Resources Section](#resources-section)
   - [Task Priority](#task-priority)
 - [Scheduler Section](#scheduler-section)
@@ -104,6 +105,88 @@ field_mappings:
 
 defaults:
   # ... Jira sync defaults
+```
+
+## Entity Types Section
+
+The `entity_types` section defines valid entity types for your feature map. This section is **optional** - if not specified, defaults to `capability`, `user_story`, and `outcome`.
+
+```yaml
+entity_types:
+  types:
+    - name: capability
+      display_name: Capability
+    - name: user_story
+      display_name: User Story
+    - name: outcome
+      display_name: Outcome
+    - name: milestone        # Custom type
+      display_name: Milestone
+  default_type: capability   # Used when 'type' field omitted
+```
+
+**`types`** (optional): List of valid entity types. Each type has:
+- **`name`**: Identifier used in YAML (e.g., `milestone`)
+- **`display_name`**: Human-readable name for documentation (e.g., `Milestone`)
+
+**`default_type`** (optional): Type assigned when entity has no explicit `type` field.
+
+### Custom Entity Types
+
+Define your own entity types to match your workflow:
+
+```yaml
+entity_types:
+  types:
+    - name: epic
+      display_name: Epic
+    - name: feature
+      display_name: Feature
+    - name: task
+      display_name: Task
+    - name: bug
+      display_name: Bug Fix
+  default_type: task
+```
+
+Entities with undefined types are rejected during validation:
+
+```yaml
+# feature_map.yaml
+entities:
+  my_thing:
+    type: unknown_type  # Error: invalid type
+    name: My Thing
+```
+
+### Format Migration
+
+Mouc supports both the old 3-section format and the new unified `entities` format. The old format emits a deprecation warning:
+
+```bash
+# Convert old format to new format
+mouc convert-format feature_map.yaml > feature_map_new.yaml
+```
+
+Old format (deprecated):
+```yaml
+capabilities:
+  cap1: { name: Cap 1, description: Desc }
+user_stories:
+  story1: { name: Story 1, description: Desc }
+```
+
+New format (preferred):
+```yaml
+entities:
+  cap1:
+    type: capability
+    name: Cap 1
+    description: Desc
+  story1:
+    type: user_story
+    name: Story 1
+    description: Desc
 ```
 
 ## Resources Section

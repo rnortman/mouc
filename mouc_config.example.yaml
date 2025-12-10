@@ -1,6 +1,21 @@
 # Example unified Mouc configuration file
 # This file combines resources and Jira integration settings
 
+# Entity type definitions (optional - defaults to capability, user_story, outcome)
+entity_types:
+  types:
+    - name: capability
+      display_name: Capability
+    - name: user_story
+      display_name: User Story
+    - name: outcome
+      display_name: Outcome
+    # Add custom types as needed:
+    # - name: milestone
+    #   display_name: Milestone
+  # Default type when 'type' field is omitted in entities section
+  default_type: capability
+
 # Global DNS periods (apply to all resources)
 global_dns_periods:
   - start: 2025-12-24  # Company holiday break

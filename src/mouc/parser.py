@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import ValidationError as PydanticValidationError
@@ -16,6 +17,9 @@ from .models import (
     FeatureMapMetadata,
 )
 from .schemas import FeatureMapSchema
+
+if TYPE_CHECKING:
+    from .unified_config import UnifiedConfig
 
 
 def resolve_graph_edges(entities: list[Entity]) -> None:
@@ -57,7 +61,7 @@ class FeatureMapParser:
     use load_feature_map() from mouc.loader.
     """
 
-    def parse_file(self, file_path: Path | str) -> FeatureMap:
+    def parse_file(self, file_path: Path | str, config: UnifiedConfig | None = None) -> FeatureMap:
         """Parse a YAML file into a FeatureMap."""
         path = Path(file_path)
         if not path.exists():
@@ -72,15 +76,20 @@ class FeatureMapParser:
         if not isinstance(data, dict):
             raise ParseError("YAML must contain a dictionary at the root level")
 
-        return self._parse_data(data)  # type: ignore[arg-type]
+        return self._parse_data(data, config)  # type: ignore[arg-type]
 
-    def _parse_data(self, data: dict[str, Any]) -> FeatureMap:
+    def _parse_data(self, data: dict[str, Any], config: UnifiedConfig | None = None) -> FeatureMap:
         """Parse the loaded YAML data into a FeatureMap."""
         try:
             # Validate with Pydantic schema
             schema = FeatureMapSchema(**data)
         except PydanticValidationError as e:
             raise ValidationError(f"Invalid YAML structure: {e}") from e
+
+        # Get default entity type from config
+        default_type: str | None = None
+        if config and config.entity_types:
+            default_type = config.entity_types.default_type
 
         # Convert to domain models
         metadata = FeatureMapMetadata(
@@ -93,14 +102,16 @@ class FeatureMapParser:
 
         # Handle new format: entities with explicit type
         for entity_id, entity_data in schema.entities.items():
-            if not entity_data.type:
+            entity_type = entity_data.type or default_type
+            if not entity_type:
                 raise ValidationError(
-                    f"Entity '{entity_id}' in 'entities' section must have a 'type' field"
+                    f"Entity '{entity_id}' in 'entities' section must have a 'type' field "
+                    "(or configure a default_type in entity_types config)"
                 )
             meta = entity_data.meta.copy() if entity_data.meta else {}
 
             entity = Entity(
-                type=entity_data.type,
+                type=entity_type,
                 id=entity_id,
                 name=entity_data.name,
                 description=entity_data.description,
@@ -114,7 +125,13 @@ class FeatureMapParser:
             )
             entities.append(entity)
 
-        # Handle old format: entities grouped by type
+        # Handle old format: entities grouped by type (deprecated)
+        if schema.capabilities or schema.user_stories or schema.outcomes:
+            sys.stderr.write(
+                "WARNING: Using deprecated 3-section format (capabilities/user_stories/outcomes). "
+                "Use unified 'entities' section instead. Run 'mouc convert-format' to migrate.\n"
+            )
+
         for entity_dict, type_name in [
             (schema.capabilities, "capability"),
             (schema.user_stories, "user_story"),

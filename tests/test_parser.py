@@ -251,7 +251,7 @@ class TestFeatureMapParser:
         assert len(feature_map.entities) == 2
 
     def test_invalid_entity_type(self, parser: FeatureMapParser) -> None:
-        """Test invalid entity type validation."""
+        """Test invalid entity type validation in the loader."""
         data = {
             "entities": {
                 "thing1": {
@@ -262,8 +262,14 @@ class TestFeatureMapParser:
             }
         }
 
-        with pytest.raises(ValidationError, match="Invalid entity type 'invalid_type'"):
-            parser._parse_data(data)
+        # Parser no longer validates entity types - that's now done by the loader
+        # The parser just accepts any type string
+        feature_map = parser._parse_data(data)
+        assert feature_map.entities[0].type == "invalid_type"
+
+        # Validation happens in validate_feature_map
+        with pytest.raises(ValidationError, match="invalid type 'invalid_type'"):
+            validate_feature_map(feature_map)
 
     def test_enables_field(self, parser: FeatureMapParser) -> None:
         """Test using enables field to specify edges."""

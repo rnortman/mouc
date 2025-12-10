@@ -255,12 +255,8 @@ class MarkdownBackend:
 
     def _pretty_type(self, entity_type: str) -> str:
         """Convert entity type to pretty display name."""
-        type_names = {
-            "capability": "Capability",
-            "user_story": "User Story",
-            "outcome": "Outcome",
-        }
-        return type_names.get(entity_type, entity_type.replace("_", " ").title())
+        # Simple title-case conversion: "user_story" -> "User Story"
+        return entity_type.replace("_", " ").title()
 
     def _make_anchor_from_text(self, text: str) -> str:
         """Create a valid markdown anchor from any text."""

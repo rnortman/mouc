@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, cast
 from mouc import styling
 from mouc.backends.base import EntityReference
 from mouc.models import Entity
-from mouc.unified_config import OrganizationConfig
+from mouc.unified_config import OrganizationConfig, UnifiedConfig, get_display_name
 
 if TYPE_CHECKING:
     from mouc.backends.base import DocumentBackend
@@ -61,6 +61,7 @@ class DocumentGenerator:
         feature_map: FeatureMap,
         backend: DocumentBackend,
         doc_config: DocumentConfig | None = None,
+        config: UnifiedConfig | None = None,
     ):
         """Initialize with a feature map, backend, and optional configuration.
 
@@ -68,9 +69,11 @@ class DocumentGenerator:
             feature_map: The feature map to document
             backend: Backend implementation for format-specific rendering
             doc_config: Configuration for document organization and TOC
+            config: Full unified config for entity type display names
         """
         self.feature_map = feature_map
         self.backend = backend
+        self.config = config
         # Store TOC sections to generate (default to all if no config provided)
         self.toc_sections = doc_config.toc_sections if doc_config else ["timeline", "entity_types"]
         # Store organization config (default to alpha_by_id if no config provided)
@@ -81,6 +84,15 @@ class DocumentGenerator:
         self.body_timeline_config = self.organization.timeline if self.organization else None
         # Build anchor registry in first pass
         self.anchor_registry: dict[str, str] = {}
+
+    def _get_entity_type_order(self) -> list[str]:
+        """Get entity type order, falling back to config or default types."""
+        if self.organization.entity_type_order:
+            return self.organization.entity_type_order
+        # Fall back to config-defined order or default types
+        from .unified_config import get_entity_type_order  # noqa: PLC0415
+
+        return get_entity_type_order(self.config)
 
     def generate(self) -> str | bytes:
         """Generate complete documentation.
@@ -419,13 +431,13 @@ class DocumentGenerator:
         return simple_groups
 
     def _get_type_display_name(self, entity_type: str) -> str:
-        """Get display name for entity type."""
-        type_names = {
-            "capability": "Capabilities",
-            "user_story": "User Stories",
-            "outcome": "Outcomes",
-        }
-        return type_names.get(entity_type, entity_type.title())
+        """Get plural display name for entity type (used in section headers)."""
+        # Get singular display name from config
+        singular = get_display_name(entity_type, self.config)
+        # Simple pluralization: add 's' (or 'ies' for words ending in 'y')
+        if singular.endswith("y") and len(singular) > 1 and singular[-2] not in "aeiou":
+            return singular[:-1] + "ies"
+        return singular + "s"
 
     def _build_timeframe_subsections(
         self, timeframe_groups: dict[str, Any], timeline_config: Any = None
@@ -495,7 +507,7 @@ class DocumentGenerator:
             if self.organization.secondary == "by_type":
                 # Group by type within the flat list
                 type_groups = self._group_entities_by_type(sorted_entities)
-                ordered_types = self.organization.entity_type_order
+                ordered_types = self._get_entity_type_order()
                 subsections = [
                     (self._get_type_display_name(t), sorted(type_groups[t], key=lambda e: e.id))
                     for t in ordered_types
@@ -507,7 +519,7 @@ class DocumentGenerator:
 
         if self.organization.primary == "by_type":
             type_groups = self._group_entities_by_type(filtered_entities)
-            ordered_types = self.organization.entity_type_order
+            ordered_types = self._get_entity_type_order()
 
             if self.organization.secondary == "by_timeframe":
                 # Primary: type sections, Secondary: timeframe subsections
@@ -553,7 +565,7 @@ class DocumentGenerator:
                         for source in ["confirmed", "inferred"]:
                             if source_groups[source]:
                                 type_groups = self._group_entities_by_type(source_groups[source])
-                                ordered_types = self.organization.entity_type_order
+                                ordered_types = self._get_entity_type_order()
                                 type_subsections: list[tuple[str, list[Entity]]] = [
                                     (
                                         self._get_type_display_name(t),
@@ -572,7 +584,7 @@ class DocumentGenerator:
                 for timeframe in sorted_timeframes:
                     tf_entities = timeframe_groups[timeframe]
                     type_groups = self._group_entities_by_type(tf_entities)
-                    ordered_types = self.organization.entity_type_order
+                    ordered_types = self._get_entity_type_order()
                     subsections_list: list[tuple[str, list[Entity]]] = [
                         (
                             self._get_type_display_name(t),
