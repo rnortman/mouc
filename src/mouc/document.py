@@ -173,8 +173,54 @@ class DocumentGenerator:
                 type_label = self.backend.format_type_label(entity)
                 self.backend.add_toc_entry(entity.name, anchor, level=0, suffix=type_label)
 
+    def _get_effective_end_date(self, entity: Entity) -> tuple[str | None, date | None]:
+        """Get effective timeframe string and end date for backward dependency checking.
+
+        Priority order:
+        1. Manual end_date in metadata (fixed date)
+        2. Manual timeframe in metadata
+        3. Scheduler's estimated_end
+
+        Args:
+            entity: Entity to get effective end date for
+
+        Returns:
+            (timeframe_string, end_date) - end_date is set when we have an actual date
+        """
+        granularity = (
+            self.toc_timeline_config.inferred_granularity
+            if self.toc_timeline_config and self.toc_timeline_config.inferred_granularity
+            else "weekly"
+        )
+
+        # 1. Check for manual end_date first (highest priority)
+        manual_end = entity.meta.get("end_date")
+        if manual_end:
+            if isinstance(manual_end, date):
+                end_date = manual_end
+            else:
+                end_date = date.fromisoformat(manual_end)
+            inferred = infer_timeframe_from_date(end_date, granularity)
+            return (inferred, end_date)
+
+        # 2. Check for manual timeframe
+        manual_tf = entity.meta.get("timeframe")
+        if manual_tf:
+            return (manual_tf, None)
+
+        # 3. Check for scheduler annotation
+        schedule = entity.annotations.get("schedule")
+        if schedule and schedule.estimated_end:
+            inferred = infer_timeframe_from_date(schedule.estimated_end, granularity)
+            return (inferred, schedule.estimated_end)
+
+        return (None, None)
+
     def _check_backward_dependencies(self) -> list[str]:
         """Check for dependencies going backward in timeline order.
+
+        Uses effective timeframes from manual end_date, manual timeframe, or scheduler
+        estimated_end to detect backward dependencies.
 
         Returns:
             List of warning messages about backward dependencies
@@ -187,39 +233,50 @@ class DocumentGenerator:
             styling.apply_entity_filters(self.feature_map.entities, self.backend.styling_context),
         )
 
-        # Build a map of entity IDs to their timeframes
-        timeframe_map: dict[str, str | None] = {}
+        # Build entity lookup for dependencies that may not be in filtered list
+        entity_lookup = {e.id: e for e in self.feature_map.entities}
+
+        # Build a map of entity IDs to their effective (timeframe, end_date)
+        effective_map: dict[str, tuple[str | None, date | None]] = {}
         for entity in filtered_entities:
-            timeframe_map[entity.id] = entity.meta.get("timeframe")
+            effective_map[entity.id] = self._get_effective_end_date(entity)
+
+        # Also compute for dependencies that might not be in filtered set
+        for entity in filtered_entities:
+            for dep_id in entity.requires_ids:
+                if dep_id not in effective_map:
+                    dep_entity = entity_lookup.get(dep_id)
+                    if dep_entity:
+                        effective_map[dep_id] = self._get_effective_end_date(dep_entity)
 
         # Check each entity's dependencies
         for entity in filtered_entities:
-            entity_timeframe = timeframe_map.get(entity.id)
+            entity_tf, entity_end = effective_map.get(entity.id, (None, None))
 
             # Skip if entity has no timeframe (unscheduled entities can depend on anything)
-            if not entity_timeframe:
+            if not entity_tf:
                 continue
 
             for dep_id in entity.requires_ids:
-                dep_timeframe = timeframe_map.get(dep_id)
+                dep_tf, dep_end = effective_map.get(dep_id, (None, None))
 
-                # If dependency has no timeframe (unscheduled), it's always backward
-                if not dep_timeframe:
+                # If dependency has no timeframe (truly unscheduled), it's backward
+                if not dep_tf:
                     dep_entity = self.feature_map.get_entity_by_id(dep_id)
                     dep_name = dep_entity.name if dep_entity else dep_id
-                    msg = f"`{entity.name}` ({entity_timeframe}) depends on `{dep_name}` (Unscheduled)"
+                    msg = f"`{entity.name}` ({entity_tf}) depends on `{dep_name}` (Unscheduled)"
                     warnings.append(msg)
-                    # Also print to console
                     sys.stderr.write(f"WARNING: Backward dependency - {msg}\n")
                     continue
 
-                # Check if dependency comes after entity in lexical order
-                if dep_timeframe > entity_timeframe:
+                # Compare using actual dates if both have them, else lexical timeframe comparison
+                is_backward = dep_end > entity_end if entity_end and dep_end else dep_tf > entity_tf
+
+                if is_backward:
                     dep_entity = self.feature_map.get_entity_by_id(dep_id)
                     dep_name = dep_entity.name if dep_entity else dep_id
-                    msg = f"`{entity.name}` ({entity_timeframe}) depends on `{dep_name}` ({dep_timeframe})"
+                    msg = f"`{entity.name}` ({entity_tf}) depends on `{dep_name}` ({dep_tf})"
                     warnings.append(msg)
-                    # Also print to console
                     sys.stderr.write(f"WARNING: Backward dependency - {msg}\n")
 
         return warnings

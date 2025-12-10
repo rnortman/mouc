@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Entity types now validated against configured types (supports custom types like `milestone`)
 - Old 3-section YAML format (capabilities/user_stories/outcomes) now emits deprecation warning
 - Graph nodes now default to white fill color; type-specific colors should be set via styling functions
+- Backward dependency warnings now use scheduler data for entities without manual timeframes
 
 ## [0.5.1] - 2025-12-09
 

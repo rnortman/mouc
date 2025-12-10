@@ -2,6 +2,7 @@
 # pyright: reportPrivateUsage=false
 
 import re
+from datetime import date
 
 import pytest
 
@@ -10,6 +11,7 @@ from mouc.backends import MarkdownBackend
 from mouc.document import DocumentGenerator
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
+from mouc.scheduler.core import ScheduleAnnotations
 from mouc.unified_config import MarkdownConfig, OrganizationConfig
 from tests.conftest import deps
 
@@ -571,6 +573,258 @@ class TestMarkdownGenerator:
         markdown = create_generator(feature_map)
 
         # No warning section should be generated
+        assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_backward_dependency_uses_scheduler_annotations(self) -> None:
+        """Test that scheduler estimated_end is used for backward dependency checking."""
+        metadata = FeatureMapMetadata()
+
+        # cap1 finishes later (March) according to scheduler
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            # No manual timeframe - will use scheduler
+        )
+        cap1.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 3, 1),
+            estimated_end=date(2025, 3, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        # cap2 finishes earlier (January) but depends on cap1 - this is backward!
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires=deps("cap1"),
+        )
+        cap2.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 1),
+            estimated_end=date(2025, 1, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        markdown = create_generator(feature_map)
+
+        # Should detect backward dependency based on scheduler dates
+        assert "## ⚠️ Timeline Warnings" in markdown
+        assert "`Cap 2`" in markdown
+        assert "depends on" in markdown
+        assert "`Cap 1`" in markdown
+
+    def test_no_backward_warning_when_scheduler_order_correct(self) -> None:
+        """Test that no warning when scheduler dates are in correct order."""
+        metadata = FeatureMapMetadata()
+
+        # cap1 finishes first (January)
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+        )
+        cap1.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 1),
+            estimated_end=date(2025, 1, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        # cap2 finishes later (March) and depends on cap1 - correct order
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires=deps("cap1"),
+        )
+        cap2.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 3, 1),
+            estimated_end=date(2025, 3, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        markdown = create_generator(feature_map)
+
+        # No warning - order is correct
+        assert "## ⚠️ Timeline Warnings" not in markdown
+
+    def test_manual_end_date_takes_precedence_over_scheduler(self) -> None:
+        """Test that manual end_date in meta takes precedence over scheduler."""
+        metadata = FeatureMapMetadata()
+
+        # cap1 has manual end_date of March
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"end_date": "2025-03-15"},
+        )
+        # Even though scheduler says January
+        cap1.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 1),
+            estimated_end=date(2025, 1, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        # cap2 finishes in February and depends on cap1
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires=deps("cap1"),
+        )
+        cap2.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 2, 1),
+            estimated_end=date(2025, 2, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        markdown = create_generator(feature_map)
+
+        # Should detect backward dependency because manual end_date (March) > cap2's end (February)
+        assert "## ⚠️ Timeline Warnings" in markdown
+        assert "`Cap 2`" in markdown
+
+    def test_manual_timeframe_takes_precedence_over_scheduler(self) -> None:
+        """Test that manual timeframe in meta takes precedence over scheduler."""
+        metadata = FeatureMapMetadata()
+
+        # cap1 has manual timeframe of Q2
+        cap1 = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Desc",
+            meta={"timeframe": "2025q2"},
+        )
+        # Scheduler says January (would be Q1)
+        cap1.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 1),
+            estimated_end=date(2025, 1, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        # cap2 has manual timeframe of Q1 and depends on cap1
+        cap2 = Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Desc",
+            requires=deps("cap1"),
+            meta={"timeframe": "2025q1"},
+        )
+
+        entities = [cap1, cap2]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        markdown = create_generator(feature_map)
+
+        # Should detect backward dependency based on manual timeframes (Q1 depends on Q2)
+        assert "## ⚠️ Timeline Warnings" in markdown
+        assert "`Cap 2` (2025q1) depends on `Cap 1` (2025q2)" in markdown
+
+    def test_workflow_phases_without_timeframe_use_scheduler(self) -> None:
+        """Test workflow-generated phases use scheduler for backward checking."""
+        metadata = FeatureMapMetadata()
+
+        # Design phase (no manual timeframe, workflow-generated)
+        design = Entity(
+            type="capability",
+            id="auth_design",
+            name="Auth Design",
+            description="Design phase",
+            # No timeframe - workflow generated
+        )
+        design.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 1),
+            estimated_end=date(2025, 1, 10),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        # Implementation phase depends on design, scheduled after
+        impl = Entity(
+            type="capability",
+            id="auth",
+            name="Auth Implementation",
+            description="Impl phase",
+            requires=deps("auth_design"),
+        )
+        impl.annotations["schedule"] = ScheduleAnnotations(
+            estimated_start=date(2025, 1, 20),
+            estimated_end=date(2025, 2, 15),
+            computed_deadline=None,
+            computed_priority=None,
+            deadline_violated=False,
+            resource_assignments=[],
+            resources_were_computed=False,
+            was_fixed=False,
+        )
+
+        entities = [design, impl]
+        resolve_graph_edges(entities)
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        markdown = create_generator(feature_map)
+
+        # No warning - design finishes before impl starts (correct order)
         assert "## ⚠️ Timeline Warnings" not in markdown
 
     def test_custom_section_ordering(self, simple_feature_map: FeatureMap) -> None:
