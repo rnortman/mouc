@@ -73,6 +73,9 @@ class GraphGenerator:
 
     def _generate_all(self, entities: list[Entity]) -> str:
         """Generate a complete graph with all entities."""
+        # Build set of entity IDs in the filtered set for edge filtering
+        entity_ids = {e.id for e in entities}
+
         lines = ["digraph FeatureMap {"]
         lines.append("  rankdir=LR;")
         lines.append("  node [shape=oval];")
@@ -84,12 +87,13 @@ class GraphGenerator:
             lines.append(f"  {node_def}")
         lines.append("")
 
-        # Add edges (unblocks direction)
+        # Add edges (unblocks direction) - only if both endpoints are in the filtered set
         lines.append("  // Dependencies (unblocks direction)")
         for entity in entities:
             for dep_id in entity.requires_ids:
-                edge_def = self._format_edge(dep_id, entity.id, "requires")
-                lines.append(f"  {edge_def}")
+                if dep_id in entity_ids:
+                    edge_def = self._format_edge(dep_id, entity.id, "requires")
+                    lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -320,12 +324,16 @@ class GraphGenerator:
             lines.append("  }")
             lines.append("")
 
-        # Add all edges (dependencies)
+        # Build set of entity IDs in the filtered set for edge filtering
+        entity_ids = {e.id for e in entities}
+
+        # Add edges (dependencies) - only if both endpoints are in the filtered set
         lines.append("  // Dependencies")
         for entity in entities:
             for dep_id in entity.requires_ids:
-                edge_def = self._format_edge(dep_id, entity.id, "requires")
-                lines.append(f"  {edge_def}")
+                if dep_id in entity_ids:
+                    edge_def = self._format_edge(dep_id, entity.id, "requires")
+                    lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)
@@ -374,12 +382,16 @@ class GraphGenerator:
 
         lines.append("")
 
-        # Add edges (unblocks direction)
+        # Build set of entity IDs in the filtered set for edge filtering
+        entity_ids = {e.id for e in entities}
+
+        # Add edges (unblocks direction) - only if both endpoints are in the filtered set
         lines.append("  // Dependencies")
         for entity in entities:
             for dep_id in entity.requires_ids:
-                edge_def = self._format_edge(dep_id, entity.id, "requires")
-                lines.append(f"  {edge_def}")
+                if dep_id in entity_ids:
+                    edge_def = self._format_edge(dep_id, entity.id, "requires")
+                    lines.append(f"  {edge_def}")
 
         lines.append("}")
         return "\n".join(lines)

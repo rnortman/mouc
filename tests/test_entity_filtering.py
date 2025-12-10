@@ -9,10 +9,12 @@ from mouc import styling
 from mouc.backends.markdown import MarkdownBackend
 from mouc.document import DocumentGenerator
 from mouc.gantt import GanttScheduler
-from mouc.graph import GraphGenerator
+from mouc.graph import GraphGenerator, GraphView
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.parser import resolve_graph_edges
 from mouc.styling import Entity as EntityProtocol
 from mouc.styling import StylingContext
+from mouc.unified_config import MarkdownConfig
 from tests.conftest import deps
 
 
@@ -321,3 +323,269 @@ def test_filter_priority_order() -> None:
 
     # Verify low priority ran first
     assert call_order == ["low", "high"]
+
+
+def test_filtered_entity_references_marked_in_document() -> None:
+    """Test that references to filtered entities are marked as (filtered) in document output."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["markdown"])
+    def filter_cap1(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        # Filter out cap1, keep cap2
+        return [e for e in entities if e.id != "cap1"]
+
+    # Create entities where cap2 depends on cap1
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="This gets filtered out",
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="This depends on Cap 1",
+            requires=deps("cap1"),
+        ),
+    ]
+    resolve_graph_edges(entities)
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Generate markdown document
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    doc_gen = DocumentGenerator(feature_map, backend)
+    doc_output = doc_gen.generate()
+
+    assert isinstance(doc_output, str)
+    # Cap 1 should not appear as a heading (it was filtered out)
+    assert "### Cap 1" not in doc_output
+    # Cap 2 should appear
+    assert "### Cap 2" in doc_output or "#### Cap 2" in doc_output
+    # Reference to Cap 1 should be marked as filtered (no link, marked text)
+    assert "Cap 1 (filtered)" in doc_output
+    # Should NOT have a link to cap1 anchor
+    assert "[Cap 1](#cap-1)" not in doc_output
+
+
+def test_filtered_entity_references_omitted_when_configured() -> None:
+    """Test that references to filtered entities are omitted when config says 'omit'."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["markdown"])
+    def filter_cap1(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return [e for e in entities if e.id != "cap1"]
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Filtered out entity",
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Test entity",
+            requires=deps("cap1"),
+        ),
+    ]
+    resolve_graph_edges(entities)
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Configure to omit filtered references
+    config = MarkdownConfig(filtered_reference_handling="omit")
+
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    doc_gen = DocumentGenerator(feature_map, backend, config)
+    doc_output = doc_gen.generate()
+
+    assert isinstance(doc_output, str)
+    # Cap 1 should not appear as a heading (filtered out)
+    assert "### Cap 1" not in doc_output
+    # Cap 2 should appear
+    assert "Cap 2" in doc_output
+    # There should be no Requires section since the only dependency was filtered and omitted
+    assert "#### Requires" not in doc_output
+    # Cap 1 should not appear in any references (no link, no (filtered) marker)
+    assert "[Cap 1]" not in doc_output
+    assert "Cap 1 (filtered)" not in doc_output
+
+
+def test_filtered_entity_enables_marked_in_document() -> None:
+    """Test that 'enables' references to filtered entities are also marked."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["markdown"])
+    def filter_cap2(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        # Filter out cap2, keep cap1
+        return [e for e in entities if e.id != "cap2"]
+
+    # Create entities where cap2 depends on cap1 (so cap1 enables cap2)
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test entity",
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Filtered out",
+            requires=deps("cap1"),
+        ),
+    ]
+    # Resolve graph edges to populate enables_ids
+    resolve_graph_edges(entities)
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    styling_context = styling.create_styling_context(feature_map, output_format="markdown")
+    backend = MarkdownBackend(feature_map, styling_context)
+    doc_gen = DocumentGenerator(feature_map, backend)
+    doc_output = doc_gen.generate()
+
+    assert isinstance(doc_output, str)
+    # Cap 1 should appear
+    assert "Cap 1" in doc_output
+    # Cap 2 should not appear as a heading (it was filtered out)
+    assert "### Cap 2" not in doc_output
+    # Reference to Cap 2 in Cap 1's Enables section should be marked as filtered
+    assert "Cap 2 (filtered)" in doc_output
+    # Should NOT have a link to cap2 anchor
+    assert "[Cap 2](#cap-2)" not in doc_output
+
+
+def test_graph_edges_omitted_for_filtered_entities() -> None:
+    """Test that graph edges to filtered entities are not drawn."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["graph"])
+    def filter_cap1(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return [e for e in entities if e.id != "cap1"]
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="This gets filtered out",
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="This depends on Cap 1",
+            requires=deps("cap1"),
+        ),
+        Entity(
+            type="capability",
+            id="cap3",
+            name="Cap 3",
+            description="This depends on Cap 2",
+            requires=deps("cap2"),
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    graph_gen = GraphGenerator(feature_map)
+    graph_output = graph_gen.generate()
+
+    # cap1 should not be in the graph (filtered out)
+    assert 'cap1 [label="Cap 1"' not in graph_output
+    # cap2 and cap3 should be in the graph
+    assert 'cap2 [label="Cap 2"' in graph_output
+    assert 'cap3 [label="Cap 3"' in graph_output
+    # Edge from cap1 -> cap2 should NOT exist (cap1 is filtered)
+    assert "cap1 -> cap2" not in graph_output
+    # Edge from cap2 -> cap3 should exist (both are in the graph)
+    assert "cap2 -> cap3" in graph_output
+
+
+def test_graph_timeline_view_edges_filtered() -> None:
+    """Test that timeline view also filters edges to filtered entities."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["graph"])
+    def filter_cap1(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return [e for e in entities if e.id != "cap1"]
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Filtered",
+            meta={"timeframe": "Q1"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Kept",
+            requires=deps("cap1"),
+            meta={"timeframe": "Q1"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    graph_gen = GraphGenerator(feature_map)
+    graph_output = graph_gen.generate(GraphView.TIMELINE)
+
+    # cap1 should not be in the graph
+    assert "cap1" not in graph_output
+    # Edge should not exist
+    assert "cap1 -> cap2" not in graph_output
+
+
+def test_graph_timeframe_colored_view_edges_filtered() -> None:
+    """Test that timeframe-colored view also filters edges to filtered entities."""
+    styling.clear_registrations()
+
+    @styling.filter_entity(formats=["graph"])
+    def filter_cap1(
+        entities: Sequence[EntityProtocol], _context: StylingContext
+    ) -> list[EntityProtocol]:
+        return [e for e in entities if e.id != "cap1"]
+
+    entities = [
+        Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Filtered",
+            meta={"timeframe": "Q1"},
+        ),
+        Entity(
+            type="capability",
+            id="cap2",
+            name="Cap 2",
+            description="Kept",
+            requires=deps("cap1"),
+            meta={"timeframe": "Q2"},
+        ),
+    ]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    graph_gen = GraphGenerator(feature_map)
+    graph_output = graph_gen.generate(GraphView.TIMEFRAME_COLORED)
+
+    # cap1 should not be in the graph
+    assert 'cap1 [label="Cap 1"' not in graph_output
+    # Edge should not exist
+    assert "cap1 -> cap2" not in graph_output

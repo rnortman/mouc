@@ -1,6 +1,15 @@
 """Pytest configuration and fixtures for mouc tests."""
 
+import pytest
+
+from mouc import styling
 from mouc.models import Dependency
+
+
+@pytest.fixture(autouse=True)
+def clear_styling_registrations() -> None:
+    """Clear styling registrations before each test for isolation."""
+    styling.clear_registrations()
 
 
 def deps(*entity_ids: str) -> set[Dependency]:

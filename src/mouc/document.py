@@ -74,6 +74,7 @@ class DocumentGenerator:
         self.feature_map = feature_map
         self.backend = backend
         self.config = config
+        self.doc_config = doc_config
         # Store TOC sections to generate (default to all if no config provided)
         self.toc_sections = doc_config.toc_sections if doc_config else ["timeline", "entity_types"]
         # Store organization config (default to alpha_by_id if no config provided)
@@ -84,6 +85,8 @@ class DocumentGenerator:
         self.body_timeline_config = self.organization.timeline if self.organization else None
         # Build anchor registry in first pass
         self.anchor_registry: dict[str, str] = {}
+        # Track which entities will be rendered (populated after filtering)
+        self.rendered_entity_ids: set[str] = set()
 
     def _get_entity_type_order(self) -> list[str]:
         """Get entity type order, falling back to config or default types."""
@@ -548,6 +551,9 @@ class DocumentGenerator:
             list[Entity], styling.apply_entity_filters(all_entities, self.backend.styling_context)
         )
 
+        # Track which entities will be rendered (for filtered reference handling)
+        self.rendered_entity_ids = {e.id for e in filtered_entities}
+
         # Handle primary grouping
         if self.organization.primary in ("alpha_by_id", "yaml_order"):
             # Single flat section with all entities
@@ -707,19 +713,37 @@ class DocumentGenerator:
             entity, self.backend.styling_context, base_metadata
         )
 
+        # Get filtered reference handling config (default: "mark")
+        filtered_handling = (
+            self.doc_config.filtered_reference_handling if self.doc_config else "mark"
+        )
+
         # Build requires references
         requires_refs: list[EntityReference] = []
         for dep_id in sorted(entity.requires_ids):
             dep = self.feature_map.get_entity_by_id(dep_id)
             if dep:
-                requires_refs.append(
-                    EntityReference(
-                        entity_id=dep_id,
-                        entity_name=dep.name,
-                        entity_type=dep.type,
-                        anchor_id=self.anchor_registry[dep_id],
+                if dep_id in self.rendered_entity_ids:
+                    # Normal link - entity exists and will be rendered
+                    requires_refs.append(
+                        EntityReference(
+                            entity_id=dep_id,
+                            entity_name=dep.name,
+                            entity_type=dep.type,
+                            anchor_id=self.anchor_registry[dep_id],
+                        )
                     )
-                )
+                elif filtered_handling == "mark":
+                    # Entity exists but was filtered out - mark it
+                    requires_refs.append(
+                        EntityReference(
+                            entity_id=dep_id,
+                            entity_name=f"{dep.name} (filtered)",
+                            entity_type=dep.type,
+                            anchor_id="",
+                        )
+                    )
+                # If filtered_handling == "omit", skip adding reference
             else:
                 # Handle missing dependency
                 requires_refs.append(
@@ -737,9 +761,22 @@ class DocumentGenerator:
         for dep_id in sorted(entity.enables_ids):
             dep = self.feature_map.get_entity_by_id(dep_id)
             if dep:
-                sorted_dependents.append((dep.type, dep_id, dep))
+                if dep_id in self.rendered_entity_ids:
+                    # Normal - entity exists and will be rendered
+                    sorted_dependents.append((dep.type, dep_id, dep))
+                elif filtered_handling == "mark":
+                    # Entity exists but was filtered out - mark it
+                    enables_refs.append(
+                        EntityReference(
+                            entity_id=dep_id,
+                            entity_name=f"{dep.name} (filtered)",
+                            entity_type=dep.type,
+                            anchor_id="",
+                        )
+                    )
+                # If filtered_handling == "omit", skip adding reference
 
-        for _dep_type, dep_id, dep in sorted(sorted_dependents):
+        for _, dep_id, dep in sorted(sorted_dependents):
             enables_refs.append(
                 EntityReference(
                     entity_id=dep_id,

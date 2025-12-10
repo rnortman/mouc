@@ -106,6 +106,7 @@ class DocumentConfig(BaseModel):
     toc_sections: list[str] = ["timeline", "entity_types"]
     organization: OrganizationConfig = OrganizationConfig()
     toc_timeline: TimelineConfig | None = None  # Timeline config for ToC timeline section
+    filtered_reference_handling: str = "mark"  # "mark" or "omit" for filtered entity references
 
 
 class MarkdownConfig(DocumentConfig):

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2025-12-10
+
+### Fixed
+- Entity filter functions no longer create broken links in document/graph output
+- References to filtered entities marked as "(filtered)" or omitted via `filtered_reference_handling` config
+- Graph edges to filtered entities are now omitted
+
 ## [0.6.1] - 2025-12-10
 
 ### Fixed
