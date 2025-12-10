@@ -4,25 +4,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is **Mouc** (Mapping Outcomes User stories and Capabilities) - a lightweight system for tracking feature dependencies in software development. It maps relationships between technical capabilities, user stories, and organizational outcomes.
+**Mouc** is a YAML-based dependency tracker and automatic scheduler for project roadmaps. It takes a YAML file describing work items and their dependencies, and produces scheduled Gantt charts, dependency graphs, and documentation.
 
-**Core Purpose**: Technical dependency tracker that answers "what depends on what" and "what blocks what" - not a project management system.
+**Core Purpose**: Define *what* needs to happen and dependencies; Mouc computes *when* things should happen. Not a full project management system.
 
 ## Architecture
 
-The system is built around a single YAML data model (`feature_map.yaml`) with three primary entity types:
+The system is built around YAML data files with configurable entity types. By default, three types are provided (capabilities, user stories, outcomes), but users can define custom types in `mouc_config.yaml`.
 
-1. **capabilities** - Technical work (infrastructure, middleware, platform features)
-   - Have dependencies on other capabilities
-   - Link to design docs and Jira tickets
-   
-2. **user_stories** - Internal customer requests from other engineering teams
-   - Require specific capabilities to be complete
-   - Usually have Jira tickets for visibility
-   
-3. **outcomes** - Business/organizational goals
-   - Enabled by user stories
-   - Always tracked in Jira for executive visibility
+Key features:
+- **Automatic scheduling** from dependencies, deadlines, priorities, and resource constraints
+- **Workflows** that expand entities into multiple phases (design → implement → review)
+- **Resource management** with availability tracking and auto-assignment
+- **Jira integration** for syncing metadata
+- **Multiple outputs**: Mermaid Gantt charts, Graphviz graphs, Markdown/DOCX docs
 
 ## Development Standards
 

@@ -1,6 +1,6 @@
 # Mouc
 
-A YAML-based dependency tracker and automatic scheduler for software roadmaps.
+A YAML-based dependency tracker and automatic scheduler for project roadmaps.
 
 ## What Mouc Does
 

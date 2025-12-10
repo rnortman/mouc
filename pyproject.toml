@@ -1,7 +1,7 @@
 [project]
 name = "mouc"
 version = "0.6.1" # Also update in src/mouc/__init__.py when changing
-description = "A lightweight dependency tracking system for mapping technical capabilities to user stories and outcomes"
+description = "A YAML-based dependency tracker and automatic scheduler for project roadmaps"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
