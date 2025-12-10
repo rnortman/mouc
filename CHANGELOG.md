@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Negated style tags: use `tags=["!detailed"]` to run only when tag is NOT active
 - User-configurable entity types via `entity_types` config section
 - `mouc convert-format` command to convert old 3-section YAML to unified `entities` format
 - Dependency lag: `requires: [task_a + 1w]` delays start by 1 week after dependency completes

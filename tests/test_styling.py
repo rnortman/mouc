@@ -1716,3 +1716,119 @@ def test_style_tags_none_always_runs() -> None:
     ctx_with_tags = styling.create_styling_context(feature_map, style_tags={"random", "tags"})
     result_with_tags = styling.apply_node_styles(entities[0], ctx_with_tags)
     assert result_with_tags["fill_color"] == "#ff0000"
+
+
+def test_negated_tag_basic() -> None:
+    """Test that negated tags work - function runs when tag is NOT active."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["!detailed"])
+    def compact_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with no active tags - should run (detailed is absent)
+    ctx_no_tags = styling.create_styling_context(feature_map, style_tags=set())
+    result = styling.apply_node_styles(entities[0], ctx_no_tags)
+    assert result["fill_color"] == "#ff0000"
+
+    # Test with unrelated tag - should run (detailed is absent)
+    ctx_other = styling.create_styling_context(feature_map, style_tags={"other"})
+    result_other = styling.apply_node_styles(entities[0], ctx_other)
+    assert result_other["fill_color"] == "#ff0000"
+
+
+def test_negated_tag_blocked() -> None:
+    """Test that negated tags block function when tag IS active."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["!detailed"])
+    def compact_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with 'detailed' active - should NOT run
+    ctx_detailed = styling.create_styling_context(feature_map, style_tags={"detailed"})
+    result = styling.apply_node_styles(entities[0], ctx_detailed)
+    assert "fill_color" not in result
+
+
+def test_mixed_positive_and_negated_tags() -> None:
+    """Test that positive and negated tags work together correctly."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["verbose", "!detailed"])
+    def verbose_compact_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with 'verbose' active and 'detailed' absent - should run
+    ctx_verbose = styling.create_styling_context(feature_map, style_tags={"verbose"})
+    result = styling.apply_node_styles(entities[0], ctx_verbose)
+    assert result["fill_color"] == "#ff0000"
+
+    # Test with 'verbose' and 'detailed' both active - should NOT run (detailed blocks it)
+    ctx_both = styling.create_styling_context(feature_map, style_tags={"verbose", "detailed"})
+    result_both = styling.apply_node_styles(entities[0], ctx_both)
+    assert "fill_color" not in result_both
+
+    # Test with only 'detailed' active - should NOT run (no positive match, negation blocked)
+    ctx_detailed = styling.create_styling_context(feature_map, style_tags={"detailed"})
+    result_detailed = styling.apply_node_styles(entities[0], ctx_detailed)
+    assert "fill_color" not in result_detailed
+
+    # Test with neither tag - should NOT run (no positive match)
+    ctx_empty = styling.create_styling_context(feature_map, style_tags=set())
+    result_empty = styling.apply_node_styles(entities[0], ctx_empty)
+    assert "fill_color" not in result_empty
+
+
+def test_multiple_negated_tags() -> None:
+    """Test that multiple negated tags all must be absent (AND logic)."""
+    styling.clear_registrations()
+
+    @styling.style_node(tags=["!a", "!b"])
+    def no_a_no_b_styler(
+        entity: styling.Entity, context: styling.StylingContext
+    ) -> styling.NodeStyle:
+        return {"fill_color": "#ff0000"}
+
+    entities = [Entity(type="capability", id="cap1", name="Test", description="Test")]
+    feature_map = FeatureMap(metadata=FeatureMapMetadata(), entities=entities)
+
+    # Test with neither a nor b active - should run
+    ctx_empty = styling.create_styling_context(feature_map, style_tags=set())
+    result = styling.apply_node_styles(entities[0], ctx_empty)
+    assert result["fill_color"] == "#ff0000"
+
+    # Test with unrelated tag - should run
+    ctx_other = styling.create_styling_context(feature_map, style_tags={"c"})
+    result_other = styling.apply_node_styles(entities[0], ctx_other)
+    assert result_other["fill_color"] == "#ff0000"
+
+    # Test with 'a' active - should NOT run
+    ctx_a = styling.create_styling_context(feature_map, style_tags={"a"})
+    result_a = styling.apply_node_styles(entities[0], ctx_a)
+    assert "fill_color" not in result_a
+
+    # Test with 'b' active - should NOT run
+    ctx_b = styling.create_styling_context(feature_map, style_tags={"b"})
+    result_b = styling.apply_node_styles(entities[0], ctx_b)
+    assert "fill_color" not in result_b
+
+    # Test with both 'a' and 'b' active - should NOT run
+    ctx_ab = styling.create_styling_context(feature_map, style_tags={"a", "b"})
+    result_ab = styling.apply_node_styles(entities[0], ctx_ab)
+    assert "fill_color" not in result_ab

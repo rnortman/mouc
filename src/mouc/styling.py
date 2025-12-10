@@ -325,7 +325,8 @@ def style_node(
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Examples:
         @style_node
@@ -339,6 +340,11 @@ def style_node(
         @style_node(tags=['detailed'])
         def detailed_styler(entity, context):
             return {'fontsize': 14}
+
+        @style_node(tags=['!detailed'])
+        def compact_styler(entity, context):
+            # Runs only when 'detailed' tag is NOT active
+            return {'fontsize': 10}
     """
 
     def decorator(f: NodeStylerFunc) -> NodeStylerFunc:
@@ -383,7 +389,8 @@ def style_edge(
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['graph']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Edge types:
         - 'requires': entity depends on another
@@ -442,7 +449,8 @@ def style_label(
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Example:
         @style_label
@@ -499,7 +507,8 @@ def style_task(
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Mermaid supports the following task tags:
         - 'done': Marks completed tasks (green)
@@ -574,7 +583,8 @@ def style_metadata(
         priority: Execution priority (lower numbers first)
         formats: Optional list of formats to apply to (e.g., ['markdown', 'docx']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Examples:
         @style_metadata
@@ -642,7 +652,8 @@ def group_tasks(
                  built-in config functions use 5)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Return dict mapping:
         - Keys: Section names (str) or None for no section
@@ -717,7 +728,8 @@ def sort_tasks(
                  built-in config functions use 5)
         formats: Optional list of formats to apply to (e.g., ['gantt']). None means all formats.
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Examples:
         @sort_tasks(formats=['gantt'])
@@ -780,7 +792,8 @@ def filter_entity(
         formats: Optional list of formats to apply to (e.g., ['gantt', 'markdown']).
                 None means all formats (markdown, docx, graph, gantt).
         tags: Optional list of tags that enable this function. None means always run.
-              If specified, function runs only if ANY tag matches active style_tags.
+              Positive tags use OR logic (any match enables). Negated tags (prefixed
+              with '!') use AND logic (all must be absent).
 
     Examples:
         @filter_entity(formats=['gantt'])
@@ -973,6 +986,10 @@ def clear_registrations() -> None:
 def _tags_match(func_tags: list[str] | None, active_tags: set[str]) -> bool:
     """Check if a function's tags match the active style tags.
 
+    Supports negated tags with '!' prefix (e.g., '!detailed' matches when
+    'detailed' is NOT active). Multiple negated tags use AND logic (all must
+    be absent). Positive tags use OR logic (at least one must match).
+
     Args:
         func_tags: Tags specified on the function (None = always run)
         active_tags: Currently active style tags
@@ -983,8 +1000,26 @@ def _tags_match(func_tags: list[str] | None, active_tags: set[str]) -> bool:
     # None means no tag requirement - always run
     if func_tags is None:
         return True
-    # If tags specified, at least one must match (OR logic)
-    return bool(set(func_tags) & active_tags)
+
+    positive_tags: list[str] = []
+    negated_tags: list[str] = []
+    for tag in func_tags:
+        if tag.startswith("!"):
+            negated_tags.append(tag[1:])
+        else:
+            positive_tags.append(tag)
+
+    # All negated tags must be absent (AND logic)
+    for neg_tag in negated_tags:
+        if neg_tag in active_tags:
+            return False
+
+    # If no positive tags, negations alone are sufficient
+    if not positive_tags:
+        return True
+
+    # At least one positive tag must match (OR logic)
+    return bool(set(positive_tags) & active_tags)
 
 
 def apply_node_styles(entity: Entity, context: StylingContext) -> dict[str, Any]:

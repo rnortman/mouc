@@ -618,7 +618,24 @@ def filter_done(entities, context):
 ### Tag Matching Logic
 
 - **`tags=None`** (default): Function always runs (backwards compatible)
-- **`tags=['a', 'b']`**: Function runs if **ANY** tag matches active tags (OR logic)
+- **`tags=['a', 'b']`**: Function runs if **ANY** positive tag matches active tags (OR logic)
+- **`tags=['!a']`**: Negated tags - function runs only when tag `a` is **NOT** active
+- **`tags=['!a', '!b']`**: Multiple negations - function runs only when **ALL** negated tags are absent (AND logic)
+- **`tags=['a', '!b']`**: Mixed - function runs when `a` is active **AND** `b` is not active
+
+**Negation examples:**
+
+```python
+@style_node(tags=['!detailed'])
+def compact_view(entity, context):
+    """Only runs when 'detailed' tag is NOT active."""
+    return {'fontsize': 10}
+
+@style_node(tags=['verbose', '!executive'])
+def detailed_tech_view(entity, context):
+    """Runs when 'verbose' is active AND 'executive' is NOT active."""
+    return {'fontsize': 14, 'border_width': 2}
+```
 
 ### Activating Tags
 
