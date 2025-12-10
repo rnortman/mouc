@@ -98,11 +98,13 @@ The Gantt chart automatically schedules `database_layer` first, then `api_servic
 
 ### Entities and Dependencies
 
-Mouc organizes work into three entity types:
+By default, Mouc provides three entity types:
 
-- **Capabilities** - technical work (can only depend on other capabilities)
-- **User Stories** - what others need from you (can depend on capabilities or other stories)
-- **Outcomes** - business goals (can depend on anything)
+- **Capabilities** - technical work
+- **User Stories** - what others need from you
+- **Outcomes** - business goals
+
+You can define your own entity types in `mouc_config.yaml` (see [Configuration](docs/config.md#entity-types-section)).
 
 Specify dependencies with `requires` (what this needs) or `enables` (what this unblocks):
 
@@ -113,6 +115,8 @@ database_layer:
 api_service:
   requires: [database_layer]          # equivalent to above
 ```
+
+There's no difference between using `enables` on the blocker or `requires` on the blocked; these are normalized to the same thing. Use what is most convenient.
 
 ### Scheduling
 
