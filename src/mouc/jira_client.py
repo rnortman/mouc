@@ -39,7 +39,7 @@ class JiraIssueData:
     summary: str
     status: str
     fields: dict[str, Any]
-    status_transitions: dict[str, datetime]  # status_name -> transition_date
+    status_transitions: dict[str, list[datetime]]  # status_name -> all transition dates
     assignee_email: str | None
 
 
@@ -142,16 +142,16 @@ class JiraClient:
             assignee_email=assignee_email,
         )
 
-    def _extract_status_transitions(self, issue: dict[str, Any]) -> dict[str, datetime]:
+    def _extract_status_transitions(self, issue: dict[str, Any]) -> dict[str, list[datetime]]:
         """Extract status transition timestamps from changelog.
 
         Args:
             issue: Full issue dict with changelog expanded
 
         Returns:
-            Dict mapping status names to first transition date to that status
+            Dict mapping status names to all transition dates to that status
         """
-        transitions: dict[str, datetime] = {}
+        transitions: dict[str, list[datetime]] = {}
         changelog = issue.get("changelog", {})
         histories = changelog.get("histories", [])
 
@@ -179,8 +179,10 @@ class JiraClient:
             for item in history.get("items", []):
                 if item.get("field") == "status":
                     to_status = item.get("toString")
-                    if to_status and to_status not in transitions:
-                        transitions[to_status] = timestamp
+                    if to_status:
+                        if to_status not in transitions:
+                            transitions[to_status] = []
+                        transitions[to_status].append(timestamp)
 
         return transitions
 

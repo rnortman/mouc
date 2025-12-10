@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Workflows: expand entities into multiple phases via `workflow: design_impl` field
 - Type-based default workflows: set `workflows.defaults.capability: design_impl` to apply to all capabilities
 - `workflow: none` to override default and prevent expansion
+- New save_resolution_choices config to control whether Jira sync remembers the conflict resolution decisions (default True which is the existing behavior)
+- `transition_to_status` now accepts a list of statuses; uses earliest date from any matching status
+- Ignored dates are now filtered before selecting the earliest transition date
 
 ## [0.5.1] - 2025-12-09
 

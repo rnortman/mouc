@@ -88,13 +88,18 @@ field_mappings:
     # Option 1: Use explicit Jira field name (takes precedence)
     explicit_field: "Start date"
     # Option 2: Derive from status transition (fallback)
-    transition_to_status: "In Progress"
+    # Can be a single status or list of statuses - uses earliest date
+    transition_to_status:
+      - "In Progress"
+      - "Started"
+      - "Development"
     # How to resolve conflicts
     conflict_resolution: "jira_wins"  # or "mouc_wins" or "ask"
 
   # End date mapping
   end_date:
     explicit_field: "Due Date"
+    # Can also use a single status string
     transition_to_status: "Done"
 
   # Effort/story points mapping

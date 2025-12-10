@@ -39,8 +39,8 @@ class TestJiraFetchCommand:
                 "created": "2025-01-01T10:00:00.000+0000",
             },
             status_transitions={
-                "To Do": datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc),
-                "In Progress": datetime(2025, 1, 5, 14, 30, 0, tzinfo=timezone.utc),
+                "To Do": [datetime(2025, 1, 1, 10, 0, 0, tzinfo=timezone.utc)],
+                "In Progress": [datetime(2025, 1, 5, 14, 30, 0, tzinfo=timezone.utc)],
             },
             assignee_email="assignee@example.com",
         )
@@ -200,7 +200,7 @@ class TestSaveResolutionChoicesConfig:
             status="In Progress",
             fields={},
             status_transitions={
-                "In Progress": datetime(2025, 1, 20, 10, 0, 0, tzinfo=timezone.utc)
+                "In Progress": [datetime(2025, 1, 20, 10, 0, 0, tzinfo=timezone.utc)]
             },
             assignee_email=None,
         )

@@ -110,7 +110,9 @@ class TestFieldExtractor:
             summary="Test issue",
             status="In Progress",
             fields={},
-            status_transitions={"In Progress": datetime(2025, 1, 10, 9, 0, 0, tzinfo=timezone.utc)},
+            status_transitions={
+                "In Progress": [datetime(2025, 1, 10, 9, 0, 0, tzinfo=timezone.utc)]
+            },
             assignee_email=None,
         )
 
@@ -124,7 +126,9 @@ class TestFieldExtractor:
             summary="Test issue",
             status="In Progress",
             fields={"startdate": "2025-01-15"},
-            status_transitions={"In Progress": datetime(2025, 1, 10, 9, 0, 0, tzinfo=timezone.utc)},
+            status_transitions={
+                "In Progress": [datetime(2025, 1, 10, 9, 0, 0, tzinfo=timezone.utc)]
+            },
             assignee_email=None,
         )
 
@@ -467,7 +471,7 @@ class TestJiraSyncMetadata:
                 summary="Test",
                 status="In Progress",
                 fields={},
-                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2025, 1, 20, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )
@@ -501,7 +505,7 @@ class TestJiraSyncMetadata:
                 summary="Test",
                 status="In Progress",
                 fields={},
-                status_transitions={"In Progress": datetime(2024, 12, 1, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2024, 12, 1, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )
@@ -533,7 +537,7 @@ class TestJiraSyncMetadata:
                 summary="Test",
                 status="In Progress",
                 fields={},
-                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2025, 1, 20, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )
@@ -567,7 +571,7 @@ class TestJiraSyncMetadata:
                 summary="Test",
                 status="In Progress",
                 fields={},
-                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2025, 1, 20, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )
@@ -598,7 +602,7 @@ class TestJiraSyncMetadata:
                 summary="Test",
                 status="In Progress",
                 fields={},
-                status_transitions={"In Progress": datetime(2025, 1, 20, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2025, 1, 20, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )
@@ -610,3 +614,217 @@ class TestJiraSyncMetadata:
         assert len(results[0].conflicts) == 1
         assert results[0].conflicts[0].field == "start_date"
         assert "INVALID" in str(results[0].conflicts[0].jira_value)
+
+
+class TestMultipleStatusTransitions:
+    """Tests for multiple status transition support."""
+
+    @pytest.fixture
+    def mock_client(self) -> Mock:
+        """Create mock Jira client."""
+        client = Mock()
+        client.get_custom_field_value = Mock(return_value=None)
+        return client
+
+    def test_multiple_statuses_uses_earliest_date(self, mock_client: Mock) -> None:
+        """Test that multiple statuses config uses earliest date."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status=["In Progress", "Started"]),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "In Progress": [datetime(2025, 1, 15, tzinfo=timezone.utc)],
+                "Started": [datetime(2025, 1, 10, tzinfo=timezone.utc)],  # Earlier
+            },
+            assignee_email=None,
+        )
+
+        result = extractor.extract_start_date(issue_data)
+        assert result == date(2025, 1, 10)  # Started is earlier
+
+    def test_single_status_still_works(self, mock_client: Mock) -> None:
+        """Test that single status config still works."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "In Progress": [datetime(2025, 1, 15, tzinfo=timezone.utc)],
+            },
+            assignee_email=None,
+        )
+
+        result = extractor.extract_start_date(issue_data)
+        assert result == date(2025, 1, 15)
+
+    def test_multiple_transitions_to_same_status_uses_earliest(self, mock_client: Mock) -> None:
+        """Test that multiple transitions to same status uses earliest."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "In Progress": [
+                    datetime(2025, 1, 20, tzinfo=timezone.utc),  # Second time
+                    datetime(2025, 1, 10, tzinfo=timezone.utc),  # First time (earlier)
+                ],
+            },
+            assignee_email=None,
+        )
+
+        result = extractor.extract_start_date(issue_data)
+        assert result == date(2025, 1, 10)  # Earliest wins
+
+    def test_ignored_values_filters_transitions(self, mock_client: Mock) -> None:
+        """Test that ignored values are filtered before selecting earliest."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "In Progress": [
+                    datetime(2025, 1, 10, tzinfo=timezone.utc),  # Earliest but ignored
+                    datetime(2025, 1, 15, tzinfo=timezone.utc),  # Second earliest
+                    datetime(2025, 1, 20, tzinfo=timezone.utc),
+                ],
+            },
+            assignee_email=None,
+        )
+
+        # Ignore Jan 10
+        ignored_values = ["2025-01-10"]
+        result = extractor.extract_start_date(issue_data, ignored_values)
+        assert result == date(2025, 1, 15)  # Next earliest after ignored
+
+    def test_ignored_values_with_multiple_statuses(self, mock_client: Mock) -> None:
+        """Test that ignored values work with multiple status configs."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status=["In Progress", "Started"]),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "Started": [datetime(2025, 1, 5, tzinfo=timezone.utc)],  # Earliest but ignored
+                "In Progress": [datetime(2025, 1, 10, tzinfo=timezone.utc)],
+            },
+            assignee_email=None,
+        )
+
+        ignored_values = ["2025-01-05"]
+        result = extractor.extract_start_date(issue_data, ignored_values)
+        assert result == date(2025, 1, 10)  # In Progress date since Started is ignored
+
+    def test_all_dates_ignored_returns_none(self, mock_client: Mock) -> None:
+        """Test that None is returned when all dates are ignored."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+        extractor = FieldExtractor(config, mock_client)
+
+        issue_data = JiraIssueData(
+            key="TEST-123",
+            summary="Test",
+            status="Done",
+            fields={},
+            status_transitions={
+                "In Progress": [datetime(2025, 1, 10, tzinfo=timezone.utc)],
+            },
+            assignee_email=None,
+        )
+
+        ignored_values = ["2025-01-10"]
+        result = extractor.extract_start_date(issue_data, ignored_values)
+        assert result is None
+
+    def test_sync_with_ignored_values_filters_before_extraction(self, mock_client: Mock) -> None:
+        """Test that sync passes ignored values to extraction."""
+        config = JiraConfig(
+            jira=JiraConnection(base_url="https://example.atlassian.net"),
+            field_mappings=FieldMappings(
+                start_date=FieldMapping(transition_to_status="In Progress"),
+            ),
+        )
+
+        entity = Entity(
+            type="capability",
+            id="cap1",
+            name="Cap 1",
+            description="Test",
+            links=["jira:TEST-123"],
+            meta={
+                "jira_sync": {
+                    "ignore_values": {"start_date": ["2025-01-10"]},
+                },
+            },
+        )
+        feature_map = FeatureMap(metadata=Mock(), entities=[entity])
+
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Test",
+                status="In Progress",
+                fields={},
+                status_transitions={
+                    "In Progress": [
+                        datetime(2025, 1, 10, tzinfo=timezone.utc),  # Ignored
+                        datetime(2025, 1, 15, tzinfo=timezone.utc),  # This should be used
+                    ]
+                },
+                assignee_email=None,
+            )
+        )
+
+        synchronizer = JiraSynchronizer(config, feature_map, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        assert len(results) == 1
+        assert "start_date" in results[0].updated_fields
+        assert results[0].updated_fields["start_date"] == date(2025, 1, 15)

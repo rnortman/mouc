@@ -64,11 +64,14 @@ class FieldExtractor:
         self.client = client
         self.resource_config = resource_config
 
-    def extract_start_date(self, issue_data: JiraIssueData) -> date | None:
+    def extract_start_date(
+        self, issue_data: JiraIssueData, ignored_values: list[Any] | None = None
+    ) -> date | None:
         """Extract start_date from issue data.
 
         Args:
             issue_data: Fetched Jira issue data
+            ignored_values: List of date values to ignore when selecting from transitions
 
         Returns:
             Extracted start date or None
@@ -85,22 +88,24 @@ class FieldExtractor:
                 return value
 
         if mapping.transition_to_status:
-            transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
-            if transition_date:
-                result = transition_date.date()
-                logger.debug(
-                    f"      start_date: from transition to '{mapping.transition_to_status}' = {result}"
-                )
+            result = self._get_earliest_transition_date(
+                issue_data, mapping.transition_to_status, ignored_values
+            )
+            if result:
+                logger.debug(f"      start_date: from transition = {result}")
                 return result
 
         logger.debug("      start_date: no value found")
         return None
 
-    def extract_end_date(self, issue_data: JiraIssueData) -> date | None:
+    def extract_end_date(
+        self, issue_data: JiraIssueData, ignored_values: list[Any] | None = None
+    ) -> date | None:
         """Extract end_date from issue data.
 
         Args:
             issue_data: Fetched Jira issue data
+            ignored_values: List of date values to ignore when selecting from transitions
 
         Returns:
             Extracted end date or None
@@ -117,12 +122,11 @@ class FieldExtractor:
                 return value
 
         if mapping.transition_to_status:
-            transition_date = issue_data.status_transitions.get(mapping.transition_to_status)
-            if transition_date:
-                result = transition_date.date()
-                logger.debug(
-                    f"      end_date: from transition to '{mapping.transition_to_status}' = {result}"
-                )
+            result = self._get_earliest_transition_date(
+                issue_data, mapping.transition_to_status, ignored_values
+            )
+            if result:
+                logger.debug(f"      end_date: from transition = {result}")
                 return result
 
         logger.debug("      end_date: no value found")
@@ -222,6 +226,67 @@ class FieldExtractor:
             logger.debug("      resources: ignored/unassigned (will not update field)")
 
         return result
+
+    def _get_earliest_transition_date(
+        self,
+        issue_data: JiraIssueData,
+        statuses: str | list[str],
+        ignored_values: list[Any] | None = None,
+    ) -> date | None:
+        """Get earliest transition date from matching statuses, filtering ignored values.
+
+        Args:
+            issue_data: Fetched Jira issue data
+            statuses: Single status or list of statuses to check
+            ignored_values: List of date values to ignore
+
+        Returns:
+            Earliest non-ignored date or None
+        """
+        # Normalize to list
+        status_list = [statuses] if isinstance(statuses, str) else statuses
+
+        # Collect all candidate dates from matching statuses
+        all_dates: list[date] = []
+        for status in status_list:
+            transitions = issue_data.status_transitions.get(status, [])
+            for transition_dt in transitions:
+                all_dates.append(transition_dt.date())
+
+        if not all_dates:
+            return None
+
+        # Filter out ignored dates
+        if ignored_values:
+            filtered_dates: list[date] = []
+            for d in all_dates:
+                is_ignored = False
+                for ignored in ignored_values:
+                    if self._date_matches_ignored(d, ignored):
+                        is_ignored = True
+                        break
+                if not is_ignored:
+                    filtered_dates.append(d)
+            all_dates = filtered_dates
+
+        if not all_dates:
+            return None
+
+        # Return earliest date
+        return min(all_dates)
+
+    def _date_matches_ignored(self, d: date, ignored: Any) -> bool:
+        """Check if a date matches an ignored value."""
+        if isinstance(ignored, date):
+            return d == ignored
+        if isinstance(ignored, datetime):
+            return d == ignored.date()
+        if isinstance(ignored, str):
+            try:
+                return d == date.fromisoformat(ignored)
+            except ValueError:
+                return False
+        return False
 
     def _get_date_field(self, issue_data: JiraIssueData, field_name: str) -> date | None:
         """Get and parse a date field from issue data using human-readable field names.
@@ -428,16 +493,21 @@ class JiraSynchronizer:
         logger.checks(f"Checking {entity_id} ({ticket_id})...")
 
         issue_data = self.client.fetch_issue(ticket_id)
+        jira_sync = entity.get_jira_sync_metadata()
 
         updated_fields: dict[str, Any] = {}
         conflicts: list[FieldConflict] = []
+
+        # Get ignored values for date fields to filter during extraction
+        start_date_ignored = jira_sync.ignore_values.get("start_date")
+        end_date_ignored = jira_sync.ignore_values.get("end_date")
 
         self._sync_field(
             field="start_date",
             entity=entity,
             entity_id=entity_id,
             ticket_id=ticket_id,
-            jira_value=self.extractor.extract_start_date(issue_data),
+            jira_value=self.extractor.extract_start_date(issue_data, start_date_ignored),
             updated_fields=updated_fields,
             conflicts=conflicts,
         )
@@ -447,7 +517,7 @@ class JiraSynchronizer:
             entity=entity,
             entity_id=entity_id,
             ticket_id=ticket_id,
-            jira_value=self.extractor.extract_end_date(issue_data),
+            jira_value=self.extractor.extract_end_date(issue_data, end_date_ignored),
             updated_fields=updated_fields,
             conflicts=conflicts,
         )

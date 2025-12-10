@@ -365,16 +365,24 @@ Extract task start date from Jira.
 
 **Options:**
 - `explicit_field` - Jira custom field name (e.g., "Start date")
-- `transition_to_status` - Derive from status transition (e.g., "In Progress")
+- `transition_to_status` - Status(es) to derive date from. Can be a single status string or a list of statuses (uses earliest date from any matching status)
 - `conflict_resolution` - How to resolve conflicts (see [Conflict Resolution](#conflict-resolution))
 
 **Precedence:** Explicit field takes precedence over status transition.
+
+**Multiple statuses:** When a list of statuses is provided, all transitions to any of those statuses are considered, and the earliest date is used. This is useful when different Jira projects use different workflow statuses (e.g., "In Progress" vs "Started" vs "Development").
+
+**Ignored dates:** If an entity has `ignore_values` configured for start_date, those dates are filtered out before selecting the earliest. This allows you to skip accidental or incorrect status transitions.
 
 **Example:**
 ```yaml
 start_date:
   explicit_field: "Start date"      # Check this field first
-  transition_to_status: "In Progress"  # Fallback to transition date
+  # Fallback: use earliest transition to any of these statuses
+  transition_to_status:
+    - "In Progress"
+    - "Started"
+    - "Development"
   conflict_resolution: "ask"
 ```
 
@@ -388,6 +396,7 @@ Extract task end date from Jira.
 ```yaml
 end_date:
   explicit_field: "Due Date"
+  # Can use single status or list
   transition_to_status: "Done"
   conflict_resolution: "jira_wins"
 ```

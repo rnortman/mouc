@@ -445,7 +445,7 @@ entities:
                 summary="Auth Redesign - Design",
                 status="In Progress",
                 fields={},  # No effort field
-                status_transitions={"In Progress": datetime(2025, 1, 15, tzinfo=timezone.utc)},
+                status_transitions={"In Progress": [datetime(2025, 1, 15, tzinfo=timezone.utc)]},
                 assignee_email=None,
             )
         )

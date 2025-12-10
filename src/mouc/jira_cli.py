@@ -183,9 +183,13 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
 
             if issue_data.status_transitions:
                 typer.echo("\nStatus Transition History:")
-                for status, timestamp in sorted(
-                    issue_data.status_transitions.items(), key=lambda x: x[1]
-                ):
+                # Flatten all transitions and sort by timestamp
+                all_transitions = [
+                    (status, ts)
+                    for status, timestamps in issue_data.status_transitions.items()
+                    for ts in timestamps
+                ]
+                for status, timestamp in sorted(all_transitions, key=lambda x: x[1]):
                     typer.echo(f"  {status}: {timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
             else:
                 typer.echo("\nNo status transitions found in changelog")
@@ -212,9 +216,13 @@ def jira_fetch(  # noqa: PLR0912, PLR0915 - CLI command handling multiple field 
 
             if issue_data.status_transitions:
                 typer.echo("\nStatus Transitions:")
-                for status, timestamp in sorted(
-                    issue_data.status_transitions.items(), key=lambda x: x[1]
-                ):
+                # Flatten all transitions and sort by timestamp
+                all_transitions = [
+                    (status, ts)
+                    for status, timestamps in issue_data.status_transitions.items()
+                    for ts in timestamps
+                ]
+                for status, timestamp in sorted(all_transitions, key=lambda x: x[1]):
                     typer.echo(f"  {status}: {timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
 
             typer.echo(f"{'=' * 60}\n")

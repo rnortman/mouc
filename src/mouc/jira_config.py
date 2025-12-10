@@ -42,8 +42,8 @@ class FieldMapping(BaseModel):
     explicit_field: str | None = Field(
         default=None, description="Jira custom field name (takes precedence)"
     )
-    transition_to_status: str | None = Field(
-        default=None, description="Status to derive date from (fallback)"
+    transition_to_status: str | list[str] | None = Field(
+        default=None, description="Status(es) to derive date from (fallback); uses earliest date"
     )
 
     # For effort/story points
