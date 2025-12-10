@@ -1,449 +1,304 @@
-# Mouc - Mapping Outcomes User stories and Capabilities
+# Mouc
 
-A lightweight dependency tracking system for software development that maps relationships between technical capabilities, user stories, and organizational outcomes.
+A YAML-based dependency tracker and automatic scheduler for software roadmaps.
 
-## Overview
+## What Mouc Does
 
-Mouc helps engineering teams track and visualize dependencies between:
+Mouc takes a YAML file describing your work items and their dependencies, and produces:
 
-- **Capabilities** - Technical work your team builds
-- **User Stories** - What other teams need from you
-- **Outcomes** - Business/organizational goals that depend on the work
+- **Scheduled Gantt charts** - automatically computed from dependencies, deadlines, priorities, and resource constraints
+- **Dependency graphs** - visualize what blocks what
+- **Documentation** - Markdown or Word docs, Gantt charts, and Graphviz/SVG graphs describing your roadmap
 
-This is **not** a project management system. It's a technical dependency tracker that answers "what depends on what" and "what blocks what."
+The scheduler handles the tedious work of figuring out *when* things should happen. You define *what* needs to happen, what it depends on, who can work on it, priorities, and any deadlines. Mouc computes a schedule that respects all constraints.
 
-Dependencies can be specified from either direction using `requires` (what this needs) or `enables` (what this unblocks), and the system automatically creates bidirectional edges.
+## What Mouc Isn't
+
+Mouc is not a full project management system. It doesn't have:
+
+- A web UI for editing (it's YAML + CLI)
+- Time tracking, budgets, or cost management
+- Collaboration features (comments, notifications, assignments)
+- Velocity tracking (though you could script this yourself; it's just YAML)
+
+Mouc is for engineers and tech leads who want version-controlled roadmaps with real scheduling logic, not another GUI to babysit.
+
+## Mouc vs. Other Tools
+
+Mouc complements tools like Jira rather than replacing them. Use Jira for ticket tracking and team collaboration; use Mouc for dependency-aware scheduling and roadmap generation.
+
+Key differences from typical PM tools:
+
+- **Automatic scheduling**: Most tools (including Jira, even with plugins) require you to manually set dates and drag Gantt bars. Mouc computes dates automatically using a real scheduling algorithm.
+- **YAML-first**: Your roadmap lives in version control. Review changes in PRs. No proprietary database.
+- **Workflow expansion**: Define patterns like "design → signoff → implement → review" once, apply them to many items. The scheduler handles the phasing automatically.
+- **Free and open source**: MIT licensed.
+
+The outputs (Mermaid Gantt charts, Graphviz graphs, Markdown) render in GitHub, GitLab, standard doc tools, or any static site. Run Mouc in CI to publish current roadmaps automatically.
 
 ## Installation
 
-Install with uv (recommended):
 ```bash
-uv pip install mouc
-```
-
-Or with pip:
-```bash
+uv pip install mouc   # recommended
+# or
 pip install mouc
 ```
 
-## Quick Start
+## Quick Example
 
-1. Create a `feature_map.yaml` file:
-
-```yaml
-metadata:
-  version: 1.0
-  team: middleware_platform
-
-entities:
-  message_bus:
-    type: capability
-    name: Inter-Process Message Bus
-    description: |
-      High-performance message passing system for services.
-
-      **Key Features:**
-      - Reliable, ordered message delivery
-      - Supports both `pub/sub` and *point-to-point* patterns
-      - See [design doc](https://docs.google.com/document/d/abc) for details
-    enables: [service_communication]  # This unblocks the service communication story
-    links:
-      - jira:INFRA-123
-    tags: [infrastructure]
-
-  service_communication:
-    type: user_story
-    name: Service Communication
-    description: Frontend team needs services to communicate
-    requires: [message_bus]  # Or you can specify from this end
-    meta:
-      requestor: frontend_team
-    links:
-      - jira:STORY-456
-
-  q3_launch:
-    type: outcome
-    name: Q3 Product Launch
-    description: Launch new product features in Q3
-    requires: [service_communication]
-    links:
-      - jira:EPIC-789
-    meta:
-      target_date: 2024-Q3
-```
-
-2. Generate documentation:
-```bash
-mouc doc
-```
-
-3. Generate dependency graph:
-```bash
-mouc graph all > deps.dot
-dot -Tpng deps.dot -o deps.png
-```
-
-## Commands
-
-### Documentation Generation
-
-Generate documentation from your feature map:
-
-```bash
-mouc doc                           # Markdown to stdout (default)
-mouc doc --output docs.md          # Markdown to file
-mouc doc --format docx --output docs.docx  # Microsoft Word format
-mouc feature_map.yaml doc          # Specify input file
-```
-
-Entity descriptions support markdown formatting (bold, italic, links, lists, code blocks) which is preserved in both markdown and DOCX output.
-
-### Gantt Chart Scheduling
-
-Generate Mermaid Gantt charts with resource-aware scheduling:
-
-```bash
-mouc gantt                                    # Output to stdout
-mouc gantt --output schedule.md               # Output to markdown file
-mouc gantt --start-date 2025-01-01            # Set project start date
-mouc gantt --title "Q1 Schedule"             # Custom chart title
-mouc --config mouc_config.yaml gantt          # Use config for resources and settings
-```
-
-Add scheduling metadata to entities in your YAML:
-```yaml
-meta:
-  effort: "2w"                     # Duration (days, weeks, months)
-  resources: ["alice", "bob"]      # Assigned people/teams
-  timeframe: "2025q1"              # Quarter, week, month, etc.
-  end_before: "2025-03-31"         # Hard deadline
-```
-
-#### Automatic Resource Assignment
-
-Use wildcards and preferences for flexible resource assignment:
-
-```yaml
-meta:
-  resources: ["*"]                 # Assign to any available resource
-  resources: ["alice|bob|charlie"] # Prefer alice, fall back to bob, then charlie
-  resources: ["team_a"]            # Use group alias from mouc_config.yaml
-```
-
-See [docs/gantt.md](docs/gantt.md) for Gantt chart features and [docs/resources.md](docs/resources.md) for resource management and automatic assignment.
-
-### Graph Generation
-
-Generate dependency graphs in DOT format:
-
-```bash
-# All entities and relationships
-mouc graph --view all
-
-# Critical path to a specific outcome
-mouc graph --view critical-path --target q3_launch
-
-# Filter by tags
-mouc graph --view filtered --tags infrastructure monitoring
-
-# Timeline view grouped by timeframe
-mouc graph --view timeline
-
-# Timeframe-colored view (colors indicate time progression)
-mouc graph --view timeframe-colored
-```
-
-Render graphs with Graphviz:
-```bash
-mouc graph --view all | dot -Tpng -o graph.png
-mouc graph --view all | dot -Tsvg -o graph.svg
-```
-
-## YAML Schema
-
-### Full Example
+Create `feature_map.yaml`:
 
 ```yaml
 metadata:
   version: 1.0
-  last_updated: 2024-01-15
-  team: middleware
 
 entities:
-  lock_free_queue:
+  database_layer:
     type: capability
-    name: Lock-Free Queue Implementation
-    description: |
-      High-performance thread-safe queue using atomic operations.
+    name: Database Abstraction Layer
+    description: Core data access patterns
+    meta:
+      effort: "2w"
+      resources: ["alice"]
 
-      **Performance targets:**
-      - 10M ops/sec single producer/consumer
-      - Sub-microsecond latency at p99
-
-      Uses *lock-free algorithms* with `std::atomic` for thread safety.
-    requires: []  # List of entity IDs this depends on
-    links:
-      - design:[DD-123](https://docs.google.com/document/d/abc123)
-      - jira:INFRA-456
-    tags: [critical, performance]  # Arbitrary tags
-
-  message_bus:
+  api_service:
     type: capability
-    name: Inter-Process Message Bus
-    description: Reliable message passing built on lock-free queue
-    requires: [lock_free_queue]
-    links:
-      - jira:INFRA-789
-    tags: [infrastructure]
+    name: REST API Service
+    description: Public API endpoints
+    requires: [database_layer]
     meta:
-      timeframe: Q1 2025  # Optional: for timeline view
-
-  analytics_realtime:
-    type: user_story
-    name: Real-time Analytics Pipeline
-    description: |
-      Analytics team needs to process streaming data at 100Hz
-      with strict latency requirements.
-    requires: [message_bus]  # Can depend on capabilities or other user stories
-    meta:
-      requestor: analytics_team  # Who asked for this
-    links:
-      - jira:STORY-100
-    tags: [q2_commitment]
+      effort: "3w"
+      resources: ["bob"]
+      end_before: "2025-03-31"
 
   mobile_app:
     type: outcome
     name: Mobile App Launch
-    description: Launch new mobile application by Q3
-    requires: [analytics_realtime]  # Can depend on user stories or capabilities
+    requires: [api_service]
     links:
-      - jira:EPIC-1000  # Always present for exec visibility
-    meta:
-      target_date: 2024-Q3
-    tags: [company_priority]
+      - jira:MOBILE-100
 ```
 
-### Field Reference
-
-**Required fields** for all entities:
-- `type`: Entity type (`capability`, `user_story`, or `outcome`)
-- `name`: Human-readable name
-- `description`: Entity description with markdown formatting support
-  - **Inline formatting**: `**bold**`, `*italic*`, `` `code` ``, `[links](url)`
-  - **Block elements**: Lists (ordered/unordered, nested), code blocks (`` ``` ``)
-  - Formatting is preserved in both markdown and DOCX output
-
-**Optional fields** for all entities:
-- `requires`: List of entity IDs this depends on (what must be completed before this)
-  - Capabilities can only depend on other capabilities
-  - User stories can depend on capabilities or other user stories
-  - Outcomes can depend on any entity (capabilities, user stories, or other outcomes)
-- `enables`: List of entity IDs that depend on this (what this unblocks)
-  - You can specify edges from either end - use `requires` OR `enables` or both
-  - The system automatically creates bidirectional edges
-- `dependencies`: ⚠️ **Deprecated** - Use `requires` instead (backward compatible)
-- `links`: List of links in various formats:
-  - `design:[DD-123](https://...)` - Design doc with markdown link
-  - `jira:TICKET-123` - Jira ticket reference
-  - `https://...` - Plain URL
-- `tags`: List of arbitrary tags
-- `meta`: Dictionary of metadata. Common fields include:
-  - `timeframe`: Time period for timeline view (e.g., `"Q1 2025"`, `"Sprint 23"`)
-  - `requestor`: Team or person requesting (for user stories)
-  - `target_date`: Target completion date (for outcomes)
-
-**Specifying Dependencies**:
-
-You can specify edges from either direction:
-
-```yaml
-# Option 1: Specify what each entity requires
-entities:
-  cap1:
-    type: capability
-    name: Foundation
-    requires: []
-
-  cap2:
-    type: capability
-    name: Feature
-    requires: [cap1]  # cap2 depends on cap1
-
-# Option 2: Specify what each entity enables
-entities:
-  cap1:
-    type: capability
-    name: Foundation
-    enables: [cap2]  # cap1 unblocks cap2
-
-  cap2:
-    type: capability
-    name: Feature
-    requires: []
-
-# Option 3: Mix both (useful for complex graphs)
-entities:
-  cap1:
-    type: capability
-    name: Foundation
-    enables: [cap2, cap3]
-
-  cap2:
-    type: capability
-    name: Feature A
-    requires: [cap1]
-    enables: [story1]
-```
-
-All three examples create the same dependency graph. The system automatically resolves bidirectional edges.
-
-## Styling System
-
-Mouc provides a flexible styling system that lets you customize how graphs and markdown output are rendered. You can write Python functions to compute styles based on entity data and graph structure.
-
-### Basic Usage
+Generate outputs:
 
 ```bash
-# Import from Python module (must be on PYTHONPATH)
-mouc graph --style-module myproject.docs.styling
+# Scheduled Gantt chart
+mouc gantt --start-date 2025-01-01 --output schedule.md
 
-# Import from file path
-mouc graph --style-file ./my_styles.py
+# Dependency graph
+mouc graph --view all | dot -Tsvg -o deps.svg
 
-# Same for markdown
-mouc doc --style-module myproject.docs.styling
-mouc doc --style-file ./my_styles.py
+# Documentation
+mouc doc --output roadmap.md
 ```
 
-### Quick Example
+The Gantt chart automatically schedules `database_layer` first, then `api_service` (after its dependency completes), and warns if the March 31 deadline can't be met.
+
+## Core Concepts
+
+### Entities and Dependencies
+
+Mouc organizes work into three entity types:
+
+- **Capabilities** - technical work (can only depend on other capabilities)
+- **User Stories** - what others need from you (can depend on capabilities or other stories)
+- **Outcomes** - business goals (can depend on anything)
+
+Specify dependencies with `requires` (what this needs) or `enables` (what this unblocks):
+
+```yaml
+database_layer:
+  enables: [api_service, batch_jobs]  # these need database_layer
+
+api_service:
+  requires: [database_layer]          # equivalent to above
+```
+
+### Scheduling
+
+Add metadata to enable automatic scheduling:
+
+```yaml
+meta:
+  effort: "2w"                    # how long (days, weeks, months)
+  resources: ["alice", "bob"]     # who works on it
+  end_before: "2025-03-31"        # hard deadline
+  timeframe: "2025q1"             # target quarter/month/week
+```
+
+The scheduler uses a priority-based algorithm that:
+
+- Respects dependencies (B waits for A if B requires A)
+- Prevents resource conflicts (Alice can't do two things at once)
+- Prioritizes by deadline urgency and task duration
+- Propagates deadlines backward through dependency chains
+
+See [docs/scheduling.md](docs/scheduling.md) for algorithm details including the bounded rollout feature for more-optimal decisions.
+
+### Workflows
+
+Workflows expand a single entity into multiple phases with proper dependencies:
+
+```yaml
+auth_redesign:
+  type: capability
+  name: Auth Redesign
+  workflow: design_impl        # expands to design phase + implementation
+  meta:
+    effort: "2w"
+```
+
+This creates `auth_redesign_design` (floats freely) and `auth_redesign` (waits for design + signoff lag). Built-in workflows include `design_impl`, `impl_pr`, `full`, and `phased_rollout`. You can implement your own workflows with Python plugins.
+
+See [docs/workflows.md](docs/workflows.md) for details.
+
+### Resources
+
+Define team members, availability, and assignment preferences:
+
+```yaml
+# mouc_config.yaml
+resources:
+  - name: alice
+    dns_periods:                  # do-not-schedule periods
+      - start: 2025-12-20
+        end: 2025-12-31
+
+groups:
+  backend_team: [alice, bob, charlie]
+
+default_resource: "*"             # auto-assign unassigned tasks
+```
+
+In your feature map:
+
+```yaml
+meta:
+  resources: ["alice"]              # explicit
+  resources: ["*"]                  # any available
+  resources: ["alice|bob"]          # prefer alice, fall back to bob
+  resources: ["backend_team"]       # anyone in the group
+  resources: ["!john"]              # Anybody but john
+```
+
+See [docs/resources.md](docs/resources.md) for details.
+
+### Jira Integration
+
+Sync metadata from Jira issues:
+
+```yaml
+entities:
+  auth_service:
+    type: capability
+    name: Auth Service
+    links:
+      - jira:AUTH-123           # pulls dates, status, assignee from Jira
+```
+
+```bash
+mouc jira sync feature_map.yaml --dry-run   # preview changes
+mouc jira sync feature_map.yaml --apply     # apply changes
+```
+
+The sync is read-only (Jira → Mouc) with configurable conflict resolution.
+
+See [docs/jira.md](docs/jira.md) for setup and configuration.
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `mouc gantt` | Generate Mermaid Gantt chart with automatic scheduling |
+| `mouc graph` | Generate Graphviz dependency graph |
+| `mouc doc` | Generate Markdown or DOCX documentation |
+| `mouc jira sync` | Sync metadata from Jira |
+| `mouc jira validate` | Test Jira connection |
+
+Common options:
+
+```bash
+mouc gantt --output schedule.md --start-date 2025-01-01
+mouc graph --view critical-path --target mobile_launch
+mouc doc --format docx --output roadmap.docx
+mouc --config mouc_config.yaml gantt
+```
+
+## Customization
+
+### Styling
+
+Write Python functions to customize graph colors, shapes, labels, and Gantt task appearance:
 
 ```python
 # my_styles.py
-from mouc.styling import *
+from mouc.styling import style_node
 
 @style_node
-def timeframe_colors(entity, context):
-    """Color entities by their timeframe."""
-    if 'timeframe' in entity.meta:
-        timeframes = context.collect_metadata_values('timeframe')
-        return {
-            'fill_color': sequential_hue(
-                entity.meta['timeframe'],
-                timeframes,
-                hue_range=(120, 230)
-            )
-        }
+def color_by_status(entity, context):
+    if entity.meta.get('status') == 'done':
+        return {'fill_color': '#90EE90'}
     return {}
-
-@style_node(priority=20)
-def highlight_blockers(entity, context):
-    """Highlight entities that block company priorities."""
-    priority_outcomes = [
-        e for e in context.get_entities_by_type('outcome')
-        if 'company_priority' in e.tags
-    ]
-
-    enabled = context.transitively_enables(entity.id)
-    for outcome in priority_outcomes:
-        if outcome.id in enabled:
-            return {'border_color': '#ff0000', 'border_width': 3}
-    return {}
-
-@style_label
-def custom_labels(entity, context):
-    """Show custom labels in markdown output."""
-    if entity.type == 'capability' and 'critical' in entity.tags:
-        return '[🔥 Critical Capability]'
-    return ''  # Use default label
 ```
 
-See also the [full styling documentation](docs/styling.md).
-
-## Use Cases
-
-### Find Critical Path
-
-What needs to be done for the Q3 launch?
 ```bash
-mouc graph --view critical-path --target q3_launch | dot -Tpng -o critical_path.png
+mouc graph --style-file ./my_styles.py
 ```
 
-### Filter by Team
+See [docs/styling.md](docs/styling.md) for the full API.
 
-What infrastructure work is planned?
-```bash
-mouc graph --view filtered --tags infrastructure | dot -Tpng -o infra_work.png
+### Configuration
+
+`mouc_config.yaml` controls resources, scheduling parameters, Jira integration, and output formatting:
+
+```yaml
+resources:
+  - name: alice
+    jira_username: alice@company.com
+
+scheduler:
+  strategy: weighted
+  cr_weight: 10.0
+  priority_weight: 1.0
+
+jira:
+  base_url: https://company.atlassian.net
+
+gantt:
+  group_by: type
+  sort_by: start
 ```
 
-### Generate Reports
+See [docs/config.md](docs/config.md) for all options.
 
-Create documentation for architecture review:
-```bash
-mouc doc --output architecture_review.md
-```
+## Documentation
 
-### View Timeline
-
-Group work by time periods (quarters, sprints, etc.):
-```bash
-# Add timeframe metadata to entities:
-# meta:
-#   timeframe: "Q1 2025"
-
-# Clustered by timeframe
-mouc graph --view timeline | dot -Tpng -o timeline.png
-
-# Colored by timeframe
-mouc graph --view timeframe-colored | dot -Tpng -o timeframe_colored.png
-```
-
-## Best Practices
-
-1. **Keep it current**: Update dependencies when architecture changes
-2. **Don't over-specify**: Only use fields you need
-3. **Rich descriptions**: Spend time documenting critical capabilities
-4. **Consistent tags**: Agree on tag conventions with your team
-5. **Version control**: Keep feature_map.yaml in git
-6. **Review regularly**: Quarterly reviews to prune obsolete items
+- [Data Model](docs/data-model.md) - entity types, fields, dependencies
+- [Gantt Charts](docs/gantt.md) - scheduling options and output
+- [Scheduling Algorithm](docs/scheduling.md) - how the scheduler works
+- [Workflows](docs/workflows.md) - phase expansion patterns
+- [Resources](docs/resources.md) - team definition and auto-assignment
+- [Jira Integration](docs/jira.md) - syncing with Jira
+- [Styling](docs/styling.md) - customizing output appearance
+- [Configuration](docs/config.md) - mouc_config.yaml reference
 
 ## Development
 
-### Setup
-
 ```bash
-# Clone the repository
 git clone https://github.com/rnortman/mouc.git
 cd mouc
-
-# Install with development dependencies
 uv pip install -e ".[dev]"
-```
 
-### Testing
-
-```bash
-# Run tests
+# Run tests and checks
 pytest
-
-# Run with coverage
-pytest --cov=mouc
-
-# Type checking
 pyright
-
-# Linting
 ruff check src tests
-ruff format src tests
 ```
 
-### Contributing
+## About the Name
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Run linting and tests
-5. Submit a pull request
+Mouc stands for "Mapping Outcomes, User stories, and Capabilities" - reflecting its origin as a dependency tracker for these three entity types. It has since grown into a full scheduling system, but the name stuck.
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT License - see LICENSE file for details.
