@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from mouc.logger import get_logger
 from mouc.resources import UNASSIGNED_RESOURCE
 
+from .config import SchedulingConfig, TimeframeConstraintMode
 from .core import Task
 from .timeframes import parse_timeframe
 
@@ -24,13 +25,19 @@ class SchedulerInputValidator:
     (Gantt, schedule command, etc.).
     """
 
-    def __init__(self, resource_config: "ResourceConfig | None" = None):
-        """Initialize validator with optional resource configuration.
+    def __init__(
+        self,
+        resource_config: "ResourceConfig | None" = None,
+        scheduling_config: SchedulingConfig | None = None,
+    ):
+        """Initialize validator with optional resource and scheduling configuration.
 
         Args:
             resource_config: Optional resource configuration for auto-assignment
+            scheduling_config: Optional scheduling configuration for timeframe behavior
         """
         self.resource_config = resource_config
+        self.scheduling_config = scheduling_config or SchedulingConfig()
 
     def parse_effort(self, effort_str: str) -> float:
         """Parse effort string to calendar days.
@@ -160,12 +167,24 @@ class SchedulerInputValidator:
             total_capacity = 1.0 if resource_spec else sum(c for _, c in resources) or 1.0
             duration = effort_days / total_capacity
 
-        # Handle timeframe
-        if timeframe and not start_after and not end_before:
+        # Handle timeframe based on config
+        tf_mode = self.scheduling_config.auto_constraint_from_timeframe
+        if (
+            timeframe
+            and tf_mode != TimeframeConstraintMode.NONE
+            and not start_after
+            and not end_before
+        ):
             timeframe_start, timeframe_end = self.parse_timeframe(str(timeframe))
-            if not start_after:
+            if (
+                tf_mode in (TimeframeConstraintMode.BOTH, TimeframeConstraintMode.START)
+                and not start_after
+            ):
                 start_after = timeframe_start
-            if not end_before:
+            if (
+                tf_mode in (TimeframeConstraintMode.BOTH, TimeframeConstraintMode.END)
+                and not end_before
+            ):
                 end_before = timeframe_end
 
         # Create task

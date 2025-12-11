@@ -5,6 +5,15 @@ from enum import Enum
 from pydantic import BaseModel
 
 
+class TimeframeConstraintMode(str, Enum):
+    """How timeframe metadata creates scheduling constraints."""
+
+    BOTH = "both"  # Sets both start_after and end_before
+    START = "start"  # Only sets start_after
+    END = "end"  # Only sets end_before
+    NONE = "none"  # No constraints from timeframe
+
+
 class AlgorithmType(str, Enum):
     """Available scheduling algorithms."""
 
@@ -49,6 +58,9 @@ class RolloutConfig(BaseModel):
 
 class SchedulingConfig(BaseModel):
     """Configuration for task prioritization and algorithm selection."""
+
+    # Timeframe constraint behavior
+    auto_constraint_from_timeframe: TimeframeConstraintMode = TimeframeConstraintMode.BOTH
 
     # Prioritization strategy
     strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted"

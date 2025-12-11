@@ -11,7 +11,7 @@ from mouc.backends import MarkdownBackend
 from mouc.gantt import GanttScheduler
 from mouc.models import Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import resolve_graph_edges
-from mouc.scheduler import parse_timeframe
+from mouc.scheduler import SchedulingConfig, TimeframeConstraintMode, parse_timeframe
 from mouc.unified_config import GanttConfig
 from tests.conftest import deps
 
@@ -1952,6 +1952,126 @@ class TestTimeframeScheduling:
         assert "2025-02-28" in deadline_line
         # Should NOT show start date as deadline
         assert "2025-02-01" not in deadline_line
+
+    def test_auto_constraint_from_timeframe_none(self, base_date: date) -> None:
+        """Test that auto_constraint_from_timeframe=none disables constraint creation."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q2 Task",
+            description="Timeframe should not create constraints",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "timeframe": "2025q2",  # Q2 starts April 1
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        config = SchedulingConfig(auto_constraint_from_timeframe=TimeframeConstraintMode.NONE)
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, scheduler_config=config
+        )
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # With constraints disabled, task should start at current_date, not wait for Q2
+        assert task_result.start_date == base_date
+
+    def test_auto_constraint_from_timeframe_start_only(self, base_date: date) -> None:
+        """Test that auto_constraint_from_timeframe=start only sets start_after."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q2 Task",
+            description="Should start in Q2 but no end constraint",
+            meta={
+                "effort": "20w",  # Long task that would violate Q2 end
+                "resources": ["alice"],
+                "timeframe": "2025q2",
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        config = SchedulingConfig(auto_constraint_from_timeframe=TimeframeConstraintMode.START)
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, scheduler_config=config
+        )
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # Should still wait for Q2 start (April 1)
+        assert task_result.start_date >= date(2025, 4, 1)
+        # But no deadline warning since end constraint not set
+        assert len(result.warnings) == 0
+
+    def test_auto_constraint_from_timeframe_end_only(self, base_date: date) -> None:
+        """Test that auto_constraint_from_timeframe=end only sets end_before."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q2 Task",
+            description="Should have Q2 deadline but start immediately",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "timeframe": "2025q2",
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        config = SchedulingConfig(auto_constraint_from_timeframe=TimeframeConstraintMode.END)
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, scheduler_config=config
+        )
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # Should start immediately at current_date, not wait for Q2
+        assert task_result.start_date == base_date
+        # But end constraint is set (verified by checking there's no warning since task fits)
+        assert task_result.end_date <= date(2025, 6, 30)
+
+    def test_auto_constraint_from_timeframe_both_default(self, base_date: date) -> None:
+        """Test that auto_constraint_from_timeframe=both (default) sets both constraints."""
+        metadata = FeatureMapMetadata()
+
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Q2 Task",
+            description="Should have both constraints",
+            meta={
+                "effort": "1w",
+                "resources": ["alice"],
+                "timeframe": "2025q2",
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        # Default config should have auto_constraint_from_timeframe="both"
+        scheduler = GanttScheduler(feature_map, start_date=base_date, current_date=base_date)
+        result = scheduler.schedule()
+
+        task_result = result.tasks[0]
+        # Should wait for Q2 start (April 1)
+        assert task_result.start_date >= date(2025, 4, 1)
+        # And finish within Q2 (by June 30)
+        assert task_result.end_date <= date(2025, 6, 30)
 
 
 class TestFixedScheduleTasks:

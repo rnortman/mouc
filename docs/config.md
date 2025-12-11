@@ -68,6 +68,7 @@ gantt:
 
 # OPTIONAL: Scheduler configuration
 scheduler:
+  auto_constraint_from_timeframe: "both"  # "both", "start", "end", or "none"
   strategy: "weighted"
   cr_weight: 10.0
   priority_weight: 1.0
@@ -303,6 +304,7 @@ The `scheduler` section configures task prioritization strategies. This section 
 
 ```yaml
 scheduler:
+  auto_constraint_from_timeframe: "both"  # "both", "start", "end", or "none"
   strategy: "weighted"       # Prioritization strategy
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority
@@ -317,6 +319,16 @@ scheduler:
     cr_relaxed_threshold: 5.0
     min_cr_urgency_gap: 3.0
 ```
+
+**`auto_constraint_from_timeframe`** (optional, default: `"both"`): Controls how `timeframe` metadata creates scheduling constraints.
+
+Valid values:
+- `"both"` - Timeframe sets both `start_after` and `end_before` constraints
+- `"start"` - Timeframe only sets `start_after` (task won't start before timeframe begins)
+- `"end"` - Timeframe only sets `end_before` (task has deadline at timeframe end)
+- `"none"` - Timeframe doesn't create any scheduling constraints (useful when timeframe is only for documentation/grouping)
+
+Note: Explicit `start_after` or `end_before` values in entity metadata always override timeframe-derived constraints.
 
 **`strategy`** (optional, default: `"weighted"`): How to prioritize tasks for scheduling.
 
@@ -846,6 +858,7 @@ default_resource: "*"
 # ============================================================================
 
 scheduler:
+  auto_constraint_from_timeframe: "both"  # "both", "start", "end", or "none"
   strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
   cr_weight: 10.0           # Weight for critical ratio
   priority_weight: 1.0      # Weight for priority

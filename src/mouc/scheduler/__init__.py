@@ -28,6 +28,7 @@ from .config import (
     PreProcessorType,
     RolloutConfig,
     SchedulingConfig,
+    TimeframeConstraintMode,
 )
 from .core import (
     AlgorithmResult,
@@ -71,6 +72,7 @@ __all__ = [
     "PreProcessorConfig",
     "PreProcessorType",
     "RolloutConfig",
+    "TimeframeConstraintMode",
     # Protocols
     "PreProcessor",
     "SchedulingAlgorithm",

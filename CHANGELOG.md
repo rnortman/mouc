@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `scheduler.auto_constraint_from_timeframe` config: control whether timeframe creates scheduling constraints (`both`, `start`, `end`, `none`)
+
 ## [0.6.4] - 2025-12-11
 
 ### Fixed

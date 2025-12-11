@@ -47,7 +47,7 @@ class SchedulingService:
         self.resource_config = resource_config
         self.config = config or SchedulingConfig()
         self.global_dns_periods = global_dns_periods or []
-        self.validator = SchedulerInputValidator(resource_config)
+        self.validator = SchedulerInputValidator(resource_config, self.config)
 
     def schedule(self) -> SchedulingResult:
         """Schedule all entities and create annotations.
