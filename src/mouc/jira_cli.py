@@ -368,12 +368,14 @@ def _find_entity_in_sections(
     return None
 
 
-def _update_phase_meta_in_place(
+def _update_phase_meta_in_place(  # noqa: PLR0913
     available_sections: dict[str, Any],
     parent_id: str,
     phase_key: str,
     new_meta: dict[str, Any],
     parent_type: str | None = None,
+    *,
+    merge_only: bool = False,
 ) -> bool:
     """Update meta in parent's phases section, creating if needed.
 
@@ -383,6 +385,9 @@ def _update_phase_meta_in_place(
         phase_key: Phase key (e.g., "design")
         new_meta: Meta dict to write
         parent_type: Optional parent entity type for legacy section lookup
+        merge_only: If True, only add/update fields from new_meta without removing
+            existing fields. Used for Jira sync to preserve existing meta fields
+            that weren't updated by the sync.
 
     Returns:
         True if updated successfully, False if parent not found
@@ -408,10 +413,11 @@ def _update_phase_meta_in_place(
     if existing_meta is None:
         parent_data["phases"][phase_key]["meta"] = new_meta
     else:
-        # Clear keys that are in existing but not in new
-        keys_to_remove = [k for k in existing_meta if k not in new_meta]
-        for key in keys_to_remove:
-            del existing_meta[key]
+        # Only clear keys when doing a full replacement (not merge_only)
+        if not merge_only:
+            keys_to_remove = [k for k in existing_meta if k not in new_meta]
+            for key in keys_to_remove:
+                del existing_meta[key]
         # Update/add keys from new_meta
         for key, value in new_meta.items():
             if key not in existing_meta or existing_meta[key] != value:
@@ -701,8 +707,16 @@ def write_feature_map(  # noqa: PLR0912
                 meta_to_write = sync_updates.get(entity.id, {})
             else:
                 meta_to_write = entity.meta
+            # When sync_updates is provided, use merge_only mode to preserve existing
+            # meta fields that weren't updated by sync
+            merge_only = sync_updates is not None
             if meta_to_write and _update_phase_meta_in_place(
-                available_sections, parent_id, phase_key, meta_to_write, entity.type
+                available_sections,
+                parent_id,
+                phase_key,
+                meta_to_write,
+                entity.type,
+                merge_only=merge_only,
             ):
                 entities_updated += 1
                 found = True

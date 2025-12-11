@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -485,4 +485,105 @@ entities:
         assert "start_date" in phase_meta
         assert "effort" not in phase_meta, (
             "effort should NOT be written - it came from workflow defaults, not Jira"
+        )
+
+    def test_jira_sync_preserves_existing_unchanged_phase_meta(
+        self,
+        tmp_path: Path,
+        jira_config: JiraConfig,
+        mock_client: Mock,
+    ) -> None:
+        """Jira sync should preserve existing phase meta fields that weren't changed.
+
+        If a phase already has meta fields (e.g., effort: "5d") in the YAML,
+        and Jira sync only updates start_date, the existing effort should be preserved.
+        """
+        # Create feature map with entity that has a workflow AND existing phase meta
+        yaml_file = tmp_path / "feature_map.yaml"
+        yaml_file.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  auth_redesign:
+    type: capability
+    name: Auth Redesign
+    description: Redesign authentication system
+    workflow: design_impl
+    meta:
+      effort: "2w"
+    phases:
+      design:
+        meta:
+          effort: "5d"
+          custom_field: "preserve_me"
+""")
+
+        # Load feature map with workflow expansion
+        workflows_config = WorkflowsConfig(stdlib=True)
+        fm = load_feature_map(yaml_file, workflows_config=workflows_config)
+
+        # Verify the design phase entity exists and has the YAML-specified meta
+        design_entity = fm.get_entity_by_id("auth_redesign_design")
+        assert design_entity is not None
+        assert design_entity.phase_of == ("auth_redesign", "design")
+        # The effort should come from the phase override, not workflow defaults
+        assert design_entity.meta.get("effort") == "5d"
+        assert design_entity.meta.get("custom_field") == "preserve_me"
+
+        # Add a Jira link to the design phase entity
+        design_entity.links = ["jira:TEST-123"]
+
+        # Mock Jira to return only start_date
+        mock_client.fetch_issue = Mock(
+            return_value=JiraIssueData(
+                key="TEST-123",
+                summary="Auth Redesign - Design",
+                status="In Progress",
+                fields={},
+                status_transitions={"In Progress": [datetime(2025, 1, 15, tzinfo=timezone.utc)]},
+                assignee_email=None,
+            )
+        )
+
+        # Run sync
+        synchronizer = JiraSynchronizer(jira_config, fm, mock_client)
+        results = synchronizer.sync_all_entities()
+
+        # Verify sync only got start_date from Jira
+        assert len(results) == 1
+        result = results[0]
+        assert result.entity_id == "auth_redesign_design"
+        assert "start_date" in result.updated_fields
+        assert "effort" not in result.updated_fields
+        assert "custom_field" not in result.updated_fields
+
+        # Apply updates (like jira_sync --apply does)
+        for field, value in result.updated_fields.items():
+            design_entity.meta[field] = value
+
+        # Build sync_updates like jira_sync command does
+        sync_updates = {result.entity_id: dict(result.updated_fields)}
+
+        # Write back to YAML with sync_updates
+        write_feature_map(yaml_file, fm, sync_updates=sync_updates)
+
+        # Read the file and check what was written
+        yaml = YAML()
+        with yaml_file.open() as f:
+            data: Any = yaml.load(f)  # type: ignore[no-untyped-call]
+
+        # Verify the phases section still exists
+        assert "phases" in data["entities"]["auth_redesign"]
+        assert "design" in data["entities"]["auth_redesign"]["phases"]
+        phase_meta = data["entities"]["auth_redesign"]["phases"]["design"]["meta"]  # type: ignore[index]
+
+        # start_date should be added
+        assert phase_meta["start_date"] == date(2025, 1, 15)  # type: ignore[index]
+        # Existing fields should be PRESERVED
+        assert phase_meta["effort"] == "5d", (  # type: ignore[index]
+            "effort should be preserved - it was in the original YAML"
+        )
+        assert phase_meta["custom_field"] == "preserve_me", (  # type: ignore[index]
+            "custom_field should be preserved - it was in the original YAML"
         )

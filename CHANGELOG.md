@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.4] - 2025-12-11
+
+### Fixed
+- Jira sync now preserves existing phase meta fields when syncing new fields
+
 ## [0.6.3] - 2025-12-10
 
 ### Fixed
