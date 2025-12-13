@@ -350,8 +350,24 @@ Valid values:
 **`algorithm.type`** (optional, default: `"parallel_sgs"`): Scheduling algorithm to use.
 
 Valid values:
-- `"parallel_sgs"` - Standard greedy chronological scheduling
+- `"parallel_sgs"` - Standard greedy chronological scheduling (fast, good quality)
 - `"bounded_rollout"` - Lookahead simulation for better priority handling
+- `"cpsat"` - Optimal scheduling using OR-Tools constraint solver (slower, best quality)
+
+**`preprocessor.type`** (optional, default: `"auto"`): Preprocessor to run before scheduling.
+
+Valid values:
+- `"auto"` - Uses `backward_pass` for greedy algorithms, `none` for CP-SAT
+- `"backward_pass"` - Propagates deadlines/priorities backward through dependencies
+- `"none"` - No preprocessing
+
+**CP-SAT Configuration** (only used when `algorithm.type` is `"cpsat"`):
+
+- **`time_limit_seconds`** (default: `30.0`): Maximum solver time. Use `null` to run until optimal.
+- **`tardiness_weight`** (default: `100.0`): Penalty weight for deadline violations
+- **`earliness_weight`** (default: `0.0`): Reward for finishing before deadlines (slack). Set to 10-50 to encourage buffer time.
+- **`priority_weight`** (default: `1.0`): Weight for priority-based completion time optimization
+- **`random_seed`** (default: `42`): Fixed seed for deterministic results
 
 **Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
 

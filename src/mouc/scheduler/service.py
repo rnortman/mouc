@@ -4,7 +4,7 @@ from datetime import date
 from typing import TYPE_CHECKING
 
 from .algorithms import create_algorithm
-from .config import SchedulingConfig
+from .config import AlgorithmType, PreProcessorType, SchedulingConfig
 from .core import ScheduleAnnotations, SchedulingResult
 from .preprocessors import create_preprocessor
 from .validator import SchedulerInputValidator
@@ -49,6 +49,16 @@ class SchedulingService:
         self.global_dns_periods = global_dns_periods or []
         self.validator = SchedulerInputValidator(resource_config, self.config)
 
+    def _resolve_preprocessor_type(self) -> PreProcessorType:
+        """Resolve auto preprocessor type based on algorithm."""
+        preprocessor_type = self.config.preprocessor.type
+        if preprocessor_type == PreProcessorType.AUTO:
+            # CP-SAT is a global optimizer that doesn't need backward pass
+            if self.config.algorithm.type == AlgorithmType.CP_SAT:
+                return PreProcessorType.NONE
+            return PreProcessorType.BACKWARD_PASS
+        return preprocessor_type
+
     def schedule(self) -> SchedulingResult:
         """Schedule all entities and create annotations.
 
@@ -62,8 +72,9 @@ class SchedulingService:
 
         # Run pre-processor if configured
         preprocess_result = None
+        preprocessor_type = self._resolve_preprocessor_type()
         preprocessor_config = {"default_priority": self.config.default_priority}
-        preprocessor = create_preprocessor(self.config.preprocessor.type, preprocessor_config)
+        preprocessor = create_preprocessor(preprocessor_type, preprocessor_config)
         if preprocessor:
             preprocess_result = preprocessor.process(tasks, done_without_dates)
 

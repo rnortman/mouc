@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from ..config import AlgorithmType, SchedulingConfig
 from ..core import PreProcessResult, Task
 from .bounded_rollout import BoundedRolloutScheduler
+from .cpsat import CPSATScheduler
 from .parallel_sgs import ParallelScheduler
 
 if TYPE_CHECKING:
@@ -22,7 +23,7 @@ def create_algorithm(  # noqa: PLR0913 - Factory function with keyword-only para
     config: SchedulingConfig | None = None,
     global_dns_periods: "list[DNSPeriod] | None" = None,
     preprocess_result: PreProcessResult | None = None,
-) -> ParallelScheduler | BoundedRolloutScheduler:
+) -> ParallelScheduler | BoundedRolloutScheduler | CPSATScheduler:
     """Create a scheduling algorithm instance.
 
     Args:
@@ -60,8 +61,19 @@ def create_algorithm(  # noqa: PLR0913 - Factory function with keyword-only para
             preprocess_result=preprocess_result,
         )
 
+    if algorithm_type == AlgorithmType.CP_SAT:
+        return CPSATScheduler(
+            tasks,
+            current_date,
+            resource_config=resource_config,
+            completed_task_ids=completed_task_ids,
+            config=config,
+            global_dns_periods=global_dns_periods,
+            preprocess_result=preprocess_result,
+        )
+
     msg = f"Unknown algorithm type: {algorithm_type}"
     raise ValueError(msg)
 
 
-__all__ = ["ParallelScheduler", "BoundedRolloutScheduler", "create_algorithm"]
+__all__ = ["ParallelScheduler", "BoundedRolloutScheduler", "CPSATScheduler", "create_algorithm"]

@@ -19,14 +19,13 @@ class AlgorithmType(str, Enum):
 
     PARALLEL_SGS = "parallel_sgs"
     BOUNDED_ROLLOUT = "bounded_rollout"
-    # Future algorithms:
-    # OR_TOOLS = "or_tools"
-    # TABU_SEARCH = "tabu_search"
+    CP_SAT = "cpsat"
 
 
 class PreProcessorType(str, Enum):
     """Available pre-processors."""
 
+    AUTO = "auto"  # backward_pass for greedy algorithms, none for cpsat
     BACKWARD_PASS = "backward_pass"
     NONE = "none"
 
@@ -40,7 +39,7 @@ class AlgorithmConfig(BaseModel):
 class PreProcessorConfig(BaseModel):
     """Configuration for pre-processor selection."""
 
-    type: PreProcessorType = PreProcessorType.BACKWARD_PASS
+    type: PreProcessorType = PreProcessorType.AUTO
 
 
 class RolloutConfig(BaseModel):
@@ -54,6 +53,16 @@ class RolloutConfig(BaseModel):
     cr_relaxed_threshold: float = 5.0
     # Minimum CR gap: upcoming task must have CR at least this much lower (more urgent)
     min_cr_urgency_gap: float = 3.0
+
+
+class CPSATConfig(BaseModel):
+    """Configuration for CP-SAT optimal scheduler."""
+
+    time_limit_seconds: float | None = 30.0  # None = no limit (run until optimal)
+    tardiness_weight: float = 100.0  # Penalty for deadline violations
+    priority_weight: float = 1.0  # Weight for priority-based completion time
+    earliness_weight: float = 0.0  # Reward for slack before deadlines (0 = disabled)
+    random_seed: int = 42
 
 
 class SchedulingConfig(BaseModel):
@@ -83,3 +92,6 @@ class SchedulingConfig(BaseModel):
 
     # Bounded rollout configuration
     rollout: RolloutConfig = RolloutConfig()
+
+    # CP-SAT configuration
+    cpsat: CPSATConfig = CPSATConfig()

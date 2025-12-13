@@ -261,6 +261,8 @@ resources:
     jira_username: alice@company.com
 
 scheduler:
+  algorithm:
+    type: parallel_sgs  # or bounded_rollout, cpsat
   strategy: weighted
   cr_weight: 10.0
   priority_weight: 1.0

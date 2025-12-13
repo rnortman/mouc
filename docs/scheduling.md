@@ -681,3 +681,228 @@ Use standard Parallel SGS when:
 - **No preemption**: Can't interrupt running tasks
 - **Bounded horizon**: Only looks ahead to current task's completion time
 - **Performance overhead**: Runs simulations, so slower than pure greedy
+
+## CP-SAT Optimal Scheduler
+
+The scheduler supports an **optimal** scheduling algorithm using Google OR-Tools CP-SAT (Constraint Programming with SAT solving). Unlike the greedy algorithms above, CP-SAT finds globally optimal solutions by exploring the entire solution space.
+
+### When to Use CP-SAT
+
+Use CP-SAT when:
+- You need the **best possible** schedule, not just a good one
+- Greedy algorithms produce schedules that miss deadlines or delay high-priority work
+- You have complex constraint combinations that greedy heuristics handle poorly
+- Schedule quality is more important than computation time
+
+Use Parallel SGS or Bounded Rollout when:
+- Schedules need to be computed in milliseconds
+- The problem is large (500+ tasks)
+- Greedy solutions are already good enough
+
+### How It Works
+
+CP-SAT models your scheduling problem mathematically and uses constraint programming to find optimal solutions:
+
+1. **Variables**: Each task gets start/end time variables
+2. **Constraints**: Dependencies, resource capacity, deadlines, start_after dates
+3. **Objective**: Minimize tardiness + priority-weighted start times
+4. **Solver**: Explores solutions systematically, proving optimality when possible
+
+The solver considers **all valid schedules** and finds the one with the best objective value, rather than building a schedule incrementally like greedy algorithms.
+
+### Configuration
+
+Enable CP-SAT via CLI or config:
+
+```bash
+mouc gantt feature_map.yaml --algorithm cpsat
+```
+
+Or in `mouc_config.yaml`:
+
+```yaml
+scheduler:
+  algorithm:
+    type: cpsat
+  cpsat:
+    time_limit_seconds: 30.0    # Maximum solve time (null = no limit)
+    tardiness_weight: 100.0     # Penalty for deadline violations
+    earliness_weight: 0.0       # Reward for slack before deadlines
+    priority_weight: 1.0        # Weight for priority optimization
+    random_seed: 42             # Seed for deterministic results
+```
+
+**Parameters:**
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `time_limit_seconds` | 30.0 | Maximum solve time. Use `null` to run until optimal. |
+| `tardiness_weight` | 100.0 | Penalty multiplier for deadline violations |
+| `earliness_weight` | 0.0 | Reward multiplier for finishing before deadlines (slack) |
+| `priority_weight` | 1.0 | Multiplier for priority-based completion time optimization |
+| `random_seed` | 42 | Fixed seed for reproducible results |
+
+### Objective Function
+
+CP-SAT minimizes a weighted combination of three terms:
+
+**1. Tardiness (deadline violations):**
+```
+tardiness = Σ max(0, end_time - deadline) × priority
+```
+- Only applies to tasks with deadlines
+- Higher priority tasks incur larger penalties for being late
+- Weight controlled by `tardiness_weight`
+
+**2. Earliness (slack before deadlines):**
+```
+earliness = Σ max(0, deadline - end_time) × priority
+```
+- Only applies to tasks with deadlines
+- Rewards finishing before deadlines (buffer for unexpected issues)
+- Weight controlled by `earliness_weight` (default 0 = disabled)
+- Negative contribution (reward, not penalty)
+
+**3. Priority-weighted completion times:**
+```
+priority_cost = Σ end_time × priority
+```
+- Encourages high-priority tasks to complete earlier
+- A priority-90 task ending on day 10 costs 900
+- A priority-20 task ending on day 10 costs 200
+- Weight controlled by `priority_weight`
+
+**Combined objective:**
+```
+minimize: tardiness_weight × tardiness
+        - earliness_weight × earliness
+        + priority_weight × priority_cost
+```
+
+**Tuning the weights:**
+
+- **High `tardiness_weight`** (default 100): Prioritizes meeting deadlines. Good when deadlines are firm.
+- **High `earliness_weight`**: Creates buffer time before deadlines - useful when "shit happens" and you want slack. Set to 10-50 to encourage finishing early.
+- **High `priority_weight`**: Prioritizes getting high-priority work done early, even if it risks some deadline slippage. Good when priorities reflect business value.
+- **Balanced weights**: Trade off between the objectives.
+
+### Resource Modeling
+
+CP-SAT uses **cumulative constraints** to model resources:
+
+- Each resource has capacity 100 (representing 1.0 or 100%)
+- Task allocations are scaled: 0.5 → 50, 0.25 → 25
+- Multiple fractional tasks can share a resource: two 0.5 tasks run concurrently
+- DNS periods are modeled as dummy tasks consuming full capacity
+
+### Auto-Assignment
+
+For tasks with `resource_spec` (e.g., `*` or `alice|bob`), CP-SAT:
+
+1. Creates **optional intervals** for each candidate resource
+2. Adds an **exactly-one constraint**: exactly one resource must be selected
+3. The solver jointly optimizes assignment and scheduling
+
+This can find better assignments than greedy "first available" selection.
+
+### Fixed Tasks
+
+Tasks with `start_on` or `end_on` are handled as constants:
+- They're scheduled at their fixed times before optimization
+- Other tasks schedule around them
+- Dependencies on fixed tasks use the fixed dates
+
+### Preprocessor
+
+By default, CP-SAT **skips the backward pass preprocessor**. The preprocessor propagates deadlines backward through dependencies, which is essential for greedy algorithms but unnecessary for CP-SAT since it optimizes globally.
+
+The default `preprocessor.type: auto` resolves to:
+- `backward_pass` for Parallel SGS and Bounded Rollout
+- `none` for CP-SAT
+
+You can override this:
+```yaml
+scheduler:
+  algorithm:
+    type: cpsat
+  preprocessor:
+    type: backward_pass  # Force backward pass with CP-SAT
+```
+
+### Determinism
+
+CP-SAT produces **deterministic results** via:
+- Single-threaded solving (`num_workers=1`)
+- Fixed random seed for tie-breaking
+
+The same inputs always produce the same schedule.
+
+### Solution Status
+
+The solver returns one of:
+- **OPTIMAL**: Proven best solution
+- **FEASIBLE**: Valid solution found, may not be optimal (time limit reached)
+- **INFEASIBLE**: No valid schedule exists (conflicting constraints)
+
+Check `result.algorithm_metadata["status"]` to see which was returned.
+
+### Performance Characteristics
+
+| Problem Size | Expected Time | Solution Quality |
+|--------------|---------------|------------------|
+| < 100 tasks | Seconds | Optimal likely |
+| 100-200 tasks | Seconds to 1 minute | Optimal or near-optimal |
+| 200-300 tasks | 1-5 minutes | Good feasible |
+| 300+ tasks | May hit time limit | Feasible, quality varies |
+
+For large problems, increase `time_limit_seconds` or use Bounded Rollout.
+
+### Example
+
+```yaml
+# mouc_config.yaml
+scheduler:
+  algorithm:
+    type: cpsat
+  cpsat:
+    time_limit_seconds: 60.0      # Allow up to 1 minute
+    tardiness_weight: 100.0       # Strong penalty for missing deadlines
+    priority_weight: 2.0          # Moderate priority optimization
+```
+
+```yaml
+# feature_map.yaml
+entities:
+  critical_feature:
+    type: capability
+    meta:
+      effort: 10d
+      priority: 95
+      end_before: 2025-02-01
+      resources: [alice]
+
+  nice_to_have:
+    type: capability
+    meta:
+      effort: 5d
+      priority: 30
+      resources: [alice]
+```
+
+With these inputs, CP-SAT will:
+1. Ensure `critical_feature` meets its deadline (priority 95 × tardiness is expensive)
+2. Schedule `critical_feature` before `nice_to_have` (priority 95 vs 30)
+3. Find the globally optimal ordering, not just a greedy approximation
+
+### Comparison with Other Algorithms
+
+| Feature | Parallel SGS | Bounded Rollout | CP-SAT |
+|---------|--------------|-----------------|--------|
+| Speed | Fast (ms) | Moderate (ms-s) | Slow (s-min) |
+| Solution quality | Good | Better | Optimal* |
+| Handles priority/deadline trade-offs | Heuristically | With lookahead | Globally |
+| Deterministic | Yes | Yes | Yes |
+| Scales to 500+ tasks | Yes | Yes | Limited |
+| Explainability | High | High | Medium |
+
+*Optimal when solver completes; best-found when time-limited.
