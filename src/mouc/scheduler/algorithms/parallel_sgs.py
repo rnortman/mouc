@@ -1,5 +1,6 @@
 """Parallel Schedule Generation Scheme (SGS) algorithm for RCPSP."""
 
+import math
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
 
@@ -326,11 +327,69 @@ class ParallelScheduler:
         # Use multiplier * max CR, with floor as minimum
         return max(max_cr * self.config.default_cr_multiplier, self.config.default_cr_floor)
 
+    def _compute_avg_duration(self, unscheduled_task_ids: set[str]) -> float:
+        """Compute average duration of unscheduled tasks.
+
+        Args:
+            unscheduled_task_ids: Set of task IDs not yet scheduled
+
+        Returns:
+            Average duration in days, or 1.0 if no tasks
+        """
+        if not unscheduled_task_ids:
+            return 1.0
+        total = sum(self.tasks[tid].duration_days for tid in unscheduled_task_ids)
+        return total / len(unscheduled_task_ids)
+
+    def _compute_default_urgency(
+        self,
+        unscheduled_task_ids: set[str],
+        current_time: date,
+        avg_duration: float,
+    ) -> float:
+        """Compute default urgency for tasks without deadlines.
+
+        Uses max(min_urgency * multiplier, floor) where min_urgency is the lowest
+        urgency among deadline-driven tasks (most relaxed task).
+
+        Args:
+            unscheduled_task_ids: Set of task IDs not yet scheduled
+            current_time: Current scheduling time
+            avg_duration: Average duration for ATC K parameter scaling
+
+        Returns:
+            Default urgency for tasks without deadlines
+        """
+        min_urgency = 1.0  # Start high, find minimum
+        found_deadline_task = False
+
+        for task_id in unscheduled_task_ids:
+            deadline = self._computed_deadlines.get(task_id)
+            if deadline and deadline != date.max:
+                found_deadline_task = True
+                duration = self.tasks[task_id].duration_days
+                slack = (deadline - current_time).days - duration
+                if slack <= 0:
+                    urgency = 1.0
+                else:
+                    urgency = math.exp(-slack / (self.config.atc_k * avg_duration))
+                min_urgency = min(min_urgency, urgency)
+
+        if not found_deadline_task:
+            # No deadline-driven tasks; use floor
+            return self.config.atc_default_urgency_floor
+
+        return max(
+            min_urgency * self.config.atc_default_urgency_multiplier,
+            self.config.atc_default_urgency_floor,
+        )
+
     def _compute_sort_key(
         self,
         task_id: str,
         current_time: date,
         default_cr: float,
+        unscheduled_task_ids: set[str] | None = None,
     ) -> tuple[float, ...] | tuple[float, float, str] | tuple[float, str]:
         """Compute sort key for task prioritization.
 
@@ -340,6 +399,7 @@ class ParallelScheduler:
             task_id: Task ID to compute key for
             current_time: Current scheduling time
             default_cr: Default CR for tasks without deadlines
+            unscheduled_task_ids: Set of unscheduled task IDs (required for ATC strategy)
 
         Returns:
             Tuple suitable for sorting (lower = more urgent)
@@ -365,6 +425,31 @@ class ParallelScheduler:
         if self.config.strategy == "weighted":
             score = self.config.cr_weight * cr + self.config.priority_weight * (100 - priority)
             return (score, task_id)
+        if self.config.strategy == "atc":
+            # ATC = (w/p) * exp(-max(0, slack) / (K * p_avg))
+            # Higher ATC = more urgent, so negate for sorting (lower = more urgent)
+            if unscheduled_task_ids is None:
+                msg = "ATC strategy requires unscheduled_task_ids parameter"
+                raise ValueError(msg)
+
+            avg_duration = self._compute_avg_duration(unscheduled_task_ids)
+            wspt = priority / max(task.duration_days, 0.1)
+
+            if deadline and deadline != date.max:
+                slack_days = (deadline - current_time).days - task.duration_days
+                if slack_days <= 0:
+                    urgency = 1.0
+                else:
+                    urgency = math.exp(-slack_days / (self.config.atc_k * avg_duration))
+            else:
+                # No deadline: compute default urgency relative to most relaxed deadline task
+                urgency = self._compute_default_urgency(
+                    unscheduled_task_ids, current_time, avg_duration
+                )
+
+            atc_score = wspt * urgency
+            return (-atc_score, task_id)  # Negate: higher ATC = schedule first
+
         msg = f"Unknown scheduling strategy: {self.config.strategy}"
         raise ValueError(msg)
 
@@ -576,7 +661,9 @@ class ParallelScheduler:
             default_cr = self._compute_default_cr(unscheduled, current_time)
 
             # Sort by configured strategy (CR, priority, or weighted combination)
-            eligible.sort(key=lambda tid: self._compute_sort_key(tid, current_time, default_cr))
+            eligible.sort(
+                key=lambda tid: self._compute_sort_key(tid, current_time, default_cr, unscheduled)
+            )
 
             if debug_enabled():
                 available_resources: list[str] = []
@@ -603,7 +690,9 @@ class ParallelScheduler:
                     else:
                         cr_str = f"{default_cr:.2f} (default)"
 
-                    sort_key = self._compute_sort_key(task_id, current_time, default_cr)
+                    sort_key = self._compute_sort_key(
+                        task_id, current_time, default_cr, unscheduled
+                    )
                     logger.debug(
                         f"    {task_id}: priority={priority}, CR={cr_str}, "
                         f"sort_key={sort_key}, duration={task.duration_days}d"

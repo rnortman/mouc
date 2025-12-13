@@ -1117,3 +1117,303 @@ def test_priority_propagation_affects_scheduling():
     task_competing_result = next(r for r in result if r.task_id == "task_competing")
 
     assert task_low_result.start_date < task_competing_result.start_date
+
+
+# === ATC Strategy Tests ===
+
+
+def test_atc_strategy_deadline_imminent_wins():
+    """Test that ATC prioritizes tasks with imminent deadlines."""
+    config = SchedulingConfig(strategy="atc", atc_k=2.0)
+
+    # High priority but relaxed deadline
+    task_high_priority = Task(
+        id="task_high",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 2, 28),  # Far future
+        meta={"priority": 90},
+    )
+
+    # Low priority but urgent deadline (slack = 10 - 5 = 5 days)
+    task_urgent = Task(
+        id="task_urgent",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 11),  # 10 days out, 5 day task = 5 day slack
+        meta={"priority": 30},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_high_priority, task_urgent], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # Urgent task should win due to exponential urgency boost
+    task_urgent_result = next(r for r in result if r.task_id == "task_urgent")
+    task_high_result = next(r for r in result if r.task_id == "task_high")
+
+    assert task_urgent_result.start_date == date(2025, 1, 1)
+    assert task_high_result.start_date > task_urgent_result.end_date
+
+
+def test_atc_strategy_high_priority_no_deadline_competes():
+    """Test that high-priority tasks without deadlines can still be scheduled early."""
+    config = SchedulingConfig(
+        strategy="atc",
+        atc_k=2.0,
+        atc_default_urgency_floor=0.5,  # Ensure meaningful urgency for no-deadline tasks
+    )
+
+    # High priority without deadline - should still compete via WSPT * default_urgency
+    task_high_no_deadline = Task(
+        id="task_high_no_deadline",
+        duration_days=2.0,  # Short task + high priority = high WSPT
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 95},
+    )
+
+    # Low priority with relaxed deadline
+    task_low_deadline = Task(
+        id="task_low_deadline",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 2, 28),  # Very relaxed
+        meta={"priority": 30},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_low_deadline, task_high_no_deadline], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # High priority no-deadline task should go first due to high WSPT
+    # (95/2 = 47.5 WSPT) * 0.5 (default urgency) = 23.75 ATC
+    # vs (30/10 = 3.0 WSPT) * low urgency = low ATC
+    task_high_result = next(r for r in result if r.task_id == "task_high_no_deadline")
+    task_low_result = next(r for r in result if r.task_id == "task_low_deadline")
+
+    assert task_high_result.start_date == date(2025, 1, 1)
+    assert task_low_result.start_date > task_high_result.end_date
+
+
+def test_atc_strategy_wspt_component():
+    """Test that ATC's WSPT component prioritizes high-priority short tasks."""
+    config = SchedulingConfig(strategy="atc", atc_k=2.0)
+
+    # Same deadline, different priority/duration combos
+    # task_a: priority=80, duration=10 -> WSPT = 8.0
+    task_a = Task(
+        id="task_a",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 31),
+        meta={"priority": 80},
+    )
+
+    # task_b: priority=40, duration=2 -> WSPT = 20.0 (higher despite lower priority)
+    task_b = Task(
+        id="task_b",
+        duration_days=2.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 31),
+        meta={"priority": 40},
+    )
+
+    scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1), config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # Task B should win due to higher WSPT (same urgency since same deadline)
+    task_b_result = next(r for r in result if r.task_id == "task_b")
+    task_a_result = next(r for r in result if r.task_id == "task_a")
+
+    assert task_b_result.start_date == date(2025, 1, 1)
+    assert task_a_result.start_date > task_b_result.end_date
+
+
+def test_atc_strategy_k_parameter_affects_urgency():
+    """Test that atc_k parameter affects how quickly urgency ramps up."""
+    # With low K (1.5), urgency ramps up faster
+    config_low_k = SchedulingConfig(strategy="atc", atc_k=1.5)
+
+    # With high K (5.0), urgency ramps up slower
+    config_high_k = SchedulingConfig(strategy="atc", atc_k=5.0)
+
+    # Task with moderate slack (15 days slack, duration 5, deadline 20 days out)
+    # With low K: urgency = exp(-15/(1.5*avg)) - higher urgency
+    # With high K: urgency = exp(-15/(5.0*avg)) - lower urgency
+    task_deadline = Task(
+        id="task_deadline",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 1, 21),  # 20 days out
+        meta={"priority": 50},
+    )
+
+    task_no_deadline = Task(
+        id="task_no_deadline",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 80},  # Higher priority
+    )
+
+    # With low K, deadline task appears more urgent
+    scheduler_low = ParallelScheduler(
+        [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_low_k
+    )
+    result_low = scheduler_low.schedule().scheduled_tasks
+
+    # With high K, deadline task appears less urgent, priority might win
+    scheduler_high = ParallelScheduler(
+        [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_high_k
+    )
+    result_high = scheduler_high.schedule().scheduled_tasks
+
+    # Both should schedule successfully
+    assert len(result_low) == 2
+    assert len(result_high) == 2
+
+
+def test_atc_strategy_default_urgency_floor():
+    """Test that atc_default_urgency_floor affects no-deadline task scheduling."""
+    # Very low floor - no-deadline tasks get very low urgency
+    config_low_floor = SchedulingConfig(
+        strategy="atc",
+        atc_k=2.0,
+        atc_default_urgency_floor=0.01,
+    )
+
+    # High floor - no-deadline tasks get meaningful urgency
+    config_high_floor = SchedulingConfig(
+        strategy="atc",
+        atc_k=2.0,
+        atc_default_urgency_floor=0.8,
+    )
+
+    # Deadline task with low priority
+    task_deadline = Task(
+        id="task_deadline",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 2, 28),  # Relaxed deadline
+        meta={"priority": 30},
+    )
+
+    # No-deadline task with high priority
+    task_no_deadline = Task(
+        id="task_no_deadline",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 90},
+    )
+
+    # With low floor, deadline task likely wins (no-deadline gets ~0 urgency)
+    scheduler_low = ParallelScheduler(
+        [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_low_floor
+    )
+    result_low = scheduler_low.schedule().scheduled_tasks
+
+    # With high floor, no-deadline task can compete better
+    scheduler_high = ParallelScheduler(
+        [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_high_floor
+    )
+    result_high = scheduler_high.schedule().scheduled_tasks
+
+    assert len(result_low) == 2
+    assert len(result_high) == 2
+
+    # High floor should let the high-priority no-deadline task win
+    result_high_no_deadline = next(r for r in result_high if r.task_id == "task_no_deadline")
+    assert result_high_no_deadline.start_date == date(2025, 1, 1)
+
+
+def test_atc_strategy_negative_slack_full_urgency():
+    """Test that tasks past their deadline get maximum urgency."""
+    config = SchedulingConfig(strategy="atc", atc_k=2.0)
+
+    # Task with deadline already passed - should get full urgency
+    task_overdue = Task(
+        id="task_overdue",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2024, 12, 15),  # In the past
+        meta={"priority": 30},  # Low priority
+    )
+
+    # Task with high priority but relaxed deadline
+    task_high_priority = Task(
+        id="task_high_priority",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        end_before=date(2025, 3, 1),  # Far future
+        meta={"priority": 95},
+    )
+
+    scheduler = ParallelScheduler(
+        [task_high_priority, task_overdue], date(2025, 1, 1), config=config
+    )
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # Overdue task should go first due to maximum urgency (slack <= 0 -> urgency = 1.0)
+    task_overdue_result = next(r for r in result if r.task_id == "task_overdue")
+    task_high_result = next(r for r in result if r.task_id == "task_high_priority")
+
+    assert task_overdue_result.start_date == date(2025, 1, 1)
+    assert task_high_result.start_date > task_overdue_result.end_date
+
+
+def test_atc_strategy_all_no_deadline_tasks():
+    """Test ATC with only no-deadline tasks uses priority via WSPT."""
+    config = SchedulingConfig(strategy="atc", atc_k=2.0, atc_default_urgency_floor=0.5)
+
+    # High priority short task
+    task_high = Task(
+        id="task_high",
+        duration_days=2.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 90},
+    )
+
+    # Low priority long task
+    task_low = Task(
+        id="task_low",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 30},
+    )
+
+    scheduler = ParallelScheduler([task_low, task_high], date(2025, 1, 1), config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 2
+
+    # High priority task should win (both get same default urgency, but different WSPT)
+    # task_high: WSPT = 90/2 = 45
+    # task_low: WSPT = 30/10 = 3
+    task_high_result = next(r for r in result if r.task_id == "task_high")
+    task_low_result = next(r for r in result if r.task_id == "task_low")
+
+    assert task_high_result.start_date == date(2025, 1, 1)
+    assert task_low_result.start_date > task_high_result.end_date

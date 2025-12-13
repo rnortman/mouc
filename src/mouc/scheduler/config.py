@@ -63,7 +63,7 @@ class SchedulingConfig(BaseModel):
     auto_constraint_from_timeframe: TimeframeConstraintMode = TimeframeConstraintMode.BOTH
 
     # Prioritization strategy
-    strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted"
+    strategy: str = "weighted"  # "priority_first" | "cr_first" | "weighted" | "atc"
     cr_weight: float = 10.0
     priority_weight: float = 1.0
 
@@ -71,6 +71,11 @@ class SchedulingConfig(BaseModel):
     default_priority: int = 50  # Priority for tasks without explicit priority (0-100)
     default_cr_multiplier: float = 2.0  # Multiplier for computing default CR (max_cr * multiplier)
     default_cr_floor: float = 10.0  # Minimum CR for tasks without deadlines
+
+    # ATC (Apparent Tardiness Cost) strategy parameters
+    atc_k: float = 2.0  # Lookahead parameter (1.5-3.0 typical)
+    atc_default_urgency_multiplier: float = 1.0  # Multiplier for default urgency
+    atc_default_urgency_floor: float = 0.3  # Minimum urgency for no-deadline tasks
 
     # Algorithm and pre-processor selection
     algorithm: AlgorithmConfig = AlgorithmConfig()

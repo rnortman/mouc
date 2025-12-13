@@ -1,5 +1,6 @@
 """Bounded Rollout scheduler with lookahead for better scheduling decisions."""
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING
@@ -287,11 +288,49 @@ class BoundedRolloutScheduler:
         # Use multiplier * max CR, with floor as minimum
         return max(max_cr * self.config.default_cr_multiplier, self.config.default_cr_floor)
 
+    def _compute_avg_duration(self, unscheduled_task_ids: set[str]) -> float:
+        """Compute average duration of unscheduled tasks."""
+        if not unscheduled_task_ids:
+            return 1.0
+        total = sum(self.tasks[tid].duration_days for tid in unscheduled_task_ids)
+        return total / len(unscheduled_task_ids)
+
+    def _compute_default_urgency(
+        self,
+        unscheduled_task_ids: set[str],
+        current_time: date,
+        avg_duration: float,
+    ) -> float:
+        """Compute default urgency for tasks without deadlines."""
+        min_urgency = 1.0
+        found_deadline_task = False
+
+        for task_id in unscheduled_task_ids:
+            deadline = self._computed_deadlines.get(task_id)
+            if deadline and deadline != date.max:
+                found_deadline_task = True
+                duration = self.tasks[task_id].duration_days
+                slack = (deadline - current_time).days - duration
+                if slack <= 0:
+                    urgency = 1.0
+                else:
+                    urgency = math.exp(-slack / (self.config.atc_k * avg_duration))
+                min_urgency = min(min_urgency, urgency)
+
+        if not found_deadline_task:
+            return self.config.atc_default_urgency_floor
+
+        return max(
+            min_urgency * self.config.atc_default_urgency_multiplier,
+            self.config.atc_default_urgency_floor,
+        )
+
     def _compute_sort_key(
         self,
         task_id: str,
         current_time: date,
         relaxed_cr: float,
+        unscheduled_task_ids: set[str] | None = None,
     ) -> tuple[float, ...] | tuple[float, float, str] | tuple[float, str]:
         """Compute sort key for task prioritization.
 
@@ -299,6 +338,7 @@ class BoundedRolloutScheduler:
             task_id: The task to compute key for
             current_time: Current scheduling time
             relaxed_cr: CR to use for tasks without deadlines (from _compute_relaxed_cr)
+            unscheduled_task_ids: Set of unscheduled task IDs (required for ATC strategy)
         """
         task = self.tasks[task_id]
         priority = self._computed_priorities.get(task_id, self.config.default_priority)
@@ -318,6 +358,28 @@ class BoundedRolloutScheduler:
         if self.config.strategy == "weighted":
             score = self.config.cr_weight * cr + self.config.priority_weight * (100 - priority)
             return (score, task_id)
+        if self.config.strategy == "atc":
+            if unscheduled_task_ids is None:
+                msg = "ATC strategy requires unscheduled_task_ids parameter"
+                raise ValueError(msg)
+
+            avg_duration = self._compute_avg_duration(unscheduled_task_ids)
+            wspt = priority / max(task.duration_days, 0.1)
+
+            if deadline and deadline != date.max:
+                slack_days = (deadline - current_time).days - task.duration_days
+                if slack_days <= 0:
+                    urgency = 1.0
+                else:
+                    urgency = math.exp(-slack_days / (self.config.atc_k * avg_duration))
+            else:
+                urgency = self._compute_default_urgency(
+                    unscheduled_task_ids, current_time, avg_duration
+                )
+
+            atc_score = wspt * urgency
+            return (-atc_score, task_id)
+
         msg = f"Unknown scheduling strategy: {self.config.strategy}"
         raise ValueError(msg)
 
@@ -643,7 +705,9 @@ class BoundedRolloutScheduler:
             # Sort by priority
             relaxed_cr = self._compute_relaxed_cr(state.unscheduled, state.current_time)
             eligible.sort(
-                key=lambda tid: self._compute_sort_key(tid, state.current_time, relaxed_cr)
+                key=lambda tid: self._compute_sort_key(
+                    tid, state.current_time, relaxed_cr, state.unscheduled
+                )
             )
 
             # Try to schedule
@@ -913,7 +977,9 @@ class BoundedRolloutScheduler:
                     eligible.append(task_id)
 
             relaxed_cr = self._compute_relaxed_cr(unscheduled, current_time)
-            eligible.sort(key=lambda tid: self._compute_sort_key(tid, current_time, relaxed_cr))
+            eligible.sort(
+                key=lambda tid: self._compute_sort_key(tid, current_time, relaxed_cr, unscheduled)
+            )
 
             # Try to schedule each eligible task
             scheduled_any = False

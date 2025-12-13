@@ -184,7 +184,7 @@ This ensures no-deadline tasks are scheduled after deadline-driven work of simil
 
 ### Scheduling Strategies
 
-The scheduler combines CR and Priority using one of three strategies (currently hardcoded to `weighted`; configuration planned for future):
+The scheduler combines CR and Priority using one of four configurable strategies:
 
 **1. Weighted (default):**
 ```
@@ -208,6 +208,36 @@ sort_key = (CR, -priority, task_id)
 ```
 - CR dominates, priority only breaks ties
 - Use when deadlines are critical
+
+**4. ATC (Apparent Tardiness Cost):**
+```
+ATC = (priority / duration) × exp(-max(0, slack) / (K × avg_duration))
+      ├── WSPT term ──────┤   ├── Urgency multiplier (0-1) ────────┤
+```
+- Combines weighted shortest processing time (WSPT) with exponential deadline urgency
+- Higher ATC = more urgent (negated for sorting)
+- **WSPT term** (`priority / duration`): High-priority short tasks score highest
+- **Urgency multiplier**: Decays exponentially as slack increases
+  - `slack ≤ 0` (deadline imminent/passed): urgency = 1.0 (maximum)
+  - `slack > 0`: urgency = exp(-slack / (K × avg_duration))
+- **K parameter** (`atc_k`): Controls urgency ramp-up speed
+  - K = 1.5: Aggressive, urgency kicks in early
+  - K = 3.0: Relaxed, only urgent near deadline
+- **No-deadline tasks**: Get a computed default urgency (see below)
+- Use when you need non-linear deadline urgency that ramps up as deadlines approach
+
+**Default urgency for no-deadline tasks:**
+
+Tasks without deadlines need an urgency value to compete with deadline-driven tasks. This is computed similarly to `default_cr`:
+
+```
+default_urgency = max(min_urgency × atc_default_urgency_multiplier, atc_default_urgency_floor)
+```
+
+Where `min_urgency` is the **lowest** urgency among deadline-driven tasks (the most relaxed task with a deadline). This ensures no-deadline tasks get urgency relative to the current project state:
+- If deadlines are tight (high min urgency), no-deadline tasks get higher urgency
+- If deadlines are relaxed (low min urgency), no-deadline tasks get lower urgency
+- The floor ensures no-deadline tasks always have some urgency (default 0.3)
 
 ### Eligible Tasks
 
@@ -411,12 +441,16 @@ The scheduler supports configurable prioritization strategies via `mouc_config.y
 
 ```yaml
 scheduler:
-  strategy: "weighted"       # "priority_first" | "cr_first" | "weighted"
+  strategy: "weighted"       # "priority_first" | "cr_first" | "weighted" | "atc"
   cr_weight: 10.0           # Weight for critical ratio in weighted strategy
   priority_weight: 1.0      # Weight for priority in weighted strategy
   default_priority: 50      # Default priority for tasks without metadata (0-100)
   default_cr_multiplier: 2.0  # Multiplier for computing default CR
   default_cr_floor: 10.0    # Minimum default CR for no-deadline tasks
+  # ATC strategy parameters (only used when strategy: atc)
+  atc_k: 2.0                         # Lookahead parameter (1.5-3.0 typical)
+  atc_default_urgency_multiplier: 1.0  # Multiplier for default urgency
+  atc_default_urgency_floor: 0.3     # Minimum urgency for no-deadline tasks
 ```
 
 **Default values** (if not specified):
@@ -426,6 +460,9 @@ scheduler:
 - `default_priority: 50`
 - `default_cr_multiplier: 2.0`
 - `default_cr_floor: 10.0`
+- `atc_k: 2.0`
+- `atc_default_urgency_multiplier: 1.0`
+- `atc_default_urgency_floor: 0.3`
 
 These parameters control how CR and Priority are combined to determine task urgency.
 

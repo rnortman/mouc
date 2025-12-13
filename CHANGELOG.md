@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - `scheduler.auto_constraint_from_timeframe` config: control whether timeframe creates scheduling constraints (`both`, `start`, `end`, `none`)
+- `scheduler.strategy: atc` - Apparent Tardiness Cost scheduling strategy with exponential deadline urgency
 
 ## [0.6.4] - 2025-12-11
 
