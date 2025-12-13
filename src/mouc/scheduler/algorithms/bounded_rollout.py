@@ -437,6 +437,40 @@ class BoundedRolloutScheduler:
 
         return (best_resource, best_start, best_completion)
 
+    def _find_best_available_now_resource_for_task(
+        self,
+        task: Task,
+        current_time: date,
+        resource_schedules: dict[str, ResourceSchedule],
+    ) -> tuple[str | None, date | None]:
+        """Find the best resource that is available NOW, by completion time.
+
+        Returns (resource_name, completion_date) or (None, None) if no resource available now.
+        """
+        best_resource: str | None = None
+        best_completion: date | None = None
+
+        candidates = self._get_candidate_resources(task)
+
+        for resource_name in candidates:
+            result = self._evaluate_resource_for_task(
+                resource_name, task, current_time, resource_schedules
+            )
+            if result is None:
+                continue
+
+            available_at, completion = result
+
+            # Only consider resources available NOW
+            if available_at != current_time:
+                continue
+
+            if best_completion is None or completion < best_completion:
+                best_resource = resource_name
+                best_completion = completion
+
+        return (best_resource, best_completion)
+
     def _estimate_task_completion(
         self,
         dep_id: str,
@@ -559,8 +593,9 @@ class BoundedRolloutScheduler:
             if eligible_date < horizon:
                 upcoming.append((other_id, other_priority, other_cr, eligible_date))
 
-        # Sort by CR (ascending, more urgent first) then priority (descending)
-        upcoming.sort(key=lambda x: (x[2], -x[1], x[3]))
+        # Sort using the configured scheduling strategy
+        relaxed_cr = self._compute_relaxed_cr(state.unscheduled, state.current_time)
+        upcoming.sort(key=lambda x: self._compute_sort_key(x[0], state.current_time, relaxed_cr))
         return upcoming
 
     def _should_trigger_rollout(
@@ -821,20 +856,18 @@ class BoundedRolloutScheduler:
 
         # Auto-assignment
         if task.resource_spec and self.resource_config:
-            best_resource, best_start, best_completion = self._find_best_resource_for_task(
+            # In simulation, use the best resource available NOW (greedy)
+            now_resource, now_completion = self._find_best_available_now_resource_for_task(
                 task, state.current_time, state.resource_schedules
             )
 
-            if best_resource is None or best_start is None or best_completion is None:
+            if now_resource is None or now_completion is None:
                 return False
 
-            if best_start != state.current_time:
-                return False
+            task.resources = [(now_resource, 1.0)]
+            end_date = now_completion
 
-            task.resources = [(best_resource, 1.0)]
-            end_date = best_completion
-
-            state.resource_schedules[best_resource].add_busy_period(state.current_time, end_date)
+            state.resource_schedules[now_resource].add_busy_period(state.current_time, end_date)
             state.scheduled[task_id] = (state.current_time, end_date)
             state.unscheduled.remove(task_id)
             state.result.append(
@@ -843,7 +876,7 @@ class BoundedRolloutScheduler:
                     start_date=state.current_time,
                     end_date=end_date,
                     duration_days=task.duration_days,
-                    resources=[best_resource],
+                    resources=[now_resource],
                 )
             )
             return True
@@ -1029,11 +1062,84 @@ class BoundedRolloutScheduler:
                         continue
 
                     if best_start != current_time:
-                        logger.checks(
-                            f"    Skipping {task_id}: Best resource {best_resource} "
-                            f"not available until {best_start}"
+                        # Best resource isn't available now - use rollout to decide:
+                        # Scenario A: Take the best available-now resource
+                        # Scenario B: Skip this task, let the next task take the available resource
+                        now_resource, now_completion = (
+                            self._find_best_available_now_resource_for_task(
+                                task, current_time, resource_schedules
+                            )
                         )
-                        continue
+
+                        if now_resource is None or now_completion is None:
+                            # No resource available now at all, must skip
+                            logger.checks(
+                                f"    Skipping {task_id}: Best resource {best_resource} "
+                                f"not available until {best_start}, no alternative available now"
+                            )
+                            continue
+
+                        # Run rollout to compare taking now vs waiting
+                        state = SchedulerState(
+                            scheduled=dict(scheduled),
+                            unscheduled=set(unscheduled),
+                            resource_schedules={
+                                name: sched.copy() for name, sched in resource_schedules.items()
+                            },
+                            current_time=current_time,
+                            result=list(result),
+                        )
+
+                        task_cr = self._compute_task_cr(task_id, current_time)
+
+                        logger.checks(
+                            f"    Resource choice rollout for {task_id} (pri={priority}, CR={task_cr:.2f}): "
+                            f"take {now_resource} now (completes {now_completion}) vs "
+                            f"wait for {best_resource} (available {best_start}, completes {best_completion})"
+                        )
+
+                        # Save original task resources before simulation
+                        original_resources = list(task.resources) if task.resources else []
+
+                        # Scenario A: Take the now-available resource
+                        state_a = state.copy()
+                        task.resources = [(now_resource, 1.0)]
+                        self._try_schedule_task(task_id, task, state_a)
+                        _, score_a = self._run_rollout_simulation(
+                            state_a, now_completion, skip_task_id=None
+                        )
+
+                        # Restore task resources before scenario B
+                        task.resources = original_resources
+
+                        # Scenario B: Skip this task, let next task take the resource
+                        state_b = state.copy()
+                        _, score_b = self._run_rollout_simulation(
+                            state_b, best_start, skip_task_id=task_id
+                        )
+
+                        # Restore task resources after simulation
+                        task.resources = original_resources
+
+                        logger.checks(
+                            f"    Resource choice scores: take_now={score_a:.2f}, wait={score_b:.2f}"
+                        )
+
+                        if score_a <= score_b:
+                            # Take the now-available resource
+                            logger.changes(
+                                f"  Rollout: {task_id} taking {now_resource} now instead of waiting for {best_resource}"
+                            )
+                            best_resource = now_resource
+                            best_completion = now_completion
+                            # Fall through to schedule the task below
+                        else:
+                            # Wait for the better resource
+                            logger.changes(
+                                f"  Rollout: {task_id} waiting for {best_resource} (available {best_start})"
+                            )
+                            skip_tasks.add(task_id)
+                            continue
 
                     # Check if rollout is warranted
                     state = SchedulerState(

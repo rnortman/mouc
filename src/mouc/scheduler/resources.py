@@ -85,17 +85,27 @@ class ResourceSchedule:
         Returns:
             Next available date (may be from_date itself if not currently busy)
         """
-        for busy_start, busy_end in self.busy_periods:
-            # If we're before or within a busy period that covers from_date
-            if busy_end >= from_date:
-                # If from_date is before the busy period, it's available now
-                if from_date < busy_start:
-                    return from_date
-                # Otherwise, from_date is within busy period, next available is after it
-                return busy_end + timedelta(days=1)
+        candidate = from_date
 
-        # No busy periods cover or follow from_date
-        return from_date
+        # Keep checking until we find a date not within any busy period
+        while True:
+            found_conflict = False
+            for busy_start, busy_end in self.busy_periods:
+                # Skip busy periods that end before our candidate
+                if busy_end < candidate:
+                    continue
+
+                # If candidate is within this busy period, move past it
+                if candidate >= busy_start:
+                    candidate = busy_end + timedelta(days=1)
+                    found_conflict = True
+                    break  # Restart the loop with new candidate
+
+                # Busy period starts after candidate, so candidate is available
+                break
+
+            if not found_conflict:
+                return candidate
 
     def _find_next_busy_period(self, current: date) -> tuple[date | None, date | None]:
         """Find the next busy period that overlaps or starts at/after current date."""

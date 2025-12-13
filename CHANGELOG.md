@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- `next_available_time` now correctly handles consecutive/overlapping busy periods
+- Bounded rollout scheduler uses configured strategy for urgent task sorting
+- Bounded rollout scheduler uses rollout for resource choice when best resource unavailable
+
 ### Added
 - `scheduler.algorithm.type: cpsat` - OR-Tools CP-SAT optimal scheduler
 - `scheduler.preprocessor.type: auto` - Default preprocessor skips backward pass for CP-SAT (global optimizer doesn't need it)

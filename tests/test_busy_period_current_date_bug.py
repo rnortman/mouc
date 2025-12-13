@@ -138,3 +138,86 @@ def test_calculate_completion_time_multiple_busy_periods():
         f"Should complete on {expected} after working around both busy periods, "
         f"but got {completion}"
     )
+
+
+# =============================================================================
+# Tests for next_available_time with consecutive/overlapping busy periods
+# =============================================================================
+
+
+def test_next_available_time_consecutive_busy_periods():
+    """Test that next_available_time handles consecutive busy periods.
+
+    Bug: The implementation returns immediately after finding the first
+    busy period that covers from_date, but doesn't check if the resulting date
+    falls within another busy period.
+
+    Scenario:
+    - Busy period 1: Jan 1-10
+    - Busy period 2: Jan 11-15
+    - Query from: Jan 5 (inside period 1)
+
+    Expected: Jan 16 (after both periods)
+    Bug returns: Jan 11 (which is inside period 2!)
+    """
+    schedule = ResourceSchedule()
+    schedule.add_busy_period(date(2025, 1, 1), date(2025, 1, 10))
+    schedule.add_busy_period(date(2025, 1, 11), date(2025, 1, 15))
+
+    result = schedule.next_available_time(date(2025, 1, 5))
+
+    expected = date(2025, 1, 16)
+    assert result == expected, (
+        f"Expected {expected} (after both busy periods), but got {result}. "
+        "The bug returns Jan 11 which is inside the second busy period."
+    )
+
+
+def test_next_available_time_overlapping_busy_periods():
+    """Test that next_available_time handles overlapping busy periods.
+
+    Scenario:
+    - Busy period 1: Jan 1-15
+    - Busy period 2: Jan 10-20 (overlaps with period 1)
+    - Query from: Jan 5 (inside period 1)
+
+    Expected: Jan 21 (after the extended busy range)
+    Bug returns: Jan 16 (which is inside period 2!)
+    """
+    schedule = ResourceSchedule()
+    schedule.add_busy_period(date(2025, 1, 1), date(2025, 1, 15))
+    schedule.add_busy_period(date(2025, 1, 10), date(2025, 1, 20))
+
+    result = schedule.next_available_time(date(2025, 1, 5))
+
+    expected = date(2025, 1, 21)
+    assert result == expected, (
+        f"Expected {expected} (after overlapping busy periods), but got {result}. "
+        "The bug doesn't check if the candidate date falls in another busy period."
+    )
+
+
+def test_next_available_time_three_consecutive_periods():
+    """Test with three consecutive busy periods to ensure iterative checking.
+
+    Scenario:
+    - Period 1: Jan 1-5
+    - Period 2: Jan 6-10
+    - Period 3: Jan 11-15
+    - Query from: Jan 3
+
+    Expected: Jan 16
+    Bug returns: Jan 6 (inside period 2)
+    """
+    schedule = ResourceSchedule()
+    schedule.add_busy_period(date(2025, 1, 1), date(2025, 1, 5))
+    schedule.add_busy_period(date(2025, 1, 6), date(2025, 1, 10))
+    schedule.add_busy_period(date(2025, 1, 11), date(2025, 1, 15))
+
+    result = schedule.next_available_time(date(2025, 1, 3))
+
+    expected = date(2025, 1, 16)
+    assert result == expected, (
+        f"Expected {expected} (after all three periods), but got {result}. "
+        "The bug only skips the first busy period."
+    )
