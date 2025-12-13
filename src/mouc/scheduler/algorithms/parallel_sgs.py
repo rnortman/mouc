@@ -384,12 +384,25 @@ class ParallelScheduler:
             self.config.atc_default_urgency_floor,
         )
 
+    def _compute_atc_params(
+        self, unscheduled: set[str], current_time: date
+    ) -> tuple[float, float] | None:
+        """Compute ATC parameters once per scheduling step for performance.
+
+        Returns (avg_duration, default_urgency) tuple if strategy is ATC, else None.
+        """
+        if self.config.strategy != "atc":
+            return None
+        avg_duration = self._compute_avg_duration(unscheduled)
+        default_urgency = self._compute_default_urgency(unscheduled, current_time, avg_duration)
+        return (avg_duration, default_urgency)
+
     def _compute_sort_key(
         self,
         task_id: str,
         current_time: date,
         default_cr: float,
-        unscheduled_task_ids: set[str] | None = None,
+        atc_params: tuple[float, float] | None = None,
     ) -> tuple[float, ...] | tuple[float, float, str] | tuple[float, str]:
         """Compute sort key for task prioritization.
 
@@ -399,7 +412,8 @@ class ParallelScheduler:
             task_id: Task ID to compute key for
             current_time: Current scheduling time
             default_cr: Default CR for tasks without deadlines
-            unscheduled_task_ids: Set of unscheduled task IDs (required for ATC strategy)
+            atc_params: Tuple of (avg_duration, default_urgency) for ATC strategy,
+                precomputed once per scheduling step for performance.
 
         Returns:
             Tuple suitable for sorting (lower = more urgent)
@@ -428,11 +442,11 @@ class ParallelScheduler:
         if self.config.strategy == "atc":
             # ATC = (w/p) * exp(-max(0, slack) / (K * p_avg))
             # Higher ATC = more urgent, so negate for sorting (lower = more urgent)
-            if unscheduled_task_ids is None:
-                msg = "ATC strategy requires unscheduled_task_ids parameter"
+            if atc_params is None:
+                msg = "ATC strategy requires atc_params parameter"
                 raise ValueError(msg)
 
-            avg_duration = self._compute_avg_duration(unscheduled_task_ids)
+            avg_duration, default_urgency = atc_params
             wspt = priority / max(task.duration_days, 0.1)
 
             if deadline and deadline != date.max:
@@ -442,10 +456,8 @@ class ParallelScheduler:
                 else:
                     urgency = math.exp(-slack_days / (self.config.atc_k * avg_duration))
             else:
-                # No deadline: compute default urgency relative to most relaxed deadline task
-                urgency = self._compute_default_urgency(
-                    unscheduled_task_ids, current_time, avg_duration
-                )
+                # No deadline: use precomputed default urgency
+                urgency = default_urgency
 
             atc_score = wspt * urgency
             return (-atc_score, task_id)  # Negate: higher ATC = schedule first
@@ -659,10 +671,11 @@ class ParallelScheduler:
 
             # Compute adaptive default CR for this time step
             default_cr = self._compute_default_cr(unscheduled, current_time)
+            atc_params = self._compute_atc_params(unscheduled, current_time)
 
             # Sort by configured strategy (CR, priority, or weighted combination)
             eligible.sort(
-                key=lambda tid: self._compute_sort_key(tid, current_time, default_cr, unscheduled)
+                key=lambda tid: self._compute_sort_key(tid, current_time, default_cr, atc_params)
             )
 
             if debug_enabled():
@@ -690,9 +703,7 @@ class ParallelScheduler:
                     else:
                         cr_str = f"{default_cr:.2f} (default)"
 
-                    sort_key = self._compute_sort_key(
-                        task_id, current_time, default_cr, unscheduled
-                    )
+                    sort_key = self._compute_sort_key(task_id, current_time, default_cr, atc_params)
                     logger.debug(
                         f"    {task_id}: priority={priority}, CR={cr_str}, "
                         f"sort_key={sort_key}, duration={task.duration_days}d"
