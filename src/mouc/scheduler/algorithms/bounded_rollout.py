@@ -595,7 +595,11 @@ class BoundedRolloutScheduler:
 
         # Sort using the configured scheduling strategy
         relaxed_cr = self._compute_relaxed_cr(state.unscheduled, state.current_time)
-        upcoming.sort(key=lambda x: self._compute_sort_key(x[0], state.current_time, relaxed_cr))
+        upcoming.sort(
+            key=lambda x: self._compute_sort_key(
+                x[0], state.current_time, relaxed_cr, state.unscheduled
+            )
+        )
         return upcoming
 
     def _should_trigger_rollout(

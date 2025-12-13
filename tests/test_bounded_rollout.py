@@ -716,3 +716,54 @@ def test_expected_tardiness_penalty_affects_rollout_decision():
     assert task_a_decision.decision == "skip"
     # Schedule score should be much higher due to expected tardiness penalty
     assert task_a_decision.schedule_score > task_a_decision.skip_score
+
+
+def test_bounded_rollout_with_atc_strategy():
+    """Test that bounded rollout works with ATC strategy.
+
+    This test ensures all call sites of _compute_sort_key pass the
+    unscheduled_task_ids parameter required by ATC.
+    """
+    # Task C: blocker for B, uses Bob
+    task_c = Task(
+        id="task_c",
+        duration_days=1.0,
+        resources=[("bob", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    # Task A: low priority, no deadline
+    task_a = Task(
+        id="task_a",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 30},
+    )
+
+    # Task B: high priority, depends on C, has deadline
+    task_b = Task(
+        id="task_b",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=dep_list("task_c"),
+        end_before=date(2025, 1, 25),
+        meta={"priority": 90},
+    )
+
+    config = SchedulingConfig(
+        strategy="atc",
+        atc_k=2.0,
+        atc_default_urgency_floor=0.3,
+        rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
+    )
+    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    # Should schedule all 3 tasks without error
+    assert len(result) == 3
+
+    # Verify tasks are scheduled
+    task_ids = {r.task_id for r in result}
+    assert task_ids == {"task_a", "task_b", "task_c"}
