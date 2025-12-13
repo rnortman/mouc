@@ -1982,6 +1982,39 @@ class TestTimeframeScheduling:
         # With constraints disabled, task should start at current_date, not wait for Q2
         assert task_result.start_date == base_date
 
+    def test_auto_constraint_from_timeframe_none_no_deadline_in_gantt(
+        self, base_date: date
+    ) -> None:
+        """Test that timeframe deadline milestone is not shown when constraints disabled."""
+        metadata = FeatureMapMetadata()
+
+        # Task that would be "late" relative to its timeframe
+        task = Entity(
+            type="capability",
+            id="task1",
+            name="Long Task",
+            description="Would miss Q1 deadline if it were a constraint",
+            meta={
+                "effort": "20w",  # Way too long for Q1
+                "resources": ["alice"],
+                "timeframe": "2025q1",  # Q1 ends March 31
+            },
+        )
+
+        entities = [task]
+        feature_map = FeatureMap(metadata=metadata, entities=entities)
+
+        config = SchedulingConfig(auto_constraint_from_timeframe=TimeframeConstraintMode.NONE)
+        scheduler = GanttScheduler(
+            feature_map, start_date=base_date, current_date=base_date, scheduler_config=config
+        )
+        result = scheduler.schedule()
+        mermaid = scheduler.generate_mermaid(result)
+
+        # With constraints disabled, there should be no deadline milestone
+        assert "Deadline" not in mermaid
+        assert ":milestone," not in mermaid
+
     def test_auto_constraint_from_timeframe_start_only(self, base_date: date) -> None:
         """Test that auto_constraint_from_timeframe=start only sets start_after."""
         metadata = FeatureMapMetadata()

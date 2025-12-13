@@ -16,6 +16,7 @@ from .scheduler import (
     ScheduleAnnotations,
     SchedulingConfig,
     SchedulingService,
+    TimeframeConstraintMode,
     parse_timeframe,
 )
 from .styling import (
@@ -549,9 +550,16 @@ class GanttScheduler:
         """Get task deadline from metadata."""
         if gantt_meta.end_before is not None:
             return self._parse_date(gantt_meta.end_before)
+        # Only use timeframe as deadline if config allows end constraints
         if gantt_meta.timeframe is not None:
-            _, deadline_date = parse_timeframe(gantt_meta.timeframe)
-            return deadline_date
+            tf_mode = (
+                self.scheduler_config.auto_constraint_from_timeframe
+                if self.scheduler_config
+                else TimeframeConstraintMode.BOTH
+            )
+            if tf_mode in (TimeframeConstraintMode.BOTH, TimeframeConstraintMode.END):
+                _, deadline_date = parse_timeframe(gantt_meta.timeframe)
+                return deadline_date
         return None
 
     def _add_deadline_milestone(
