@@ -65,6 +65,7 @@ class CPSATConfig(BaseModel):
     priority_weight: float = 1.0  # Weight for priority-based completion time
     earliness_weight: float = 0.0  # Reward for slack before deadlines (0 = disabled)
     random_seed: int = 42
+    use_greedy_hints: bool = True  # Run greedy scheduler to seed CP-SAT with hints
 
 
 class SchedulingConfig(BaseModel):

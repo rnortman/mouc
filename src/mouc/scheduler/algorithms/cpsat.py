@@ -10,6 +10,7 @@ from mouc.logger import get_logger
 from ..config import SchedulingConfig
 from ..core import AlgorithmResult, PreProcessResult, ScheduledTask, Task
 from ..resources import ResourceSchedule
+from .parallel_sgs import ParallelScheduler
 
 logger = get_logger()
 
@@ -138,8 +139,15 @@ class CPSATScheduler:
                 algorithm_metadata={"algorithm": "cpsat", "status": "no_tasks"},
             )
 
+        # Run greedy for hints and tighter horizon
+        greedy_result = self._run_greedy_for_hints(tasks_to_schedule)
+
         # Calculate planning horizon
-        horizon = self._calculate_horizon(tasks_to_schedule, fixed_tasks)
+        if greedy_result and greedy_result.scheduled_tasks:
+            max_end = max(t.end_date for t in greedy_result.scheduled_tasks)
+            horizon = (max_end - self.current_date).days + 30
+        else:
+            horizon = self._calculate_horizon(tasks_to_schedule, fixed_tasks)
 
         # Build and solve the model
         model = cp_model.CpModel()
@@ -148,6 +156,11 @@ class CPSATScheduler:
         self._add_resource_constraints(model, task_vars, fixed_tasks)
         self._add_boundary_constraints(model, task_vars)
         self._set_objective(model, task_vars)
+
+        # Add greedy hints
+        hint_count = 0
+        if greedy_result:
+            hint_count = self._add_greedy_hints(model, task_vars, greedy_result)
 
         # Solve with deterministic settings
         solver = cp_model.CpSolver()
@@ -181,6 +194,8 @@ class CPSATScheduler:
                 "status": status_name,
                 "objective_value": solver.ObjectiveValue() if status_name == "OPTIMAL" else None,
                 "solve_time_seconds": solver.WallTime(),
+                "greedy_seeded": greedy_result is not None,
+                "hint_count": hint_count,
             },
         )
 
@@ -258,6 +273,76 @@ class CPSATScheduler:
         # Add buffer for scheduling flexibility
         days_from_start = (max_end - self.current_date).days
         return max(days_from_start + 60, total_duration * 2, 365)
+
+    def _run_greedy_for_hints(self, tasks_to_schedule: list[Task]) -> AlgorithmResult | None:
+        """Run greedy scheduler to get hints for CP-SAT."""
+        if not self.config.cpsat.use_greedy_hints:
+            return None
+
+        try:
+            # Make copies of tasks since greedy may modify them in-place
+            # (e.g., setting resources for auto-assigned tasks)
+            task_copies = [
+                Task(
+                    id=t.id,
+                    duration_days=t.duration_days,
+                    resources=list(t.resources),
+                    dependencies=list(t.dependencies),
+                    resource_spec=t.resource_spec,
+                    start_on=t.start_on,
+                    end_on=t.end_on,
+                    start_after=t.start_after,
+                    end_before=t.end_before,
+                    meta=dict(t.meta) if t.meta else None,
+                )
+                for t in tasks_to_schedule
+            ]
+            greedy = ParallelScheduler(
+                task_copies,
+                self.current_date,
+                resource_config=self.resource_config,
+                completed_task_ids=self.completed_task_ids,
+                config=self.config,
+                global_dns_periods=self.global_dns_periods,
+                preprocess_result=self.preprocess_result,
+            )
+            return greedy.schedule()
+        except ValueError:
+            # Greedy scheduler may fail on tasks it can't handle (e.g., no resources)
+            # Fall back to no hints
+            logger.debug("Greedy scheduler failed, proceeding without hints")
+            return None
+
+    def _add_greedy_hints(
+        self,
+        model: cp_model.CpModel,
+        task_vars: TaskVarsDict,
+        greedy_result: AlgorithmResult,
+    ) -> int:
+        """Add hints from greedy solution. Returns number of hints added."""
+        greedy_by_id = {t.task_id: t for t in greedy_result.scheduled_tasks}
+        hint_count = 0
+
+        for task_id, vars_dict in task_vars.items():
+            if task_id not in greedy_by_id:
+                continue
+
+            greedy_task = greedy_by_id[task_id]
+            start_offset = self._date_to_offset(greedy_task.start_date)
+            end_offset = self._date_to_offset(greedy_task.end_date)
+
+            model.add_hint(vars_dict["start"], start_offset)
+            model.add_hint(vars_dict["end"], end_offset)
+            hint_count += 2
+
+            # Hint resource selection for auto-assignment
+            if vars_dict.get("resource_presences") and greedy_task.resources:
+                selected = greedy_task.resources[0]
+                for resource, presence_var in vars_dict["resource_presences"].items():
+                    model.add_hint(presence_var, 1 if resource == selected else 0)
+                    hint_count += 1
+
+        return hint_count
 
     def _create_fixed_scheduled_task(self, task: Task) -> ScheduledTask:
         """Create a ScheduledTask for a fixed task (start_on or end_on)."""

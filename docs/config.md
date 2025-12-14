@@ -368,6 +368,7 @@ Valid values:
 - **`earliness_weight`** (default: `0.0`): Reward for finishing before deadlines (slack). Set to 10-50 to encourage buffer time.
 - **`priority_weight`** (default: `1.0`): Weight for priority-based completion time optimization
 - **`random_seed`** (default: `42`): Fixed seed for deterministic results
+- **`use_greedy_hints`** (default: `true`): Run greedy scheduler first to seed CP-SAT with hints and compute a tighter horizon
 
 **Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
 

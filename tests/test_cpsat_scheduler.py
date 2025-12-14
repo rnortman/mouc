@@ -725,3 +725,91 @@ class TestDNSSplitting:
         # Works 1-3, DNS 4-5, works 6-7 → ends day 8
         assert tasks_by_id["task_a"].end_date == date(2025, 1, 8)
         assert tasks_by_id["task_b"].end_date == date(2025, 1, 8)
+
+
+class TestGreedyHints:
+    """Tests for greedy scheduler hints."""
+
+    def test_greedy_hints_enabled_by_default(self):
+        """Verify use_greedy_hints defaults to True."""
+        config = CPSATConfig()
+        assert config.use_greedy_hints is True
+
+    def test_greedy_hints_disabled(self):
+        """With use_greedy_hints=False, metadata shows no hints."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=False))
+        scheduler = CPSATScheduler([task], date(2025, 1, 1), config=config)
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is False
+        assert result.algorithm_metadata["hint_count"] == 0
+
+    def test_greedy_hints_enabled(self):
+        """With use_greedy_hints=True, hints are added."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler([task], date(2025, 1, 1), config=config)
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × 2 hints (start + end) = 2
+        assert result.algorithm_metadata["hint_count"] == 2
+
+    def test_metadata_includes_hint_info(self):
+        """Check algorithm_metadata has greedy_seeded and hint_count."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        scheduler = CPSATScheduler([task], date(2025, 1, 1))
+        result = scheduler.schedule()
+
+        assert "greedy_seeded" in result.algorithm_metadata
+        assert "hint_count" in result.algorithm_metadata
+
+    def test_auto_assignment_hints_include_resource(self):
+        """Auto-assignment tasks should hint resource selection."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[],
+            resource_spec="alice|bob",
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(name="alice"),
+                ResourceDefinition(name="bob"),
+            ]
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task], date(2025, 1, 1), resource_config=resource_config, config=config
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × (2 start/end hints + 2 resource presence hints) = 4
+        assert result.algorithm_metadata["hint_count"] == 4

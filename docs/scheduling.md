@@ -730,6 +730,7 @@ scheduler:
     earliness_weight: 0.0       # Reward for slack before deadlines
     priority_weight: 1.0        # Weight for priority optimization
     random_seed: 42             # Seed for deterministic results
+    use_greedy_hints: true      # Seed solver with greedy solution
 ```
 
 **Parameters:**
@@ -741,6 +742,7 @@ scheduler:
 | `earliness_weight` | 0.0 | Reward multiplier for finishing before deadlines (slack) |
 | `priority_weight` | 1.0 | Multiplier for priority-based completion time optimization |
 | `random_seed` | 42 | Fixed seed for reproducible results |
+| `use_greedy_hints` | true | Run greedy scheduler first to seed CP-SAT with hints |
 
 ### Objective Function
 
@@ -835,6 +837,29 @@ CP-SAT produces **deterministic results** via:
 - Fixed random seed for tie-breaking
 
 The same inputs always produce the same schedule.
+
+### Greedy Hints
+
+By default (`use_greedy_hints: true`), CP-SAT runs the greedy Parallel SGS scheduler first to:
+
+1. **Compute a tighter horizon**: Uses greedy makespan + 30 days instead of heuristic estimates. Smaller horizons mean faster solving.
+
+2. **Provide solution hints**: Seeds the solver with start times, end times, and resource selections from the greedy solution via `model.add_hint()`.
+
+**Benefits:**
+- Solver immediately has a feasible solution
+- Better upper bound for pruning (branches worse than the hint are cut early)
+- Faster time to first solution and often faster to optimal
+
+**When to disable:**
+- If greedy and optimal solutions differ significantly (hints may slow search)
+- For benchmarking raw CP-SAT performance
+
+```yaml
+scheduler:
+  cpsat:
+    use_greedy_hints: false  # Disable greedy seeding
+```
 
 ### Solution Status
 
