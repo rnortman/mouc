@@ -351,8 +351,8 @@ class TestDeadlineAdherence:
 class TestFractionalResources:
     """Fractional resource allocation tests."""
 
-    def test_fractional_allocation_concurrent(self):
-        """Two 0.5 allocation tasks can run concurrently on same resource."""
+    def test_fractional_allocation_no_concurrent(self):
+        """Tasks on same resource cannot run concurrently (allocation doesn't enable sharing)."""
         task_a = Task(
             id="task_a",
             duration_days=5.0,
@@ -375,8 +375,8 @@ class TestFractionalResources:
         a = tasks_by_id["task_a"]
         b = tasks_by_id["task_b"]
 
-        # Both should start at the same time (can run in parallel with 0.5 each)
-        assert a.start_date == b.start_date == date(2025, 1, 1)
+        # Tasks must not overlap - one must finish before the other starts
+        assert a.end_date <= b.start_date or b.end_date <= a.start_date
 
 
 class TestDeterminism:

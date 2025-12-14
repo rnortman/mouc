@@ -369,7 +369,7 @@ When a task requires multiple resources (e.g., `resources: [alice, bob]`), all r
 
 Resources can be partially allocated (e.g., `resources: [alice:0.5]` for 50% allocation). The task duration is adjusted accordingly:
 - If a 10-day task has 50% of Alice, it takes 20 calendar days
-- During those 20 days, Alice is 50% busy and can do other 50% work
+- During those 20 days, Alice is fully blocked from other tasks
 
 ### Unassigned Work
 
@@ -788,12 +788,11 @@ minimize: tardiness_weight × tardiness
 
 ### Resource Modeling
 
-CP-SAT uses **cumulative constraints** to model resources:
+CP-SAT uses **no-overlap constraints** to model resources:
 
-- Each resource has capacity 100 (representing 1.0 or 100%)
-- Task allocations are scaled: 0.5 → 50, 0.25 → 25
-- Multiple fractional tasks can share a resource: two 0.5 tasks run concurrently
-- DNS periods are modeled as dummy tasks consuming full capacity
+- Each resource can only work on one task at a time
+- DNS periods and fixed tasks are merged into blocked intervals
+- The allocation value (e.g., `alice:0.5`) affects task duration but not concurrency
 
 ### Auto-Assignment
 
