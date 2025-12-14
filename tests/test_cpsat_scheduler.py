@@ -441,7 +441,7 @@ class TestDNSPeriods:
     """DNS (Do-Not-Schedule) period tests."""
 
     def test_global_dns_respected(self):
-        """Tasks should not be scheduled during global DNS periods."""
+        """Tasks can span DNS periods with correct completion time."""
         dns_periods = [DNSPeriod(start=date(2025, 1, 5), end=date(2025, 1, 10))]
 
         task = Task(
@@ -456,9 +456,11 @@ class TestDNSPeriods:
         result = scheduler.schedule()
 
         scheduled = result.scheduled_tasks[0]
-        # Task should either complete before DNS or start after DNS
-        # Since task is 10 days and DNS starts on day 5, it must start after DNS
-        assert scheduled.start_date >= date(2025, 1, 11)
+        # Task can now span DNS: starts Jan 1, works 4 days (Jan 1-4),
+        # pauses during DNS (Jan 5-10), works 6 more days (Jan 11-16),
+        # ends Jan 17
+        assert scheduled.start_date == date(2025, 1, 1)
+        assert scheduled.end_date == date(2025, 1, 17)
 
 
 class TestAlgorithmMetadata:
@@ -571,3 +573,155 @@ class TestInfeasibility:
         assert len(result.scheduled_tasks) == 1
         # Task will be late (ends after deadline)
         assert result.scheduled_tasks[0].end_date > date(2025, 1, 3)
+
+
+class TestDNSSplitting:
+    """Tests for DNS period splitting via element constraints."""
+
+    def test_task_spans_dns_period(self):
+        """A task can span a DNS period, with completion accounting for the gap."""
+        # Task starts day 1, works days 1-3, DNS days 4-5, works days 6-7
+        # Total work: 5 days, Calendar span: 7 days (1-7 inclusive, ends day 8)
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        # DNS period: days 4-5 (Jan 4-5)
+        dns = DNSPeriod(start=date(2025, 1, 4), end=date(2025, 1, 5))
+        resource_config = ResourceConfig(
+            resources=[ResourceDefinition(name="alice", dns_periods=[dns])]
+        )
+
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+        )
+        result = scheduler.schedule()
+
+        assert len(result.scheduled_tasks) == 1
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date == date(2025, 1, 1)
+        # End should account for DNS: 5 work days + 2 DNS days = completes day 8
+        assert scheduled.end_date == date(2025, 1, 8)
+
+    def test_task_after_dns_no_split(self):
+        """A task starting after DNS completes normally."""
+        task = Task(
+            id="task_a",
+            duration_days=3.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            start_after=date(2025, 1, 10),  # Start after DNS
+            meta={"priority": 50},
+        )
+
+        dns = DNSPeriod(start=date(2025, 1, 4), end=date(2025, 1, 5))
+        resource_config = ResourceConfig(
+            resources=[ResourceDefinition(name="alice", dns_periods=[dns])]
+        )
+
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+        )
+        result = scheduler.schedule()
+
+        assert len(result.scheduled_tasks) == 1
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date >= date(2025, 1, 10)
+        # 3 days duration, no DNS in the way
+        assert (scheduled.end_date - scheduled.start_date).days == 3
+
+    def test_two_tasks_can_both_span_dns(self):
+        """Two tasks on different resources can each span their own DNS periods."""
+        task_a = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+        task_b = Task(
+            id="task_b",
+            duration_days=5.0,
+            resources=[("bob", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        # Alice has DNS days 4-5, Bob has DNS days 6-7
+        alice_dns = DNSPeriod(start=date(2025, 1, 4), end=date(2025, 1, 5))
+        bob_dns = DNSPeriod(start=date(2025, 1, 6), end=date(2025, 1, 7))
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(name="alice", dns_periods=[alice_dns]),
+                ResourceDefinition(name="bob", dns_periods=[bob_dns]),
+            ]
+        )
+
+        scheduler = CPSATScheduler(
+            [task_a, task_b],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+        )
+        result = scheduler.schedule()
+
+        assert len(result.scheduled_tasks) == 2
+        tasks_by_id = {t.task_id: t for t in result.scheduled_tasks}
+
+        # Both tasks can start day 1 (different resources)
+        assert tasks_by_id["task_a"].start_date == date(2025, 1, 1)
+        assert tasks_by_id["task_b"].start_date == date(2025, 1, 1)
+
+        # Alice: works 1-3, DNS 4-5, works 6-7 → ends day 8
+        assert tasks_by_id["task_a"].end_date == date(2025, 1, 8)
+        # Bob: works 1-5, DNS 6-7, no more work needed → ends day 6
+        assert tasks_by_id["task_b"].end_date == date(2025, 1, 6)
+
+    def test_global_dns_affects_all_resources(self):
+        """Global DNS periods apply to all resources."""
+        task_a = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+        task_b = Task(
+            id="task_b",
+            duration_days=5.0,
+            resources=[("bob", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        # Global DNS days 4-5 applies to both
+        global_dns = [DNSPeriod(start=date(2025, 1, 4), end=date(2025, 1, 5))]
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(name="alice"),
+                ResourceDefinition(name="bob"),
+            ]
+        )
+
+        scheduler = CPSATScheduler(
+            [task_a, task_b],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+            global_dns_periods=global_dns,
+        )
+        result = scheduler.schedule()
+
+        assert len(result.scheduled_tasks) == 2
+        tasks_by_id = {t.task_id: t for t in result.scheduled_tasks}
+
+        # Both have same DNS → same completion pattern
+        # Works 1-3, DNS 4-5, works 6-7 → ends day 8
+        assert tasks_by_id["task_a"].end_date == date(2025, 1, 8)
+        assert tasks_by_id["task_b"].end_date == date(2025, 1, 8)

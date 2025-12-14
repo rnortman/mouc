@@ -9,6 +9,7 @@ from mouc.logger import get_logger
 
 from ..config import SchedulingConfig
 from ..core import AlgorithmResult, PreProcessResult, ScheduledTask, Task
+from ..resources import ResourceSchedule
 
 logger = get_logger()
 
@@ -207,6 +208,38 @@ class CPSATScheduler:
         """Convert horizon offset back to absolute date."""
         return self.current_date + timedelta(days=offset)
 
+    def _get_dns_periods_for_resource(self, resource_name: str) -> list[tuple[date, date]]:
+        """Get combined global + per-resource DNS periods."""
+        periods = [(dns.start, dns.end) for dns in self.global_dns_periods]
+
+        if self.resource_config:
+            for resource_def in self.resource_config.resources:
+                if resource_def.name == resource_name:
+                    periods.extend((dns.start, dns.end) for dns in resource_def.dns_periods)
+                    break
+
+        return periods
+
+    def _build_completion_table(
+        self,
+        duration_days: float,
+        dns_periods: list[tuple[date, date]],
+        horizon: int,
+    ) -> list[int]:
+        """Build table mapping start offset → completion offset.
+
+        For each possible start day, computes when the task would complete
+        accounting for DNS periods (work pauses during DNS).
+        """
+        schedule = ResourceSchedule(dns_periods)
+        table: list[int] = []
+        for start_offset in range(horizon):
+            start_date = self.current_date + timedelta(days=start_offset)
+            completion_date = schedule.calculate_completion_time(start_date, duration_days)
+            completion_offset = (completion_date - self.current_date).days
+            table.append(completion_offset)
+        return table
+
     def _calculate_horizon(
         self, tasks_to_schedule: list[Task], fixed_tasks: list[ScheduledTask]
     ) -> int:
@@ -260,6 +293,7 @@ class CPSATScheduler:
             - 'start': IntVar for start time
             - 'end': IntVar for end time
             - 'interval': IntervalVar for the task
+            - 'duration': int work duration in days
             - 'resources': list of assigned resource names
             - 'resource_intervals': dict mapping resource name to optional interval (for auto-assign)
             - 'resource_presences': dict mapping resource name to BoolVar (for auto-assign)
@@ -270,10 +304,38 @@ class CPSATScheduler:
             duration = int(task.duration_days)
 
             start_var = model.new_int_var(0, horizon, f"start_{task.id}")
-            end_var = model.new_int_var(0, horizon, f"end_{task.id}")
-            interval_var = model.new_interval_var(
-                start_var, duration, end_var, f"interval_{task.id}"
-            )
+            # End can extend beyond horizon due to DNS gaps
+            end_var = model.new_int_var(0, horizon * 2, f"end_{task.id}")
+
+            # Check if task has/will have a resource (for DNS-aware scheduling)
+            has_explicit_resource = bool(task.resources)
+            has_auto_assign = bool(task.resource_spec and self.resource_config)
+
+            # Get DNS periods for explicit resource
+            dns_periods: list[tuple[date, date]] = []
+            if has_explicit_resource:
+                resource_name = task.resources[0][0]
+                dns_periods = self._get_dns_periods_for_resource(resource_name)
+
+            if dns_periods or has_auto_assign:
+                # Use variable-size interval for DNS-aware completion
+                # Size represents calendar span (can be > duration due to DNS gaps)
+                size_var = model.new_int_var(duration, horizon * 2, f"size_{task.id}")
+                interval_var = model.new_interval_var(
+                    start_var, size_var, end_var, f"interval_{task.id}"
+                )
+
+                # For explicit resource with DNS, add element constraint
+                if has_explicit_resource and dns_periods:
+                    completion_table = self._build_completion_table(
+                        task.duration_days, dns_periods, horizon
+                    )
+                    model.add_element(start_var, completion_table, end_var)
+            else:
+                # No DNS periods - use fixed duration interval
+                interval_var = model.new_interval_var(
+                    start_var, duration, end_var, f"interval_{task.id}"
+                )
 
             task_vars[task.id] = {
                 "start": start_var,
@@ -286,11 +348,12 @@ class CPSATScheduler:
             }
 
             # Handle resource assignment
-            if task.resources:
+            if has_explicit_resource:
                 # Explicit resource assignments
                 task_vars[task.id]["resources"] = [r[0] for r in task.resources]
-            elif task.resource_spec and self.resource_config:
+            elif has_auto_assign:
                 # Auto-assignment: create optional intervals for candidates
+                assert task.resource_spec is not None  # Guaranteed by has_auto_assign check
                 candidates = self._get_candidate_resources(task.resource_spec)
                 if candidates:
                     self._create_auto_assignment_vars(
@@ -315,7 +378,7 @@ class CPSATScheduler:
         task_var_dict: dict[str, Any],
         horizon: int,
     ) -> None:
-        """Create optional interval variables for auto-assignment."""
+        """Create optional interval variables for auto-assignment with DNS-aware completion."""
         duration = int(task.duration_days)
         start_var = task_var_dict["start"]
         end_var = task_var_dict["end"]
@@ -329,10 +392,39 @@ class CPSATScheduler:
             presences.append(presence)
             resource_presences[resource] = presence
 
-            # Create optional interval that's active only if this resource is selected
-            optional_interval = model.new_optional_interval_var(
-                start_var, duration, end_var, presence, f"opt_interval_{task.id}_{resource}"
-            )
+            # Get DNS periods for this candidate
+            dns_periods = self._get_dns_periods_for_resource(resource)
+
+            if dns_periods:
+                # Build completion table for this candidate's DNS
+                completion_table = self._build_completion_table(
+                    task.duration_days, dns_periods, horizon
+                )
+
+                # Create completion var for this candidate
+                completion_var = model.new_int_var(
+                    0, horizon * 2, f"completion_{task.id}_{resource}"
+                )
+                model.add_element(start_var, completion_table, completion_var)
+
+                # Link to end_var when this resource is selected
+                model.add(end_var == completion_var).only_enforce_if(presence)
+
+                # Create variable-size optional interval for no-overlap
+                size_var = model.new_int_var(
+                    duration, horizon * 2, f"opt_size_{task.id}_{resource}"
+                )
+                optional_interval = model.new_optional_interval_var(
+                    start_var, size_var, end_var, presence, f"opt_interval_{task.id}_{resource}"
+                )
+            else:
+                # No DNS - use fixed duration
+                optional_interval = model.new_optional_interval_var(
+                    start_var, duration, end_var, presence, f"opt_interval_{task.id}_{resource}"
+                )
+                # Constrain end_var when this resource is selected (no DNS gaps)
+                model.add(end_var == start_var + duration).only_enforce_if(presence)
+
             resource_intervals[resource] = optional_interval
 
         # Exactly one resource must be selected
@@ -376,7 +468,7 @@ class CPSATScheduler:
                     model.add(start_var >= dep_end_var + lag_days)
                 # else: dependency not in our task set (external or missing)
 
-    def _add_resource_constraints(  # noqa: PLR0912 - resource handling has inherent complexity
+    def _add_resource_constraints(  # noqa: PLR0912
         self,
         model: cp_model.CpModel,
         task_vars: TaskVarsDict,
@@ -384,9 +476,11 @@ class CPSATScheduler:
     ) -> None:
         """Add no-overlap resource constraints.
 
-        All intervals (unfixed tasks + merged blocked periods) are included
-        in a single no_overlap constraint per resource. Blocked periods are
-        created by merging DNS periods and fixed tasks to reduce constraint count.
+        Task intervals are included in a no_overlap constraint per resource.
+        Fixed tasks (already scheduled) are added as blocked periods.
+
+        Note: DNS periods are NOT added here - they're handled by element constraints
+        that map start time to completion time, allowing tasks to span DNS periods.
         """
         # Collect unfixed task intervals per resource
         resource_intervals: dict[str, list[cp_model.IntervalVar]] = {}
@@ -406,30 +500,8 @@ class CPSATScheduler:
                         resource_intervals[resource] = []
                     resource_intervals[resource].append(interval)
 
-        # Collect all blocked periods per resource (DNS + fixed tasks)
+        # Add fixed task periods as blocked intervals (already scheduled work)
         blocked_periods: dict[str, list[tuple[date, date]]] = {}
-
-        # Add global DNS periods to all resources with tasks
-        for resource in list(resource_intervals.keys()):
-            if resource not in blocked_periods:
-                blocked_periods[resource] = []
-            for dns in self.global_dns_periods:
-                blocked_periods[resource].append((dns.start, dns.end))
-
-        # Add per-resource DNS periods
-        if self.resource_config:
-            for resource_def in self.resource_config.resources:
-                if not resource_def.dns_periods:
-                    continue
-                resource_name = resource_def.name
-                if resource_name not in blocked_periods:
-                    blocked_periods[resource_name] = []
-                    if resource_name not in resource_intervals:
-                        resource_intervals[resource_name] = []
-                for dns in resource_def.dns_periods:
-                    blocked_periods[resource_name].append((dns.start, dns.end))
-
-        # Add fixed task periods
         for st in fixed_tasks:
             for resource in st.resources:
                 if resource not in blocked_periods:
