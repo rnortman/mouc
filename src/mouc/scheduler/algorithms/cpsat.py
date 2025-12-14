@@ -86,6 +86,16 @@ class CPSATScheduler:
             preprocess_result: Optional result from pre-processor (e.g., backward pass)
         """
         self.tasks = {task.id: task for task in tasks}
+
+        # Validate: CP-SAT does not support multi-resource tasks
+        for task in tasks:
+            if task.resources and len(task.resources) > 1:
+                raise ValueError(
+                    f"CP-SAT scheduler does not support multi-resource tasks. "
+                    f"Task '{task.id}' has {len(task.resources)} resources assigned. "
+                    f"Use resource_spec for auto-assignment or assign a single resource."
+                )
+
         self.current_date = current_date
         self.resource_config = resource_config
         self.completed_task_ids = completed_task_ids or set()

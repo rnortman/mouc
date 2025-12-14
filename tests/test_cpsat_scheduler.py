@@ -2,6 +2,8 @@
 
 from datetime import date, timedelta
 
+import pytest
+
 from mouc.models import Dependency
 from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
 from mouc.scheduler import SchedulingConfig, Task
@@ -496,6 +498,53 @@ class TestAlgorithmMetadata:
 
         # Should still work and produce optimal result
         assert result.algorithm_metadata["status"] == "OPTIMAL"
+
+
+class TestValidation:
+    """Input validation tests."""
+
+    def test_rejects_multi_resource_tasks(self):
+        """CP-SAT scheduler should reject tasks with multiple explicit resources."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0), ("bob", 1.0)],  # Multiple resources
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        with pytest.raises(ValueError, match="multi-resource tasks"):
+            CPSATScheduler([task], date(2025, 1, 1))
+
+    def test_accepts_single_resource_task(self):
+        """CP-SAT scheduler should accept tasks with a single resource."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        # Should not raise
+        scheduler = CPSATScheduler([task], date(2025, 1, 1))
+        result = scheduler.schedule()
+        assert len(result.scheduled_tasks) == 1
+
+    def test_accepts_no_resource_task(self):
+        """CP-SAT scheduler should accept tasks with no explicit resources."""
+        task = Task(
+            id="task_a",
+            duration_days=5.0,
+            resources=[],  # No explicit resources
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        # Should not raise
+        scheduler = CPSATScheduler([task], date(2025, 1, 1))
+        result = scheduler.schedule()
+        assert len(result.scheduled_tasks) == 1
 
 
 class TestInfeasibility:
