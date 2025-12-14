@@ -511,21 +511,20 @@ class CPSATScheduler:
                 resource_demands[resource].append(RESOURCE_SCALE)
 
     def _add_boundary_constraints(self, model: cp_model.CpModel, task_vars: TaskVarsDict) -> None:
-        """Add start_after and end_before constraints."""
+        """Add start_after constraints.
+
+        Note: end_before is handled as a soft constraint in the objective function
+        (tardiness penalty) rather than a hard constraint, to avoid infeasibility
+        when deadlines cannot be met.
+        """
         for task_id, vars_dict in task_vars.items():
             task = self.tasks[task_id]
             start_var = vars_dict["start"]
-            end_var = vars_dict["end"]
 
-            # start_after constraint
+            # start_after constraint (hard constraint - task cannot start before this date)
             if task.start_after:
                 min_start = self._date_to_offset(task.start_after)
                 model.add(start_var >= min_start)
-
-            # end_before constraint
-            if task.end_before:
-                max_end = self._date_to_offset(task.end_before)
-                model.add(end_var <= max_end)
 
     def _set_objective(self, model: cp_model.CpModel, task_vars: TaskVarsDict) -> None:
         """Set multi-objective: minimize tardiness + priority-weighted completion time."""

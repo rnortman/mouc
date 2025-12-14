@@ -2,8 +2,6 @@
 
 from datetime import date, timedelta
 
-import pytest
-
 from mouc.models import Dependency
 from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
 from mouc.scheduler import SchedulingConfig, Task
@@ -503,19 +501,24 @@ class TestAlgorithmMetadata:
 class TestInfeasibility:
     """Infeasibility detection tests."""
 
-    def test_infeasible_constraints_raises(self):
-        """Impossible constraints should raise ValueError."""
-        # Task that must complete by day 3 but has duration 10
+    def test_missed_deadline_still_schedules(self):
+        """Tasks that miss deadlines should still be scheduled (soft constraint)."""
+        # Task that cannot complete by day 3 but has duration 10
+        # end_before is a soft constraint - scheduler should find a solution
+        # with tardiness penalty rather than failing
         task = Task(
             id="task_a",
             duration_days=10.0,
             resources=[("alice", 1.0)],
             dependencies=[],
-            end_before=date(2025, 1, 3),  # Only 2 days available!
+            end_before=date(2025, 1, 3),  # Only 2 days available, but soft constraint
             meta={"priority": 50},
         )
 
         scheduler = CPSATScheduler([task], date(2025, 1, 1))
 
-        with pytest.raises(ValueError, match="infeasible"):
-            scheduler.schedule()
+        # Should not raise - deadline is soft constraint
+        result = scheduler.schedule()
+        assert len(result.scheduled_tasks) == 1
+        # Task will be late (ends after deadline)
+        assert result.scheduled_tasks[0].end_date > date(2025, 1, 3)
