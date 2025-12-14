@@ -293,7 +293,10 @@ class BoundedRolloutScheduler:
         if not unscheduled_task_ids:
             return 1.0
         total = sum(self.tasks[tid].duration_days for tid in unscheduled_task_ids)
-        return total / len(unscheduled_task_ids)
+        avg = total / len(unscheduled_task_ids)
+        # Avoid division by zero in ATC urgency calculations when all tasks
+        # have zero duration (e.g., milestones)
+        return max(avg, 1.0)
 
     def _compute_default_urgency(
         self,

@@ -767,3 +767,70 @@ def test_bounded_rollout_with_atc_strategy():
     # Verify tasks are scheduled
     task_ids = {r.task_id for r in result}
     assert task_ids == {"task_a", "task_b", "task_c"}
+
+
+def test_bounded_rollout_atc_with_zero_duration_milestones():
+    """Test ATC strategy when all unscheduled tasks are zero-duration milestones.
+
+    This is a regression test for a ZeroDivisionError that occurred when
+    computing the average duration of unscheduled tasks. When all tasks have
+    zero duration (like milestones), the average is 0.0, which caused a
+    division by zero in the ATC urgency formula.
+    """
+    # A regular task that will be scheduled first
+    task_a = Task(
+        id="task_a",
+        duration_days=5.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+
+    # Three zero-duration milestones that will remain unscheduled when
+    # _compute_atc_params is called during rollout evaluation
+    milestone_1 = Task(
+        id="milestone_1",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=dep_list("task_a"),
+        end_before=date(2025, 2, 28),
+        meta={"priority": 80},
+    )
+
+    milestone_2 = Task(
+        id="milestone_2",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=dep_list("task_a"),
+        meta={"priority": 60},
+    )
+
+    milestone_3 = Task(
+        id="milestone_3",
+        duration_days=0.0,
+        resources=[("alice", 1.0)],
+        dependencies=dep_list("milestone_1"),
+        end_before=date(2025, 3, 31),
+        meta={"priority": 70},
+    )
+
+    config = SchedulingConfig(
+        strategy="atc",
+        atc_k=2.0,
+        atc_default_urgency_floor=0.3,
+        rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
+    )
+
+    scheduler = BoundedRolloutScheduler(
+        [task_a, milestone_1, milestone_2, milestone_3],
+        date(2025, 1, 1),
+        config=config,
+    )
+
+    # This should not raise ZeroDivisionError
+    result = scheduler.schedule().scheduled_tasks
+
+    # Should schedule all 4 tasks
+    assert len(result) == 4
+    task_ids = {r.task_id for r in result}
+    assert task_ids == {"task_a", "milestone_1", "milestone_2", "milestone_3"}
