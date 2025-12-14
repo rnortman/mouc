@@ -32,6 +32,8 @@ class ResourceSchedule:
             self._merge_periods(unavailable_periods) if unavailable_periods else []
         )
         self.resource_name = resource_name
+        # Cache for calculate_completion_time results; invalidated on add_busy_period()
+        self._completion_cache: dict[tuple[date, float], date] = {}
 
     @staticmethod
     def _merge_periods(periods: list[tuple[date, date]]) -> list[tuple[date, date]]:
@@ -56,13 +58,15 @@ class ResourceSchedule:
         """Create a copy of this schedule for rollout simulations.
 
         Returns:
-            A new ResourceSchedule with copied busy periods
+            A new ResourceSchedule with copied busy periods and cache
         """
         new_schedule = ResourceSchedule(
             unavailable_periods=None,
             resource_name=self.resource_name,
         )
         new_schedule.busy_periods = list(self.busy_periods)
+        # Cache is still valid since busy_periods are identical
+        new_schedule._completion_cache = dict(self._completion_cache)
         return new_schedule
 
     def add_busy_period(self, start: date, end: date) -> None:
@@ -74,6 +78,9 @@ class ResourceSchedule:
             start: Start date of busy period (inclusive)
             end: End date of busy period (inclusive)
         """
+        # Invalidate cache since busy periods are changing
+        self._completion_cache.clear()
+
         if not self.busy_periods:
             self.busy_periods.append((start, end))
             return
@@ -196,6 +203,11 @@ class ResourceSchedule:
         if duration_days == 0:
             return start
 
+        # Check cache first
+        cache_key = (start, duration_days)
+        if cache_key in self._completion_cache:
+            return self._completion_cache[cache_key]
+
         work_remaining = duration_days
         current = start
 
@@ -205,7 +217,9 @@ class ResourceSchedule:
 
             if next_busy_start is None:
                 # No more busy periods ahead, can complete remaining work
-                return current + timedelta(days=work_remaining)
+                result = current + timedelta(days=work_remaining)
+                self._completion_cache[cache_key] = result
+                return result
 
             assert next_busy_end is not None
 
@@ -220,11 +234,14 @@ class ResourceSchedule:
 
             if work_days_available >= work_remaining:
                 # Can complete before next busy period
-                return current + timedelta(days=work_remaining)
+                result = current + timedelta(days=work_remaining)
+                self._completion_cache[cache_key] = result
+                return result
 
             # Use up available work days, then skip busy period
             work_remaining -= work_days_available
             current = next_busy_end + timedelta(days=1)
 
         # All work consumed (edge case: work_remaining became exactly 0)
+        self._completion_cache[cache_key] = current
         return current

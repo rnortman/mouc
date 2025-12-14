@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Scheduler performance: caching, binary search, and reduced logging in hot paths
+- Bounded rollout: memoize `calculate_completion_time`, configurable `max_horizon_days` (default 30)
 
 ### Fixed
 - `next_available_time` now correctly handles consecutive/overlapping busy periods

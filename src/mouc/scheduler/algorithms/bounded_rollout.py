@@ -100,6 +100,10 @@ class BoundedRolloutScheduler:
         # Cache for candidate resources per task (resource_spec -> list of resources)
         self._candidate_resources_cache: dict[str, list[str]] = {}
 
+        # Pre-compute max rollout horizon timedelta for performance
+        max_days = self.config.rollout.max_horizon_days
+        self._max_horizon_delta = timedelta(days=max_days) if max_days else None
+
         if preprocess_result:
             self._computed_deadlines = dict(preprocess_result.computed_deadlines)
             self._computed_priorities = dict(preprocess_result.computed_priorities)
@@ -533,6 +537,13 @@ class BoundedRolloutScheduler:
         # No deadline - use floor as default CR (relaxed)
         return self.config.default_cr_floor
 
+    def _cap_rollout_horizon(self, horizon: date, current_time: date) -> date:
+        """Cap rollout horizon to configured maximum for performance."""
+        if self._max_horizon_delta is None:
+            return horizon
+        max_horizon = current_time + self._max_horizon_delta
+        return min(horizon, max_horizon)
+
     def _compute_atc_params(
         self, unscheduled: set[str], current_time: date
     ) -> tuple[float, float] | None:
@@ -750,6 +761,9 @@ class BoundedRolloutScheduler:
         Returns:
             Tuple of (final_state, score)
         """
+        # Cap horizon to configured maximum for performance
+        horizon = self._cap_rollout_horizon(horizon, state.current_time)
+
         max_iterations = len(self.tasks) * 10
         iteration = 0
         initial_time = state.current_time

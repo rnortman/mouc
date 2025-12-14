@@ -53,6 +53,8 @@ class RolloutConfig(BaseModel):
     cr_relaxed_threshold: float = 5.0
     # Minimum CR gap: upcoming task must have CR at least this much lower (more urgent)
     min_cr_urgency_gap: float = 3.0
+    # Maximum rollout horizon in days (limits simulation depth for performance)
+    max_horizon_days: int | None = 30
 
 
 class CPSATConfig(BaseModel):
