@@ -9,7 +9,11 @@ logger = get_logger()
 
 
 class ResourceSchedule:
-    """Tracks busy periods for a resource using sorted intervals."""
+    """Tracks busy periods for a resource using sorted, non-overlapping intervals.
+
+    Maintains the invariant that busy_periods is always sorted by start date and
+    contains no overlapping periods. This enables O(log n) binary search lookups.
+    """
 
     def __init__(
         self,
@@ -23,11 +27,30 @@ class ResourceSchedule:
                 the resource is unavailable (e.g., vacations, do-not-schedule periods)
             resource_name: Name of the resource (for verbose logging)
         """
-        # Sort unavailable periods by start date to ensure proper iteration order
+        # Merge overlapping periods to maintain non-overlapping invariant
         self.busy_periods: list[tuple[date, date]] = (
-            sorted(unavailable_periods, key=lambda x: x[0]) if unavailable_periods else []
+            self._merge_periods(unavailable_periods) if unavailable_periods else []
         )
         self.resource_name = resource_name
+
+    @staticmethod
+    def _merge_periods(periods: list[tuple[date, date]]) -> list[tuple[date, date]]:
+        """Merge overlapping or adjacent periods into a sorted, non-overlapping list."""
+        if not periods:
+            return []
+
+        sorted_periods = sorted(periods, key=lambda x: x[0])
+        merged: list[tuple[date, date]] = [sorted_periods[0]]
+
+        for start, end in sorted_periods[1:]:
+            last_start, last_end = merged[-1]
+            # Merge if overlapping or adjacent (within 1 day)
+            if start <= last_end + timedelta(days=1):
+                merged[-1] = (last_start, max(last_end, end))
+            else:
+                merged.append((start, end))
+
+        return merged
 
     def copy(self) -> "ResourceSchedule":
         """Create a copy of this schedule for rollout simulations.
@@ -43,13 +66,40 @@ class ResourceSchedule:
         return new_schedule
 
     def add_busy_period(self, start: date, end: date) -> None:
-        """Add a busy period and maintain sorted order.
+        """Add a busy period, merging with existing periods if they overlap.
+
+        Maintains the invariant that busy_periods is sorted and non-overlapping.
 
         Args:
             start: Start date of busy period (inclusive)
             end: End date of busy period (inclusive)
         """
-        bisect.insort(self.busy_periods, (start, end), key=lambda x: x[0])
+        if not self.busy_periods:
+            self.busy_periods.append((start, end))
+            return
+
+        # Find insertion point
+        idx = bisect.bisect_left(self.busy_periods, start, key=lambda x: x[0])
+
+        # Merge with previous period if overlapping or adjacent
+        if idx > 0:
+            prev_start, prev_end = self.busy_periods[idx - 1]
+            if prev_end >= start - timedelta(days=1):
+                start = prev_start
+                end = max(prev_end, end)
+                idx -= 1
+                del self.busy_periods[idx]
+
+        # Merge with subsequent periods if overlapping or adjacent
+        while idx < len(self.busy_periods):
+            next_start, next_end = self.busy_periods[idx]
+            if next_start <= end + timedelta(days=1):
+                end = max(end, next_end)
+                del self.busy_periods[idx]
+            else:
+                break
+
+        self.busy_periods.insert(idx, (start, end))
 
     def is_available(self, start: date, duration_days: float) -> bool:
         """Check if resource is available for the full duration starting at start.
@@ -85,43 +135,52 @@ class ResourceSchedule:
         Returns:
             Next available date (may be from_date itself if not currently busy)
         """
+        if not self.busy_periods:
+            return from_date
+
         candidate = from_date
 
-        # Keep checking until we find a date not within any busy period
+        # With non-overlapping periods, we can use binary search to find conflicts
         while True:
-            found_conflict = False
-            for busy_start, busy_end in self.busy_periods:
-                # Skip busy periods that end before our candidate
-                if busy_end < candidate:
-                    continue
+            next_busy_start, next_busy_end = self._find_next_busy_period(candidate)
 
-                # If candidate is within this busy period, move past it
-                if candidate >= busy_start:
-                    candidate = busy_end + timedelta(days=1)
-                    found_conflict = True
-                    break  # Restart the loop with new candidate
-
-                # Busy period starts after candidate, so candidate is available
-                break
-
-            if not found_conflict:
+            if next_busy_start is None:
+                # No more busy periods
                 return candidate
 
+            if candidate < next_busy_start:
+                # Candidate is before the next busy period, so it's available
+                return candidate
+
+            # Candidate is within the busy period, advance past it
+            # next_busy_end is guaranteed non-None when next_busy_start is non-None
+            assert next_busy_end is not None
+            candidate = next_busy_end + timedelta(days=1)
+
     def _find_next_busy_period(self, current: date) -> tuple[date | None, date | None]:
-        """Find the next busy period that overlaps or starts at/after current date."""
-        for busy_start, busy_end in self.busy_periods:
-            # Check if current date is within this busy period or the period is ahead
-            if busy_end >= current:
-                return (busy_start, busy_end)
+        """Find the next busy period that contains or starts at/after current date.
+
+        Uses binary search for O(log n) lookup. Relies on the invariant that
+        busy_periods is sorted by start date and non-overlapping.
+        """
+        if not self.busy_periods:
+            return (None, None)
+
+        # Binary search: find leftmost period where end >= current
+        lo, hi = 0, len(self.busy_periods)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if self.busy_periods[mid][1] < current:
+                lo = mid + 1
+            else:
+                hi = mid
+
+        if lo < len(self.busy_periods):
+            return self.busy_periods[lo]
         return (None, None)
 
-    def _log_debug(self, message: str) -> None:
-        """Log a debug message."""
-        if self.resource_name:
-            logger.debug(f"            {message}")
-
     def calculate_completion_time(self, start: date, duration_days: float) -> date:
-        """Calculate when a task will actually complete, accounting for busy periods (including DNS gaps).
+        """Calculate when a task will actually complete, accounting for busy periods.
 
         This method walks through the schedule from start date, accumulating work days
         and skipping over busy periods (DNS, other tasks, etc.) until the full duration
@@ -134,14 +193,7 @@ class ResourceSchedule:
         Returns:
             Date when the task would complete (exclusive end, matching scheduler convention)
         """
-        if self.resource_name:
-            logger.debug(
-                f"          Calculating completion time for {self.resource_name}: "
-                f"start={start}, duration={duration_days}d"
-            )
-
         if duration_days == 0:
-            self._log_debug(f"Duration is 0, returning start date: {start}")
             return start
 
         work_remaining = duration_days
@@ -153,22 +205,14 @@ class ResourceSchedule:
 
             if next_busy_start is None:
                 # No more busy periods ahead, can complete remaining work
-                completion = current + timedelta(days=work_remaining)
-                self._log_debug(
-                    f"No more busy periods, completing at {completion} (work_remaining={work_remaining}d)"
-                )
-                return completion
+                return current + timedelta(days=work_remaining)
 
             assert next_busy_end is not None
 
             # Check if current date is within the busy period
             if next_busy_start <= current:
                 # We're inside a busy period, skip to the end
-                skip_to = next_busy_end + timedelta(days=1)
-                self._log_debug(
-                    f"Current date {current} is within busy period ({next_busy_start} to {next_busy_end}), skipping to {skip_to}"
-                )
-                current = skip_to
+                current = next_busy_end + timedelta(days=1)
                 continue
 
             # Calculate work days available before next busy period
@@ -176,20 +220,11 @@ class ResourceSchedule:
 
             if work_days_available >= work_remaining:
                 # Can complete before next busy period
-                completion = current + timedelta(days=work_remaining)
-                self._log_debug(
-                    f"Completing at {completion} before busy period ({next_busy_start} to {next_busy_end}), work_remaining={work_remaining}d"
-                )
-                return completion
+                return current + timedelta(days=work_remaining)
 
             # Use up available work days, then skip busy period
-            skip_to = next_busy_end + timedelta(days=1)
-            self._log_debug(
-                f"Working {work_days_available}d before busy period ({next_busy_start} to {next_busy_end}), then skipping to {skip_to}"
-            )
             work_remaining -= work_days_available
-            current = skip_to
+            current = next_busy_end + timedelta(days=1)
 
         # All work consumed (edge case: work_remaining became exactly 0)
-        self._log_debug(f"Work consumed exactly, completing at {current}")
         return current

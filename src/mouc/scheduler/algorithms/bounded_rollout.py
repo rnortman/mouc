@@ -97,6 +97,9 @@ class BoundedRolloutScheduler:
 
         self.rollout_decisions: list[RolloutDecision] = []
 
+        # Cache for candidate resources per task (resource_spec -> list of resources)
+        self._candidate_resources_cache: dict[str, list[str]] = {}
+
         if preprocess_result:
             self._computed_deadlines = dict(preprocess_result.computed_deadlines)
             self._computed_priorities = dict(preprocess_result.computed_priorities)
@@ -386,9 +389,18 @@ class BoundedRolloutScheduler:
         raise ValueError(msg)
 
     def _get_candidate_resources(self, task: Task) -> list[str]:
-        """Get the list of candidate resources for a task."""
+        """Get the list of candidate resources for a task.
+
+        Uses caching for resource_spec lookups to avoid repeated expansion.
+        """
         if task.resource_spec and self.resource_config:
-            return self.resource_config.expand_resource_spec(task.resource_spec)
+            # Check cache first
+            if task.resource_spec in self._candidate_resources_cache:
+                return self._candidate_resources_cache[task.resource_spec]
+            # Compute and cache
+            result = self.resource_config.expand_resource_spec(task.resource_spec)
+            self._candidate_resources_cache[task.resource_spec] = result
+            return result
         if task.resources:
             return [r[0] for r in task.resources]
         return []

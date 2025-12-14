@@ -8,7 +8,7 @@ This module handles loading and validating resource definitions including:
 
 from datetime import date
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, model_validator
 
 # Magic resource name for tasks with no assigned resources
 UNASSIGNED_RESOURCE = "unassigned"
@@ -51,6 +51,11 @@ class ResourceConfig(BaseModel):
     resources: list[ResourceDefinition]
     groups: dict[str, list[str]] = Field(default_factory=dict)
     default_resource: str | None = None  # Resource spec to use for unassigned tasks
+
+    # Cache for expand_resource_spec results (not serialized)
+    _resource_spec_cache: dict[str, list[str]] = PrivateAttr(
+        default_factory=lambda: {}  # type: ignore[arg-type]
+    )
 
     @model_validator(mode="after")
     def validate_group_members(self) -> "ResourceConfig":
@@ -121,6 +126,8 @@ class ResourceConfig(BaseModel):
     def expand_resource_spec(self, spec: str | list[str]) -> list[str]:
         """Expand a resource specification to an ordered list of resource names.
 
+        Results are cached for string specs to avoid repeated computation.
+
         Args:
             spec: Can be:
                 - "*" -> all resources in config order
@@ -141,6 +148,16 @@ class ResourceConfig(BaseModel):
         if not spec or spec == "":
             return []
 
+        # Check cache first
+        if spec in self._resource_spec_cache:
+            return list(self._resource_spec_cache[spec])  # Return copy to prevent mutation
+
+        result = self._expand_resource_spec_impl(spec)
+        self._resource_spec_cache[spec] = result
+        return list(result)  # Return copy to prevent mutation
+
+    def _expand_resource_spec_impl(self, spec: str) -> list[str]:
+        """Implementation of resource spec expansion for string specs."""
         # Parse spec into parts separated by |
         parts = [s.strip() for s in spec.split("|")] if "|" in spec else [spec]
 

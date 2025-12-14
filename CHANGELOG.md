@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Scheduler performance: caching, binary search, and reduced logging in hot paths
+
 ### Fixed
 - `next_available_time` now correctly handles consecutive/overlapping busy periods
 - Bounded rollout scheduler uses configured strategy for urgent task sorting
