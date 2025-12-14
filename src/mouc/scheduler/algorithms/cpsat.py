@@ -22,6 +22,39 @@ TaskVarsDict = dict[str, dict[str, Any]]
 RESOURCE_SCALE = 100
 
 
+def _merge_dns_periods(periods: "list[DNSPeriod]") -> "list[DNSPeriod]":
+    """Merge overlapping or adjacent DNS periods into non-overlapping periods."""
+    # Import here to avoid circular import, but the class is already imported via TYPE_CHECKING
+    # We need the actual class to construct new instances
+    from mouc.resources import DNSPeriod as DNSPeriodClass  # noqa: PLC0415
+
+    if not periods:
+        return []
+
+    # Sort by start date
+    sorted_periods = sorted(periods, key=lambda p: p.start)
+
+    merged: list[DNSPeriod] = []
+    current_start = sorted_periods[0].start
+    current_end = sorted_periods[0].end
+
+    for period in sorted_periods[1:]:
+        # Check if this period overlaps or is adjacent to current
+        # (end + 1 day >= start means adjacent or overlapping)
+        if period.start <= current_end + timedelta(days=1):
+            # Extend current period
+            current_end = max(current_end, period.end)
+        else:
+            # No overlap - save current and start new
+            merged.append(DNSPeriodClass(start=current_start, end=current_end))
+            current_start = period.start
+            current_end = period.end
+
+    # Don't forget the last period
+    merged.append(DNSPeriodClass(start=current_start, end=current_end))
+    return merged
+
+
 class CPSATScheduler:
     """CP-SAT based optimal scheduler for RCPSP.
 
@@ -340,11 +373,13 @@ class CPSATScheduler:
         fixed_tasks: list[ScheduledTask],
     ) -> None:
         """Add cumulative resource constraints."""
-        # Collect intervals and demands per resource
+        # Collect intervals and demands per resource (for unfixed tasks only)
         resource_intervals: dict[str, list[cp_model.IntervalVar]] = {}
         resource_demands: dict[str, list[int]] = {}
+        # Track unfixed task intervals per resource for no-overlap with fixed tasks
+        unfixed_intervals: dict[str, list[cp_model.IntervalVar]] = {}
 
-        # Process scheduled tasks
+        # Process scheduled (unfixed) tasks
         for task_id, vars_dict in task_vars.items():
             task = self.tasks[task_id]
 
@@ -354,11 +389,13 @@ class CPSATScheduler:
                     if resource not in resource_intervals:
                         resource_intervals[resource] = []
                         resource_demands[resource] = []
+                        unfixed_intervals[resource] = []
 
                     # For auto-assigned tasks, assume full allocation
                     demand = RESOURCE_SCALE
                     resource_intervals[resource].append(opt_interval)
                     resource_demands[resource].append(demand)
+                    unfixed_intervals[resource].append(opt_interval)
             elif vars_dict["resources"]:
                 # Explicit resource assignments
                 interval = vars_dict["interval"]
@@ -366,6 +403,7 @@ class CPSATScheduler:
                     if resource not in resource_intervals:
                         resource_intervals[resource] = []
                         resource_demands[resource] = []
+                        unfixed_intervals[resource] = []
 
                     # Get allocation from task.resources
                     allocation = 1.0
@@ -375,8 +413,11 @@ class CPSATScheduler:
 
                     resource_intervals[resource].append(interval)
                     resource_demands[resource].append(demand)
+                    unfixed_intervals[resource].append(interval)
 
-        # Add fixed tasks to resource constraints
+        # Create fixed task intervals separately (not in cumulative constraint)
+        # Fixed tasks use no-overlap constraints with unfixed tasks
+        fixed_task_intervals: dict[str, list[cp_model.IntervalVar]] = {}
         for st in fixed_tasks:
             task = self.tasks.get(st.task_id)
             if not task:
@@ -389,27 +430,20 @@ class CPSATScheduler:
             if duration <= 0:
                 continue
 
-            for i, resource in enumerate(st.resources):
-                if resource not in resource_intervals:
-                    resource_intervals[resource] = []
-                    resource_demands[resource] = []
+            for resource in st.resources:
+                if resource not in fixed_task_intervals:
+                    fixed_task_intervals[resource] = []
 
                 # Create fixed interval for this task
                 fixed_interval = model.new_fixed_size_interval_var(
                     start_offset, duration, f"fixed_{st.task_id}_{resource}"
                 )
-                allocation = 1.0
-                if task.resources and i < len(task.resources):
-                    allocation = task.resources[i][1]
-                demand = int(allocation * RESOURCE_SCALE)
-
-                resource_intervals[resource].append(fixed_interval)
-                resource_demands[resource].append(demand)
+                fixed_task_intervals[resource].append(fixed_interval)
 
         # Add DNS periods as full-capacity intervals
         self._add_dns_constraints(model, resource_intervals, resource_demands)
 
-        # Add cumulative constraints for each resource
+        # Add cumulative constraints for each resource (unfixed tasks + DNS only)
         for resource, intervals in resource_intervals.items():
             if intervals:
                 model.add_cumulative(
@@ -418,6 +452,14 @@ class CPSATScheduler:
                     RESOURCE_SCALE,  # capacity = 100 (1.0 scaled)
                 )
 
+        # Add no-overlap constraints between unfixed and fixed tasks
+        for resource, fixed_intervals in fixed_task_intervals.items():
+            if resource in unfixed_intervals:
+                for unfixed_interval in unfixed_intervals[resource]:
+                    for fixed_interval in fixed_intervals:
+                        # Each unfixed task cannot overlap with each fixed task
+                        model.add_no_overlap([unfixed_interval, fixed_interval])
+
     def _add_dns_constraints(
         self,
         model: cp_model.CpModel,
@@ -425,22 +467,14 @@ class CPSATScheduler:
         resource_demands: dict[str, list[int]],
     ) -> None:
         """Add DNS (do-not-schedule) periods as blocked intervals."""
-        # Global DNS periods apply to all resources
-        for dns in self.global_dns_periods:
-            start_offset = self._date_to_offset(dns.start)
-            end_offset = self._date_to_offset(dns.end)
-            duration = end_offset - start_offset + 1  # inclusive
+        # Collect all DNS periods per resource, then merge to avoid overlap conflicts
+        dns_per_resource: dict[str, list[DNSPeriod]] = {}
 
-            if duration <= 0:
-                continue
-
-            # Add to all resources that have any tasks
-            for resource in list(resource_intervals.keys()):
-                dns_interval = model.new_fixed_size_interval_var(
-                    start_offset, duration, f"dns_global_{dns.start}_{resource}"
-                )
-                resource_intervals[resource].append(dns_interval)
-                resource_demands[resource].append(RESOURCE_SCALE)
+        # Global DNS periods apply to all resources that have tasks
+        for resource in list(resource_intervals.keys()):
+            if resource not in dns_per_resource:
+                dns_per_resource[resource] = []
+            dns_per_resource[resource].extend(self.global_dns_periods)
 
         # Per-resource DNS periods
         if self.resource_config:
@@ -449,23 +483,32 @@ class CPSATScheduler:
                     continue
 
                 resource_name = resource_def.name
-                if resource_name not in resource_intervals:
-                    resource_intervals[resource_name] = []
-                    resource_demands[resource_name] = []
+                if resource_name not in dns_per_resource:
+                    dns_per_resource[resource_name] = []
+                    # Also ensure resource_intervals has this resource
+                    if resource_name not in resource_intervals:
+                        resource_intervals[resource_name] = []
+                        resource_demands[resource_name] = []
 
-                for dns in resource_def.dns_periods:
-                    start_offset = self._date_to_offset(dns.start)
-                    end_offset = self._date_to_offset(dns.end)
-                    duration = end_offset - start_offset + 1
+                dns_per_resource[resource_name].extend(resource_def.dns_periods)
 
-                    if duration <= 0:
-                        continue
+        # Merge and add DNS periods per resource
+        for resource, dns_list in dns_per_resource.items():
+            merged = _merge_dns_periods(dns_list)
 
-                    dns_interval = model.new_fixed_size_interval_var(
-                        start_offset, duration, f"dns_{resource_name}_{dns.start}"
-                    )
-                    resource_intervals[resource_name].append(dns_interval)
-                    resource_demands[resource_name].append(RESOURCE_SCALE)
+            for dns in merged:
+                start_offset = self._date_to_offset(dns.start)
+                end_offset = self._date_to_offset(dns.end)
+                duration = end_offset - start_offset + 1  # inclusive
+
+                if duration <= 0:
+                    continue
+
+                dns_interval = model.new_fixed_size_interval_var(
+                    start_offset, duration, f"dns_{resource}_{dns.start}"
+                )
+                resource_intervals[resource].append(dns_interval)
+                resource_demands[resource].append(RESOURCE_SCALE)
 
     def _add_boundary_constraints(self, model: cp_model.CpModel, task_vars: TaskVarsDict) -> None:
         """Add start_after and end_before constraints."""
