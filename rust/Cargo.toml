@@ -1,0 +1,12 @@
+[package]
+name = "mouc-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "mouc_rust"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.22", features = ["extension-module", "chrono"] }
+chrono = "0.4"

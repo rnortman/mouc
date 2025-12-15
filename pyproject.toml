@@ -97,12 +97,18 @@ ignore = ["E501"]  # line too long - handled by formatter
 [tool.pyright]
 typeCheckingMode = "strict"
 pythonVersion = "3.10"
+include = ["src", "tests"]
 reportMissingImports = true
 reportMissingTypeStubs = false
 
 [build-system]
-requires = ["setuptools>=61", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["maturin>=1.0,<2.0"]
+build-backend = "maturin"
+
+[tool.maturin]
+features = ["pyo3/extension-module"]
+module-name = "mouc.rust"
+python-source = "src"
 
 [dependency-groups]
 dev = [
@@ -112,13 +118,8 @@ dev = [
     "ruff>=0.13.0",
     "build>=1.0.0",
     "twine>=5.0.0",
+    "maturin>=1.0,<2.0",
 ]
 
 [tool.uv]
 package = true
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.setuptools.package-data]
-mouc = ["py.typed"]
