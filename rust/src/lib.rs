@@ -12,11 +12,13 @@ use std::collections::{HashMap, HashSet};
 pub mod backward_pass;
 mod config;
 mod models;
+pub mod scheduler;
 pub mod sorting;
 
 pub use backward_pass::{backward_pass, BackwardPassConfig, BackwardPassError, BackwardPassResult};
 pub use config::{RolloutConfig, SchedulingConfig};
 pub use models::{AlgorithmResult, Dependency, PreProcessResult, ScheduledTask, Task};
+pub use scheduler::{ParallelScheduler, ResourceConfig, RolloutDecision, SchedulerError};
 pub use sorting::{sort_tasks, AtcParams, SortKey, SortingError, TaskSortInfo};
 
 /// Run the backward pass algorithm to compute deadlines and priorities.
@@ -153,6 +155,186 @@ fn py_sort_tasks(
     }
 }
 
+/// Resource configuration for the scheduler (PyO3 wrapper).
+#[pyclass(name = "ResourceConfig")]
+#[derive(Clone, Debug, Default)]
+pub struct PyResourceConfig {
+    #[pyo3(get, set)]
+    pub resource_order: Vec<String>,
+    #[pyo3(get, set)]
+    pub dns_periods: HashMap<String, Vec<(NaiveDate, NaiveDate)>>,
+    #[pyo3(get, set)]
+    pub spec_expansion: HashMap<String, Vec<String>>,
+}
+
+#[pymethods]
+impl PyResourceConfig {
+    #[new]
+    #[pyo3(signature = (resource_order=None, dns_periods=None, spec_expansion=None))]
+    fn new(
+        resource_order: Option<Vec<String>>,
+        dns_periods: Option<HashMap<String, Vec<(NaiveDate, NaiveDate)>>>,
+        spec_expansion: Option<HashMap<String, Vec<String>>>,
+    ) -> Self {
+        Self {
+            resource_order: resource_order.unwrap_or_default(),
+            dns_periods: dns_periods.unwrap_or_default(),
+            spec_expansion: spec_expansion.unwrap_or_default(),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        format!(
+            "ResourceConfig(resources={}, dns_periods={}, specs={})",
+            self.resource_order.len(),
+            self.dns_periods.len(),
+            self.spec_expansion.len()
+        )
+    }
+}
+
+/// Rollout decision record (PyO3 wrapper).
+#[pyclass(name = "RolloutDecision")]
+#[derive(Clone, Debug)]
+pub struct PyRolloutDecision {
+    #[pyo3(get)]
+    pub task_id: String,
+    #[pyo3(get)]
+    pub task_priority: i32,
+    #[pyo3(get)]
+    pub task_cr: f64,
+    #[pyo3(get)]
+    pub competing_task_id: String,
+    #[pyo3(get)]
+    pub competing_priority: i32,
+    #[pyo3(get)]
+    pub competing_cr: f64,
+    #[pyo3(get)]
+    pub competing_eligible_date: NaiveDate,
+    #[pyo3(get)]
+    pub schedule_score: f64,
+    #[pyo3(get)]
+    pub skip_score: f64,
+    #[pyo3(get)]
+    pub decision: String,
+}
+
+#[pymethods]
+impl PyRolloutDecision {
+    fn __repr__(&self) -> String {
+        format!(
+            "RolloutDecision(task={}, decision={})",
+            self.task_id, self.decision
+        )
+    }
+}
+
+impl From<RolloutDecision> for PyRolloutDecision {
+    fn from(rd: RolloutDecision) -> Self {
+        Self {
+            task_id: rd.task_id,
+            task_priority: rd.task_priority,
+            task_cr: rd.task_cr,
+            competing_task_id: rd.competing_task_id,
+            competing_priority: rd.competing_priority,
+            competing_cr: rd.competing_cr,
+            competing_eligible_date: rd.competing_eligible_date,
+            schedule_score: rd.schedule_score,
+            skip_score: rd.skip_score,
+            decision: rd.decision,
+        }
+    }
+}
+
+/// Rust parallel scheduler (PyO3 wrapper).
+#[pyclass(name = "ParallelScheduler")]
+pub struct PyParallelScheduler {
+    inner: ParallelScheduler,
+}
+
+#[pymethods]
+impl PyParallelScheduler {
+    #[new]
+    #[pyo3(signature = (
+        tasks,
+        current_date,
+        completed_task_ids=None,
+        config=None,
+        rollout_config=None,
+        resource_config=None,
+        global_dns_periods=None,
+        preprocess_result=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        tasks: Vec<Task>,
+        current_date: NaiveDate,
+        completed_task_ids: Option<HashSet<String>>,
+        config: Option<SchedulingConfig>,
+        rollout_config: Option<RolloutConfig>,
+        resource_config: Option<PyResourceConfig>,
+        global_dns_periods: Option<Vec<(NaiveDate, NaiveDate)>>,
+        preprocess_result: Option<PreProcessResult>,
+    ) -> PyResult<Self> {
+        let rust_resource_config = resource_config.map(|rc| ResourceConfig {
+            resource_order: rc.resource_order,
+            dns_periods: rc.dns_periods,
+            spec_expansion: rc.spec_expansion,
+        });
+
+        let (deadlines, priorities) = match preprocess_result {
+            Some(pr) => (Some(pr.computed_deadlines), Some(pr.computed_priorities)),
+            None => (None, None),
+        };
+
+        match ParallelScheduler::new(
+            tasks,
+            current_date,
+            completed_task_ids.unwrap_or_default(),
+            config.unwrap_or_default(),
+            rollout_config,
+            rust_resource_config,
+            global_dns_periods.unwrap_or_default(),
+            deadlines,
+            priorities,
+        ) {
+            Ok(scheduler) => Ok(Self { inner: scheduler }),
+            Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e.to_string())),
+        }
+    }
+
+    /// Run the scheduling algorithm.
+    fn schedule(&mut self) -> PyResult<AlgorithmResult> {
+        match self.inner.schedule() {
+            Ok(result) => Ok(result),
+            Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e.to_string())),
+        }
+    }
+
+    /// Get computed deadlines.
+    fn get_computed_deadlines(&self) -> HashMap<String, NaiveDate> {
+        self.inner.get_computed_deadlines()
+    }
+
+    /// Get computed priorities.
+    fn get_computed_priorities(&self) -> HashMap<String, i32> {
+        self.inner.get_computed_priorities()
+    }
+
+    /// Get rollout decisions (only populated if rollout was enabled).
+    fn get_rollout_decisions(&self) -> Vec<PyRolloutDecision> {
+        self.inner
+            .get_rollout_decisions()
+            .into_iter()
+            .map(PyRolloutDecision::from)
+            .collect()
+    }
+
+    fn __repr__(&self) -> String {
+        "ParallelScheduler(...)".to_string()
+    }
+}
+
 /// The mouc.rust Python module.
 #[pymodule]
 fn rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -167,6 +349,11 @@ fn rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Config types
     m.add_class::<SchedulingConfig>()?;
     m.add_class::<RolloutConfig>()?;
+    m.add_class::<PyResourceConfig>()?;
+
+    // Scheduler
+    m.add_class::<PyParallelScheduler>()?;
+    m.add_class::<PyRolloutDecision>()?;
 
     // Algorithms
     m.add_function(wrap_pyfunction!(run_backward_pass, m)?)?;

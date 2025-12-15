@@ -130,6 +130,59 @@ class TaskSortInfo:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class ResourceConfig:
+    resource_order: list[str]
+    dns_periods: dict[str, list[tuple[date, date]]]
+    spec_expansion: dict[str, list[str]]
+
+    def __init__(
+        self,
+        resource_order: list[str] | None = None,
+        dns_periods: dict[str, list[tuple[date, date]]] | None = None,
+        spec_expansion: dict[str, list[str]] | None = None,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
+class RolloutDecision:
+    task_id: str
+    task_priority: int
+    task_cr: float
+    competing_task_id: str
+    competing_priority: int
+    competing_cr: float
+    competing_eligible_date: date
+    schedule_score: float
+    skip_score: float
+    decision: str
+
+    def __repr__(self) -> str: ...
+
+class ParallelScheduler:
+    def __init__(
+        self,
+        tasks: list[Task],
+        current_date: date,
+        completed_task_ids: set[str] | None = None,
+        config: SchedulingConfig | None = None,
+        rollout_config: RolloutConfig | None = None,
+        resource_config: ResourceConfig | None = None,
+        global_dns_periods: list[tuple[date, date]] | None = None,
+        preprocess_result: PreProcessResult | None = None,
+    ) -> None: ...
+    def schedule(self) -> AlgorithmResult:
+        """Run the scheduling algorithm."""
+        ...
+    def get_computed_deadlines(self) -> dict[str, date]:
+        """Get computed deadlines."""
+        ...
+    def get_computed_priorities(self) -> dict[str, int]:
+        """Get computed priorities."""
+        ...
+    def get_rollout_decisions(self) -> list[RolloutDecision]:
+        """Get rollout decisions (only populated if rollout was enabled)."""
+        ...
+    def __repr__(self) -> str: ...
+
 # Functions
 
 def run_backward_pass(
