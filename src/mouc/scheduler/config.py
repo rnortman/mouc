@@ -30,6 +30,13 @@ class PreProcessorType(str, Enum):
     NONE = "none"
 
 
+class ImplementationType(str, Enum):
+    """Implementation language for scheduler."""
+
+    PYTHON = "python"
+    RUST = "rust"
+
+
 class AlgorithmConfig(BaseModel):
     """Configuration for algorithm selection."""
 
@@ -101,3 +108,6 @@ class SchedulingConfig(BaseModel):
 
     # CP-SAT configuration
     cpsat: CPSATConfig = CPSATConfig()
+
+    # Implementation language (python or rust)
+    implementation: ImplementationType = ImplementationType.PYTHON

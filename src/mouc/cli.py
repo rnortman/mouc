@@ -24,6 +24,7 @@ from .models import FeatureMap
 from .scheduler import (
     AlgorithmConfig,
     AlgorithmType,
+    ImplementationType,
     SchedulingConfig,
     SchedulingResult,
     SchedulingService,
@@ -362,7 +363,7 @@ def _format_gantt_output(mermaid_output: str, output_path: Path | None) -> None:
 
 
 @app.command()
-def gantt(  # noqa: PLR0913 - CLI command needs multiple options
+def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
@@ -465,6 +466,10 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
             help="Scheduling algorithm to use. Overrides config. Available: 'parallel_sgs'",
         ),
     ] = None,
+    rust: Annotated[
+        bool,
+        typer.Option("--rust", help="Use Rust scheduler implementation (faster)"),
+    ] = False,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -524,6 +529,12 @@ def gantt(  # noqa: PLR0913 - CLI command needs multiple options
         if scheduler_config is None:
             scheduler_config = SchedulingConfig()
         scheduler_config.algorithm = AlgorithmConfig(type=algorithm_type)
+
+    # Override implementation if --rust flag is passed
+    if rust:
+        if scheduler_config is None:
+            scheduler_config = SchedulingConfig()
+        scheduler_config.implementation = ImplementationType.RUST
 
     final_markdown_url = markdown_base_url or gantt_config_markdown_url
 
@@ -634,6 +645,10 @@ def schedule(
             help="Scheduling algorithm to use. Overrides config. Available: 'parallel_sgs'",
         ),
     ] = None,
+    rust: Annotated[
+        bool,
+        typer.Option("--rust", help="Use Rust scheduler implementation (faster)"),
+    ] = False,
     annotate_yaml: Annotated[
         bool,
         typer.Option(
@@ -674,6 +689,12 @@ def schedule(
         if scheduler_config is None:
             scheduler_config = SchedulingConfig()
         scheduler_config.algorithm = AlgorithmConfig(type=algorithm_type)
+
+    # Override implementation if --rust flag is passed
+    if rust:
+        if scheduler_config is None:
+            scheduler_config = SchedulingConfig()
+        scheduler_config.implementation = ImplementationType.RUST
 
     # Run scheduling service
     service = SchedulingService(

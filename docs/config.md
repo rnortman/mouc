@@ -354,6 +354,14 @@ Valid values:
 - `"bounded_rollout"` - Lookahead simulation for better priority handling
 - `"cpsat"` - Optimal scheduling using OR-Tools constraint solver (slower, best quality)
 
+**`implementation`** (optional, default: `"python"`): Implementation language for greedy schedulers.
+
+Valid values:
+- `"python"` - Use the Python implementation (default)
+- `"rust"` - Use the Rust implementation (faster for large projects)
+
+Note: Only applies to `parallel_sgs` and `bounded_rollout` algorithms. CP-SAT always uses Python. Can also be set via `--rust` CLI flag.
+
 **`preprocessor.type`** (optional, default: `"auto"`): Preprocessor to run before scheduling.
 
 Valid values:

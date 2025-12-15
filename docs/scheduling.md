@@ -957,3 +957,31 @@ With these inputs, CP-SAT will:
 | Explainability | High | High | Medium |
 
 *Optimal when solver completes; best-found when time-limited.
+
+## Rust Implementation
+
+The greedy schedulers (Parallel SGS and Bounded Rollout) have both Python and Rust implementations with identical behavior. The Rust implementation offers better performance for large projects.
+
+### Usage
+
+Via CLI flag:
+```bash
+mouc gantt feature_map.yaml --rust
+mouc schedule feature_map.yaml --rust
+```
+
+Via configuration:
+```yaml
+scheduler:
+  implementation: "rust"  # or "python" (default)
+  algorithm:
+    type: parallel_sgs  # or bounded_rollout
+```
+
+### When to Use Rust
+
+- **Large projects**: 100+ tasks benefit from Rust's speed
+- **Benchmarking**: Compare Python vs Rust performance
+- **CI/CD pipelines**: Faster scheduling in automated workflows
+
+Note: CP-SAT always uses Python (OR-Tools). The Rust implementation only applies to greedy algorithms.

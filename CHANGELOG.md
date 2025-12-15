@@ -19,6 +19,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bounded rollout scheduler uses rollout for resource choice when best resource unavailable
 
 ### Added
+- A reimplementation of the greedy schedulers in Rust for performance
+- `--rust` CLI flag for `gantt` and `schedule` commands to use Rust scheduler implementation
+- `scheduler.implementation` config option (`python` or `rust`) to select scheduler implementation
 - `scheduler.algorithm.type: cpsat` - OR-Tools CP-SAT optimal scheduler
 - `scheduler.preprocessor.type: auto` - Default preprocessor skips backward pass for CP-SAT (global optimizer doesn't need it)
 - `scheduler.auto_constraint_from_timeframe` config: control whether timeframe creates scheduling constraints (`both`, `start`, `end`, `none`)

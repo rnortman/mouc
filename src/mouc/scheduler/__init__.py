@@ -24,6 +24,7 @@ from .algorithms import BoundedRolloutScheduler, ParallelScheduler, create_algor
 from .config import (
     AlgorithmConfig,
     AlgorithmType,
+    ImplementationType,
     PreProcessorConfig,
     PreProcessorType,
     RolloutConfig,
@@ -69,6 +70,7 @@ __all__ = [
     "SchedulingConfig",
     "AlgorithmConfig",
     "AlgorithmType",
+    "ImplementationType",
     "PreProcessorConfig",
     "PreProcessorType",
     "RolloutConfig",
