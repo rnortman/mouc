@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from ortools.sat.python import cp_model
 
-from mouc.logger import get_logger
+from mouc.logger import changes_enabled, get_logger
 
 from ..config import SchedulingConfig
 from ..core import AlgorithmResult, PreProcessResult, ScheduledTask, Task
@@ -56,6 +56,28 @@ def _merge_blocked_periods(periods: list[tuple[date, date]]) -> list[tuple[date,
     # Don't forget the last period
     merged.append((current_start, current_end))
     return merged
+
+
+class _SolutionProgressCallback(cp_model.CpSolverSolutionCallback):
+    """Callback to log progress when new solutions are found."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._solution_count = 0
+
+    def on_solution_callback(self) -> None:
+        self._solution_count += 1
+        obj = self.objective_value
+        bound = self.best_objective_bound
+        gap = abs(obj - bound) / max(abs(obj), 1) * 100 if obj != 0 else 0
+        logger.changes(
+            "CP-SAT: Solution #%d found - objective=%d, bound=%d, gap=%.1f%%, time=%.1fs",
+            self._solution_count,
+            obj,
+            bound,
+            gap,
+            self.wall_time,
+        )
 
 
 class CPSATScheduler:
@@ -219,7 +241,8 @@ class CPSATScheduler:
         """
         solver = cp_model.CpSolver()
         solver.parameters.random_seed = self.config.cpsat.random_seed
-        solver.parameters.num_workers = 1  # Single-threaded for determinism
+        if self.config.cpsat.num_workers is not None:
+            solver.parameters.num_workers = self.config.cpsat.num_workers
         if self.config.cpsat.time_limit_seconds is not None:
             solver.parameters.max_time_in_seconds = self.config.cpsat.time_limit_seconds
 
@@ -229,7 +252,10 @@ class CPSATScheduler:
         solver.parameters.log_to_stdout = False
         solver.log_callback = solver_log_lines.append
 
-        status = solver.Solve(model)
+        # Add solution callback for live progress logging
+        callback = _SolutionProgressCallback() if changes_enabled() else None
+
+        status = solver.Solve(model, callback)
         status_name = solver.status_name(status)
         solver_log = "\n".join(solver_log_lines)
 
@@ -573,7 +599,8 @@ class CPSATScheduler:
 
             # Check if task has/will have a resource (for DNS-aware scheduling)
             has_explicit_resource = bool(task.resources)
-            has_auto_assign = bool(task.resource_spec and self.resource_config)
+            # Skip auto-assign for 0-duration tasks (milestones) - they don't consume resources
+            has_auto_assign = bool(duration > 0 and task.resource_spec and self.resource_config)
 
             # Get DNS periods for explicit resource
             dns_periods: list[tuple[date, date]] = []

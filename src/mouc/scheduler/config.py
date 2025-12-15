@@ -61,6 +61,7 @@ class CPSATConfig(BaseModel):
     """Configuration for CP-SAT optimal scheduler."""
 
     time_limit_seconds: float | None = 30.0  # None = no limit (run until optimal)
+    num_workers: int | None = None  # None = use all available cores, 1 = single-threaded
     tardiness_weight: float = 100.0  # Penalty for deadline violations
     priority_weight: float = 1.0  # Weight for priority-based completion time
     earliness_weight: float = 0.0  # Reward for slack before deadlines (0 = disabled)

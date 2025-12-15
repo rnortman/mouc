@@ -726,6 +726,7 @@ scheduler:
     type: cpsat
   cpsat:
     time_limit_seconds: 30.0    # Maximum solve time (null = no limit)
+    num_workers: null           # Parallel threads (null = all cores, 1 = single-threaded)
     tardiness_weight: 100.0     # Penalty for deadline violations
     earliness_weight: 0.0       # Reward for slack before deadlines
     priority_weight: 1.0        # Weight for priority optimization
@@ -738,6 +739,7 @@ scheduler:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `time_limit_seconds` | 30.0 | Maximum solve time. Use `null` to run until optimal. |
+| `num_workers` | null | Number of parallel threads. `null` uses all cores, `1` for deterministic. |
 | `tardiness_weight` | 100.0 | Penalty multiplier for deadline violations |
 | `earliness_weight` | 0.0 | Reward multiplier for finishing before deadlines (slack) |
 | `priority_weight` | 1.0 | Multiplier for priority-based completion time optimization |
@@ -834,11 +836,15 @@ scheduler:
 
 ### Determinism
 
-CP-SAT produces **deterministic results** via:
-- Single-threaded solving (`num_workers=1`)
-- Fixed random seed for tie-breaking
+By default, CP-SAT uses all available CPU cores for faster solving, which may produce different results across runs. For **deterministic results**, set:
 
-The same inputs always produce the same schedule.
+```yaml
+cpsat:
+  num_workers: 1  # Single-threaded for reproducibility
+  random_seed: 42  # Fixed seed (default)
+```
+
+With these settings, the same inputs always produce the same schedule.
 
 ### Greedy Hints
 

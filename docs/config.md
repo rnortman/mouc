@@ -364,6 +364,7 @@ Valid values:
 **CP-SAT Configuration** (only used when `algorithm.type` is `"cpsat"`):
 
 - **`time_limit_seconds`** (default: `30.0`): Maximum solver time. Use `null` to run until optimal.
+- **`num_workers`** (default: `null`): Number of parallel threads. `null` uses all available cores, `1` for single-threaded deterministic solving.
 - **`tardiness_weight`** (default: `100.0`): Penalty weight for deadline violations
 - **`earliness_weight`** (default: `0.0`): Reward for finishing before deadlines (slack). Set to 10-50 to encourage buffer time.
 - **`priority_weight`** (default: `1.0`): Weight for priority-based completion time optimization
