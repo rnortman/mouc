@@ -1084,3 +1084,38 @@ scheduler:
 - **CI/CD pipelines**: Faster scheduling in automated workflows
 
 Note: CP-SAT always uses Python (OR-Tools). Critical Path is Rust-only. Parallel SGS and Bounded Rollout have both implementations.
+
+## Scenario Comparison
+
+Compare "what-if" scenarios by exporting schedules to CSV and using the `compare` command.
+
+### Exporting a Schedule
+
+```bash
+mouc schedule feature_map.yaml --output-csv baseline.csv
+```
+
+The CSV contains: `task_id`, `task_name`, `priority`, `deadline`, `completion_date`.
+
+### Creating Scenarios
+
+Modify your feature map (priorities, deadlines, resources, algorithm parameters) and export again:
+
+```bash
+# Tweak priorities or deadlines in feature_map.yaml
+mouc schedule feature_map.yaml --output-csv scenario_high_priority.csv
+```
+
+### Comparing Scenarios
+
+```bash
+mouc compare baseline.csv scenario1.csv scenario2.csv -o comparison.csv
+```
+
+The comparison CSV includes:
+- Task metadata from baseline (id, name, priority, deadline)
+- `completion_baseline` - completion date from baseline
+- `completion_<scenario>` - completion date per scenario (name from filename)
+- `delta_<scenario>` - days difference vs baseline (positive = later, negative = earlier)
+
+Missing tasks show blank values. Import to a spreadsheet for analysis.

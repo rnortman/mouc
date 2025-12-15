@@ -1,5 +1,6 @@
 """Tests for CLI commands."""
 
+import csv
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -135,3 +136,210 @@ class TestGanttCommand:
 
         assert result.exit_code == 1
         assert "Invalid sort-by value" in result.output
+
+
+class TestScheduleCommand:
+    """Test the schedule CLI command."""
+
+    def test_schedule_output_csv(self, tmp_path: Path) -> None:
+        """Test schedule command with --output-csv."""
+        output_file = tmp_path / "schedule.csv"
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "examples/feature_map.yaml",
+                "--current-date",
+                "2025-01-01",
+                "--output-csv",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert output_file.exists()
+        content = output_file.read_text()
+        lines = content.strip().split("\n")
+
+        # Check header
+        assert lines[0] == "task_id,task_name,priority,deadline,completion_date"
+
+        # Check we have data rows
+        assert len(lines) > 1
+
+        # Check a known entity is in the output
+        assert "lock_free_queue" in content or "Lock-Free Queue" in content
+
+    def test_schedule_csv_has_correct_columns(self, tmp_path: Path) -> None:
+        """Test schedule CSV contains expected column values."""
+        output_file = tmp_path / "schedule.csv"
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "examples/feature_map.yaml",
+                "--current-date",
+                "2025-01-01",
+                "--output-csv",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        with output_file.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        assert len(rows) > 0
+
+        # Each row should have all expected columns
+        for row in rows:
+            assert "task_id" in row
+            assert "task_name" in row
+            assert "priority" in row
+            assert "deadline" in row
+            assert "completion_date" in row
+
+            # task_id should not be empty
+            assert row["task_id"]
+
+
+class TestCompareCommand:
+    """Test the compare CLI command."""
+
+    def test_compare_basic(self, tmp_path: Path) -> None:
+        """Test basic compare command with baseline and scenario."""
+        # Create baseline CSV
+        baseline = tmp_path / "baseline.csv"
+        baseline.write_text(
+            "task_id,task_name,priority,deadline,completion_date\n"
+            "task1,Task One,50,,2025-01-10\n"
+            "task2,Task Two,80,2025-02-01,2025-01-15\n"
+        )
+
+        # Create scenario CSV (task1 delayed, task2 earlier)
+        scenario = tmp_path / "faster.csv"
+        scenario.write_text(
+            "task_id,task_name,priority,deadline,completion_date\n"
+            "task1,Task One,50,,2025-01-15\n"
+            "task2,Task Two,80,2025-02-01,2025-01-10\n"
+        )
+
+        output = tmp_path / "comparison.csv"
+        result = runner.invoke(
+            app, ["compare", str(baseline), str(scenario), "--output", str(output)]
+        )
+
+        assert result.exit_code == 0
+        assert output.exists()
+
+        with output.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = {row["task_id"]: row for row in reader}
+
+        # Check header includes scenario columns
+        assert "completion_baseline" in rows["task1"]
+        assert "completion_faster" in rows["task1"]
+        assert "delta_faster" in rows["task1"]
+
+        # task1: 2025-01-10 -> 2025-01-15 = +5 days
+        assert rows["task1"]["delta_faster"] == "5"
+
+        # task2: 2025-01-15 -> 2025-01-10 = -5 days
+        assert rows["task2"]["delta_faster"] == "-5"
+
+    def test_compare_multiple_scenarios(self, tmp_path: Path) -> None:
+        """Test compare with multiple scenario files."""
+        baseline = tmp_path / "baseline.csv"
+        baseline.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-10\n"
+        )
+
+        scenario1 = tmp_path / "scenario_a.csv"
+        scenario1.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-12\n"
+        )
+
+        scenario2 = tmp_path / "scenario_b.csv"
+        scenario2.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-08\n"
+        )
+
+        output = tmp_path / "comparison.csv"
+        result = runner.invoke(
+            app,
+            [
+                "compare",
+                str(baseline),
+                str(scenario1),
+                str(scenario2),
+                "--output",
+                str(output),
+            ],
+        )
+
+        assert result.exit_code == 0
+
+        with output.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        assert len(rows) == 1
+        row = rows[0]
+
+        # Check both scenario columns present
+        assert "completion_scenario_a" in row
+        assert "delta_scenario_a" in row
+        assert "completion_scenario_b" in row
+        assert "delta_scenario_b" in row
+
+        assert row["delta_scenario_a"] == "2"  # +2 days
+        assert row["delta_scenario_b"] == "-2"  # -2 days
+
+    def test_compare_missing_task_in_scenario(self, tmp_path: Path) -> None:
+        """Test compare handles task in baseline but not in scenario."""
+        baseline = tmp_path / "baseline.csv"
+        baseline.write_text(
+            "task_id,task_name,priority,deadline,completion_date\n"
+            "task1,Task One,50,,2025-01-10\n"
+            "task2,Task Two,80,,2025-01-15\n"
+        )
+
+        scenario = tmp_path / "partial.csv"
+        scenario.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-12\n"
+        )
+
+        output = tmp_path / "comparison.csv"
+        result = runner.invoke(
+            app, ["compare", str(baseline), str(scenario), "--output", str(output)]
+        )
+
+        assert result.exit_code == 0
+
+        with output.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = {row["task_id"]: row for row in reader}
+
+        # task2 should have blank scenario completion and delta
+        assert rows["task2"]["completion_partial"] == ""
+        assert rows["task2"]["delta_partial"] == ""
+
+    def test_compare_stdout(self, tmp_path: Path) -> None:
+        """Test compare outputs to stdout by default."""
+        baseline = tmp_path / "baseline.csv"
+        baseline.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-10\n"
+        )
+
+        scenario = tmp_path / "scenario.csv"
+        scenario.write_text(
+            "task_id,task_name,priority,deadline,completion_date\ntask1,Task One,50,,2025-01-12\n"
+        )
+
+        result = runner.invoke(app, ["compare", str(baseline), str(scenario)])
+
+        assert result.exit_code == 0
+        assert "task_id,task_name,priority,deadline,completion_baseline" in result.stdout
+        assert "task1" in result.stdout

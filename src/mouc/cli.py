@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import csv
 import importlib
 import importlib.util
+import sys
 from contextlib import suppress
 from datetime import date
 from pathlib import Path
@@ -624,8 +626,31 @@ def _display_schedule_results(feature_map: FeatureMap, result: SchedulingResult)
         typer.echo("")
 
 
+def _export_schedule_csv(
+    feature_map: FeatureMap,
+    result: SchedulingResult,
+    output_path: Path,
+    default_priority: int,
+) -> None:
+    """Export schedule results to CSV for scenario comparison."""
+    with output_path.open("w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["task_id", "task_name", "priority", "deadline", "completion_date"])
+
+        for entity in feature_map.entities:
+            if entity.id not in result.annotations:
+                continue
+
+            annot = result.annotations[entity.id]
+            priority = entity.meta.get("priority", default_priority)
+            deadline = entity.meta.get("end_before", "")
+            completion_date = annot.estimated_end.isoformat() if annot.estimated_end else ""
+
+            writer.writerow([entity.id, entity.name, priority, deadline, completion_date])
+
+
 @app.command()
-def schedule(
+def schedule(  # noqa: PLR0913 - CLI command needs multiple options
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
@@ -656,6 +681,13 @@ def schedule(
             help="Write estimated_start/estimated_end back to YAML file",
         ),
     ] = False,
+    output_csv: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-csv",
+            help="Export schedule results to CSV file for scenario comparison",
+        ),
+    ] = None,
 ) -> None:
     """Run scheduling algorithm and display or persist results."""
     # Parse current date if provided
@@ -707,7 +739,11 @@ def schedule(
     result = service.schedule()
 
     # Display or persist results
-    if annotate_yaml:
+    if output_csv:
+        default_priority = scheduler_config.default_priority if scheduler_config else 50
+        _export_schedule_csv(feature_map, result, output_csv, default_priority)
+        typer.echo(f"Schedule exported to {output_csv}")
+    elif annotate_yaml:
         _annotate_feature_map(feature_map, result, file)
     else:
         _display_schedule_results(feature_map, result)
@@ -717,6 +753,96 @@ def schedule(
         typer.echo("\nWarnings:", err=True)
         for warning in result.warnings:
             typer.echo(f"  - {warning}", err=True)
+
+
+@app.command()
+def compare(
+    baseline: Annotated[Path, typer.Argument(help="Baseline CSV file from schedule --output-csv")],
+    scenarios: Annotated[
+        list[Path], typer.Argument(help="One or more scenario CSV files to compare")
+    ],
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Output file (default: stdout)"),
+    ] = None,
+) -> None:
+    """Compare schedule scenarios against a baseline.
+
+    Takes CSV files exported from 'schedule --output-csv' and produces a combined
+    comparison showing completion dates and deltas for each scenario.
+    """
+    # Read baseline
+    baseline_data: dict[str, dict[str, str]] = {}
+    with baseline.open(newline="") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            baseline_data[row["task_id"]] = row
+
+    # Read scenarios
+    scenario_names: list[str] = []
+    scenario_data: list[dict[str, dict[str, str]]] = []
+    for scenario_path in scenarios:
+        name = scenario_path.stem  # filename without extension
+        scenario_names.append(name)
+        data: dict[str, dict[str, str]] = {}
+        with scenario_path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                data[row["task_id"]] = row
+        scenario_data.append(data)
+
+    # Collect all task IDs (baseline union scenarios)
+    all_task_ids = set(baseline_data.keys())
+    for data in scenario_data:
+        all_task_ids.update(data.keys())
+
+    # Build header
+    header = ["task_id", "task_name", "priority", "deadline", "completion_baseline"]
+    for name in scenario_names:
+        header.append(f"completion_{name}")
+        header.append(f"delta_{name}")
+
+    # Build rows
+    rows: list[list[str]] = []
+    for task_id in sorted(all_task_ids):
+        baseline_row = baseline_data.get(task_id, {})
+        task_name = baseline_row.get("task_name", "")
+        priority = baseline_row.get("priority", "")
+        deadline = baseline_row.get("deadline", "")
+        baseline_completion = baseline_row.get("completion_date", "")
+
+        row = [task_id, task_name, priority, deadline, baseline_completion]
+
+        for i in range(len(scenario_names)):
+            scenario_row = scenario_data[i].get(task_id, {})
+            scenario_completion = scenario_row.get("completion_date", "")
+            row.append(scenario_completion)
+
+            # Compute delta in days
+            delta = ""
+            if baseline_completion and scenario_completion:
+                try:
+                    base_date = date.fromisoformat(baseline_completion)
+                    scen_date = date.fromisoformat(scenario_completion)
+                    delta = str((scen_date - base_date).days)
+                except ValueError:
+                    pass
+            row.append(delta)
+
+        rows.append(row)
+
+    # Write output
+    out_file = output.open("w", newline="") if output else sys.stdout
+    try:
+        writer = csv.writer(out_file)
+        writer.writerow(header)
+        writer.writerows(rows)
+    finally:
+        if output:
+            out_file.close()
+
+    if output:
+        typer.echo(f"Comparison written to {output}")
 
 
 @app.command()

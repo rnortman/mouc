@@ -214,6 +214,8 @@ See [docs/jira.md](docs/jira.md) for setup and configuration.
 | Command | Description |
 |---------|-------------|
 | `mouc gantt` | Generate Mermaid Gantt chart with automatic scheduling |
+| `mouc schedule` | Run scheduler and display or export results |
+| `mouc compare` | Compare schedule scenarios (CSV diff with deltas) |
 | `mouc graph` | Generate Graphviz dependency graph |
 | `mouc doc` | Generate Markdown or DOCX documentation |
 | `mouc jira sync` | Sync metadata from Jira |
