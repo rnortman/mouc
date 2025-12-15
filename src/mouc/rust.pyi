@@ -222,7 +222,7 @@ class CriticalPathScheduler:
 def run_backward_pass(
     tasks: list[Task],
     completed_task_ids: set[str],
-    default_priority: int = 50,
+    default_priority: int,
 ) -> PreProcessResult:
     """Run the backward pass algorithm to compute deadlines and priorities.
 

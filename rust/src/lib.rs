@@ -43,7 +43,7 @@ pub use sorting::{sort_tasks, AtcParams, SortKey, SortingError, TaskSortInfo};
 /// # Raises
 /// * ValueError if circular dependency is detected
 #[pyfunction]
-#[pyo3(signature = (tasks, completed_task_ids, default_priority=50))]
+#[pyo3(signature = (tasks, completed_task_ids, default_priority))]
 fn run_backward_pass(
     tasks: Vec<Task>,
     completed_task_ids: HashSet<String>,

@@ -3,6 +3,7 @@
 from datetime import date
 from typing import Any
 
+from ..config import SchedulingConfig
 from ..core import PreProcessResult, Task, compute_dependency_deadline
 
 
@@ -115,7 +116,7 @@ class BackwardPassPreProcessor:
                 latest[task_id] = task.end_before
 
         # Initialize priorities with base values
-        default_priority = self.config.get("default_priority", 50)
+        default_priority = self.config.get("default_priority", SchedulingConfig().default_priority)
         for task_id, task in tasks.items():
             base_priority = default_priority
             if task.meta:

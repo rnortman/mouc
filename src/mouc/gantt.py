@@ -48,7 +48,7 @@ class GanttMetadata(BaseModel):
     end_before: str | date | None = None  # Constraint: hard deadline
     timeframe: str | None = None  # Convenience: sets start_after and end_before from timeframe
     status: str | None = None  # Task status: "done" marks task as completed
-    priority: int = 50  # Urgency indicator (0-100, default 50)
+    priority: int | None = None  # Urgency indicator (0-100), uses config default if not set
 
 
 @dataclass(slots=True, frozen=True)
@@ -140,7 +140,9 @@ class GanttScheduler:
         )
 
         # Create styling context for task styling (with config access)
-        config_dict = {"gantt": self.gantt_config.model_dump()}
+        config_dict: dict[str, object] = {"gantt": self.gantt_config.model_dump()}
+        if self.scheduler_config:
+            config_dict["scheduler"] = self.scheduler_config.model_dump()
         self.styling_context: StylingContext = create_styling_context(
             feature_map, output_format="gantt", config=config_dict, style_tags=style_tags
         )

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 # Import registries directly (not through public API since this is internal)
 from . import styling
-from .scheduler import parse_timeframe
+from .scheduler import SchedulingConfig, parse_timeframe
 from .unified_config import DEFAULT_ENTITY_TYPES
 
 if TYPE_CHECKING:
@@ -174,8 +174,8 @@ def _builtin_sort_by_name(entities: Sequence[Entity], _context: StylingContext) 
 
 def _builtin_sort_by_priority(entities: Sequence[Entity], context: StylingContext) -> list[Entity]:
     """Sort entities by priority metadata descending (higher priority first)."""
-    # Get default priority from scheduler config
-    default_priority = 50
+    # Get default priority from scheduler config (fall back to config class default)
+    default_priority = SchedulingConfig().default_priority
     config: dict[str, object] | None = getattr(context, "_config", None)
     if config is not None:
         scheduler_config = config.get("scheduler")

@@ -740,7 +740,11 @@ def schedule(  # noqa: PLR0913 - CLI command needs multiple options
 
     # Display or persist results
     if output_csv:
-        default_priority = scheduler_config.default_priority if scheduler_config else 50
+        default_priority = (
+            scheduler_config.default_priority
+            if scheduler_config
+            else SchedulingConfig().default_priority
+        )
         _export_schedule_csv(feature_map, result, output_csv, default_priority)
         typer.echo(f"Schedule exported to {output_csv}")
     elif annotate_yaml:
