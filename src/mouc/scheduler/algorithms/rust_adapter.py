@@ -1,15 +1,34 @@
 """Adapter to use Rust scheduler implementation from Python."""
 
+import logging
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from mouc import rust
+from mouc.logger import CHANGES_LEVEL, CHECKS_LEVEL, get_logger
 
 from ..config import AlgorithmType, SchedulingConfig
 from ..core import AlgorithmResult, PreProcessResult, ScheduledTask, Task
 
 if TYPE_CHECKING:
     from mouc.resources import DNSPeriod, ResourceConfig
+
+
+def _get_verbosity() -> int:
+    """Get verbosity level from Python logger for Rust scheduler.
+
+    Returns:
+        Verbosity level: 0=silent, 1=changes, 2=checks, 3=debug
+    """
+    logger = get_logger()
+    level = logger.level
+    if level >= logging.ERROR:
+        return 0  # SILENT
+    if level >= CHANGES_LEVEL:
+        return 1  # CHANGES
+    if level >= CHECKS_LEVEL:
+        return 2  # CHECKS
+    return 3  # DEBUG
 
 
 class RustSchedulerAdapter:
@@ -121,6 +140,7 @@ class RustSchedulerAdapter:
             atc_k=config.atc_k,
             atc_default_urgency_multiplier=config.atc_default_urgency_multiplier,
             atc_default_urgency_floor=config.atc_default_urgency_floor,
+            verbosity=_get_verbosity(),
         )
 
     def _convert_resource_config(
@@ -177,6 +197,7 @@ class RustSchedulerAdapter:
             k=config.critical_path.k,
             no_deadline_urgency_multiplier=config.critical_path.no_deadline_urgency_multiplier,
             urgency_floor=config.critical_path.urgency_floor,
+            verbosity=_get_verbosity(),
         )
 
     def schedule(self) -> AlgorithmResult:

@@ -85,6 +85,7 @@ class SchedulingConfig:
     atc_k: float
     atc_default_urgency_multiplier: float
     atc_default_urgency_floor: float
+    verbosity: int
 
     def __init__(
         self,
@@ -97,6 +98,7 @@ class SchedulingConfig:
         atc_k: float | None = None,
         atc_default_urgency_multiplier: float | None = None,
         atc_default_urgency_floor: float | None = None,
+        verbosity: int | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
 
@@ -188,6 +190,7 @@ class CriticalPathConfig:
     k: float
     no_deadline_urgency_multiplier: float
     urgency_floor: float
+    verbosity: int
 
     def __init__(
         self,
@@ -195,6 +198,7 @@ class CriticalPathConfig:
         k: float = 2.0,
         no_deadline_urgency_multiplier: float = 0.5,
         urgency_floor: float = 0.1,
+        verbosity: int = 0,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

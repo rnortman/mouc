@@ -12,6 +12,7 @@ use std::collections::{HashMap, HashSet};
 pub mod backward_pass;
 mod config;
 pub mod critical_path;
+pub mod logging;
 mod models;
 pub mod scheduler;
 pub mod sorting;

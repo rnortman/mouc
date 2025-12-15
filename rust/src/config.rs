@@ -33,6 +33,9 @@ pub struct SchedulingConfig {
     /// ATC minimum urgency for no-deadline tasks
     #[pyo3(get, set)]
     pub atc_default_urgency_floor: f64,
+    /// Verbosity level: 0=silent, 1=changes, 2=checks, 3=debug
+    #[pyo3(get, set)]
+    pub verbosity: u8,
 }
 
 impl Default for SchedulingConfig {
@@ -47,6 +50,7 @@ impl Default for SchedulingConfig {
             atc_k: 2.0,
             atc_default_urgency_multiplier: 1.0,
             atc_default_urgency_floor: 0.3,
+            verbosity: 0,
         }
     }
 }
@@ -63,7 +67,8 @@ impl SchedulingConfig {
         default_cr_floor=None,
         atc_k=None,
         atc_default_urgency_multiplier=None,
-        atc_default_urgency_floor=None
+        atc_default_urgency_floor=None,
+        verbosity=None
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -76,6 +81,7 @@ impl SchedulingConfig {
         atc_k: Option<f64>,
         atc_default_urgency_multiplier: Option<f64>,
         atc_default_urgency_floor: Option<f64>,
+        verbosity: Option<u8>,
     ) -> Self {
         let defaults = Self::default();
         Self {
@@ -90,6 +96,7 @@ impl SchedulingConfig {
                 .unwrap_or(defaults.atc_default_urgency_multiplier),
             atc_default_urgency_floor: atc_default_urgency_floor
                 .unwrap_or(defaults.atc_default_urgency_floor),
+            verbosity: verbosity.unwrap_or(defaults.verbosity),
         }
     }
 

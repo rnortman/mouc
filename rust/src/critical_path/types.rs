@@ -23,6 +23,10 @@ pub struct CriticalPathConfig {
     /// Minimum urgency floor for all targets.
     #[pyo3(get, set)]
     pub urgency_floor: f64,
+
+    /// Verbosity level: 0=silent, 1=changes, 2=checks, 3=debug.
+    #[pyo3(get, set)]
+    pub verbosity: u8,
 }
 
 #[pymethods]
@@ -32,19 +36,22 @@ impl CriticalPathConfig {
         default_priority=50,
         k=2.0,
         no_deadline_urgency_multiplier=0.5,
-        urgency_floor=0.1
+        urgency_floor=0.1,
+        verbosity=0
     ))]
     fn new(
         default_priority: i32,
         k: f64,
         no_deadline_urgency_multiplier: f64,
         urgency_floor: f64,
+        verbosity: u8,
     ) -> Self {
         Self {
             default_priority,
             k,
             no_deadline_urgency_multiplier,
             urgency_floor,
+            verbosity,
         }
     }
 
@@ -63,6 +70,7 @@ impl Default for CriticalPathConfig {
             k: 2.0,
             no_deadline_urgency_multiplier: 0.5,
             urgency_floor: 0.1,
+            verbosity: 0,
         }
     }
 }

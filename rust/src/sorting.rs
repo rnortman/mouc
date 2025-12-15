@@ -309,6 +309,7 @@ mod tests {
             atc_k: 2.0,
             atc_default_urgency_multiplier: 1.0,
             atc_default_urgency_floor: 0.3,
+            verbosity: 0,
         }
     }
 

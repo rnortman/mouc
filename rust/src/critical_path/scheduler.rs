@@ -6,6 +6,7 @@ use thiserror::Error;
 
 use crate::models::{AlgorithmResult, ScheduledTask, Task};
 use crate::scheduler::{ResourceConfig, ResourceSchedule};
+use crate::{log_changes, log_checks, log_debug};
 
 use super::calculation::{calculate_critical_path, CriticalPathError};
 use super::scoring::{compute_urgency_with_context, score_task};
@@ -230,11 +231,14 @@ impl CriticalPathScheduler {
 
         let mut current_time = self.current_date;
         let max_iterations = self.tasks.len() * 100;
+        let verbosity = self.config.verbosity;
 
         for _iteration in 0..max_iterations {
             if unscheduled.is_empty() {
                 break;
             }
+
+            log_changes!(verbosity, "Time: {}", current_time);
 
             // Calculate critical paths for all unscheduled tasks (each is a potential target)
             let target_infos =
@@ -242,6 +246,17 @@ impl CriticalPathScheduler {
 
             // Rank targets by attractiveness
             let ranked_targets = self.rank_targets(&target_infos, current_time);
+
+            log_debug!(
+                verbosity,
+                "  Ranked targets: {}",
+                ranked_targets
+                    .iter()
+                    .take(3)
+                    .map(|t| format!("{}(score={:.2})", t.target_id, t.score))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
 
             // Try to schedule from each target in order
             let mut scheduled_any = false;
@@ -262,6 +277,19 @@ impl CriticalPathScheduler {
                 // Pick best task by WSPT
                 let best_task_id = self.pick_best_task(&eligible);
 
+                let task = self.tasks.get(&best_task_id);
+                let priority = task
+                    .and_then(|t| t.priority)
+                    .unwrap_or(self.config.default_priority);
+
+                log_checks!(
+                    verbosity,
+                    "  Considering task {} (priority={}, target={})",
+                    best_task_id,
+                    priority,
+                    target.target_id
+                );
+
                 // Try to schedule it
                 if let Some(scheduled_task) =
                     self.try_schedule_task(&best_task_id, current_time, &mut resource_schedules)
@@ -271,9 +299,34 @@ impl CriticalPathScheduler {
                         (scheduled_task.start_date, scheduled_task.end_date),
                     );
                     unscheduled.remove(&best_task_id);
+
+                    if scheduled_task.duration_days == 0.0 {
+                        log_changes!(
+                            verbosity,
+                            "  Scheduled milestone {} at {}",
+                            best_task_id,
+                            current_time
+                        );
+                    } else {
+                        log_changes!(
+                            verbosity,
+                            "  Scheduled task {} on {} from {} to {}",
+                            best_task_id,
+                            scheduled_task.resources.join(", "),
+                            scheduled_task.start_date,
+                            scheduled_task.end_date
+                        );
+                    }
+
                     result.push(scheduled_task);
                     scheduled_any = true;
                     break; // Single-target focus per iteration
+                } else {
+                    log_checks!(
+                        verbosity,
+                        "    Skipping {}: Resources not available now",
+                        best_task_id
+                    );
                 }
             }
 
@@ -285,8 +338,19 @@ impl CriticalPathScheduler {
                     &resource_schedules,
                     current_time,
                 ) {
-                    Some(next_time) => current_time = next_time,
-                    None => break,
+                    Some(next_time) => {
+                        log_debug!(
+                            verbosity,
+                            "  No tasks scheduled at {}, advancing to {}",
+                            current_time,
+                            next_time
+                        );
+                        current_time = next_time;
+                    }
+                    None => {
+                        log_debug!(verbosity, "  No more events, stopping");
+                        break;
+                    }
                 }
             }
         }

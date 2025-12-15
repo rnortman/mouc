@@ -8,6 +8,7 @@ use crate::backward_pass::{backward_pass, BackwardPassConfig};
 use crate::config::{RolloutConfig, SchedulingConfig};
 use crate::models::{AlgorithmResult, ScheduledTask, Task};
 use crate::sorting::{sort_tasks, AtcParams, SortingError, TaskSortInfo};
+use crate::{log_changes, log_checks, log_debug};
 
 use super::resource_schedule::ResourceSchedule;
 use super::rollout::RolloutDecision;
@@ -394,11 +395,15 @@ impl ParallelScheduler {
 
         let mut current_time = self.current_date;
         let max_iterations = self.tasks.len() * 100;
+        let verbosity = self.config.verbosity;
 
         for _iteration in 0..max_iterations {
             if unscheduled.is_empty() {
                 break;
             }
+
+            // Log current time
+            log_changes!(verbosity, "Time: {}", current_time);
 
             // Find eligible tasks at current_time
             let eligible = self.find_eligible_tasks(&scheduled, &unscheduled, current_time);
@@ -411,6 +416,13 @@ impl ParallelScheduler {
             let sorted_eligible =
                 self.sort_eligible_tasks(&eligible, current_time, default_cr, atc_params.as_ref())?;
 
+            log_debug!(
+                verbosity,
+                "  Eligible tasks: {} (default_cr={:.2})",
+                sorted_eligible.len(),
+                default_cr
+            );
+
             // Try to schedule each eligible task
             let mut scheduled_any = false;
             for task_id in sorted_eligible {
@@ -419,11 +431,43 @@ impl ParallelScheduler {
                     None => continue,
                 };
 
+                // Get priority and CR for logging
+                let priority = self
+                    .computed_priorities
+                    .get(&task_id)
+                    .copied()
+                    .unwrap_or(self.config.default_priority);
+                let deadline = self.computed_deadlines.get(&task_id);
+                let cr_str = if let Some(dl) = deadline {
+                    if *dl != NaiveDate::MAX {
+                        let slack = (*dl - current_time).num_days() as f64;
+                        format!("{:.2}", slack / task.duration_days.max(1.0))
+                    } else {
+                        format!("{:.2} (default)", default_cr)
+                    }
+                } else {
+                    format!("{:.2} (default)", default_cr)
+                };
+
+                log_checks!(
+                    verbosity,
+                    "  Considering task {} (priority={}, CR={})",
+                    task_id,
+                    priority,
+                    cr_str
+                );
+
                 // Zero-duration tasks (milestones)
                 if task.duration_days == 0.0 {
                     scheduled.insert(task_id.clone(), (current_time, current_time));
                     unscheduled.remove(&task_id);
                     scheduled_any = true;
+                    log_changes!(
+                        verbosity,
+                        "  Scheduled milestone {} at {}",
+                        task_id,
+                        current_time
+                    );
                     result.push(ScheduledTask {
                         task_id,
                         start_date: current_time,
@@ -449,6 +493,14 @@ impl ParallelScheduler {
                         scheduled.insert(task_id.clone(), (current_time, end_date));
                         unscheduled.remove(&task_id);
                         scheduled_any = true;
+                        log_changes!(
+                            verbosity,
+                            "  Scheduled task {} on {} from {} to {}",
+                            task_id,
+                            resource,
+                            current_time,
+                            end_date
+                        );
                         result.push(ScheduledTask {
                             task_id,
                             start_date: current_time,
@@ -456,6 +508,12 @@ impl ParallelScheduler {
                             duration_days: task.duration_days,
                             resources: vec![resource],
                         });
+                    } else {
+                        log_checks!(
+                            verbosity,
+                            "    Skipping {}: No resource available now",
+                            task_id
+                        );
                     }
                 } else {
                     // Explicit resource assignment
@@ -474,6 +532,14 @@ impl ParallelScheduler {
                         scheduled.insert(task_id.clone(), (current_time, end_date));
                         unscheduled.remove(&task_id);
                         scheduled_any = true;
+                        log_changes!(
+                            verbosity,
+                            "  Scheduled task {} on {} from {} to {}",
+                            task_id,
+                            resources.join(", "),
+                            current_time,
+                            end_date
+                        );
                         result.push(ScheduledTask {
                             task_id,
                             start_date: current_time,
@@ -481,6 +547,12 @@ impl ParallelScheduler {
                             duration_days: task.duration_days,
                             resources,
                         });
+                    } else {
+                        log_checks!(
+                            verbosity,
+                            "    Skipping {}: Resources not available now",
+                            task_id
+                        );
                     }
                 }
             }
@@ -493,8 +565,19 @@ impl ParallelScheduler {
                     &resource_schedules,
                     current_time,
                 ) {
-                    Some(next_time) => current_time = next_time,
-                    None => break,
+                    Some(next_time) => {
+                        log_debug!(
+                            verbosity,
+                            "  No tasks scheduled at {}, advancing to {}",
+                            current_time,
+                            next_time
+                        );
+                        current_time = next_time;
+                    }
+                    None => {
+                        log_debug!(verbosity, "  No more events, stopping");
+                        break;
+                    }
                 }
             }
         }
@@ -940,6 +1023,25 @@ impl ParallelScheduler {
             return Some(false);
         }
 
+        let verbosity = self.config.verbosity;
+
+        // Log rollout trigger
+        if let Some((competing_id, competing_priority, competing_cr, competing_date)) =
+            upcoming.first()
+        {
+            log_checks!(
+                verbosity,
+                "    Rollout triggered: {} (pri={}, CR={:.2}) vs {} (pri={}, CR={:.2}, eligible={})",
+                task_id,
+                task_priority,
+                task_cr,
+                competing_id,
+                competing_priority,
+                competing_cr,
+                competing_date
+            );
+        }
+
         // Run rollout simulation to decide
         let state = SchedulerState::new(
             scheduled.clone(),
@@ -962,6 +1064,13 @@ impl ParallelScheduler {
             .run_rollout_simulation(skip_state, horizon, Some(task_id))
             .ok()?;
 
+        log_checks!(
+            verbosity,
+            "    Rollout scores: schedule={:.2}, skip={:.2}",
+            schedule_score,
+            skip_score
+        );
+
         // Record decision
         if let Some((competing_id, competing_priority, competing_cr, competing_date)) =
             upcoming.first()
@@ -971,6 +1080,15 @@ impl ParallelScheduler {
             } else {
                 "schedule".to_string()
             };
+
+            if decision == "skip" {
+                log_changes!(
+                    verbosity,
+                    "  Rollout: skipping {} to wait for {}",
+                    task_id,
+                    competing_id
+                );
+            }
 
             self.rollout_decisions.push(RolloutDecision::new(
                 task_id.to_string(),
