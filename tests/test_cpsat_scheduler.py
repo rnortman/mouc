@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 
 import pytest
+from ortools.sat.python import cp_model
 
 from mouc.models import Dependency
 from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
@@ -811,5 +812,421 @@ class TestGreedyHints:
         result = scheduler.schedule()
 
         assert result.algorithm_metadata["greedy_seeded"] is True
-        # 1 task × (2 start/end hints + 2 resource presence hints) = 4
+        # 1 task × (start + end + size + 2 presences) = 5
+        assert result.algorithm_metadata["hint_count"] == 5
+
+    def test_greedy_hints_with_fixed_tasks(self):
+        """Greedy hints work when there are fixed tasks with dependencies."""
+        # Fixed task in the past
+        fixed_task = Task(
+            id="fixed_past",
+            duration_days=5.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            start_on=date(2025, 1, 1),
+            meta={"priority": 50},
+        )
+        # Task depending on fixed task
+        dependent_task = Task(
+            id="follow_up",
+            duration_days=3.0,
+            resources=[("alice", 1.0)],
+            dependencies=dep_list("fixed_past"),
+            meta={"priority": 50},
+        )
+
+        resource_config = ResourceConfig(resources=[ResourceDefinition(name="alice")])
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [fixed_task, dependent_task],
+            date(2025, 1, 10),
+            resource_config=resource_config,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        assert result.algorithm_metadata["hint_count"] >= 2  # At least start+end for dependent
+
+        # Verify the schedule is correct
+        tasks_by_id = {t.task_id: t for t in result.scheduled_tasks}
+        assert tasks_by_id["fixed_past"].start_date == date(2025, 1, 1)
+        assert tasks_by_id["follow_up"].start_date >= date(2025, 1, 6)  # After fixed ends
+
+    def test_solver_log_shows_hint_usage(self):
+        """Verify OR-Tools solver log indicates hints are being used."""
+        # Create a simple model with hints
+        model = cp_model.CpModel()
+        x = model.new_int_var(0, 100, "x")
+        y = model.new_int_var(0, 100, "y")
+        model.add(x + y <= 100)
+        model.maximize(x + y)
+
+        # Add hints
+        model.add_hint(x, 50)
+        model.add_hint(y, 50)
+
+        # Solve with logging enabled
+        solver = cp_model.CpSolver()
+        solver.parameters.log_search_progress = True
+        solver.parameters.log_to_stdout = False
+
+        log_lines: list[str] = []
+        solver.log_callback = log_lines.append
+
+        status = solver.solve(model)
+        assert status == cp_model.OPTIMAL
+
+        # Check log for hint acceptance message
+        full_log = "\n".join(log_lines)
+        # OR-Tools logs "The solution hint is complete and is feasible" when hints are accepted
+        assert "solution hint is complete and is feasible" in full_log.lower(), (
+            f"Expected hint acceptance message in solver log:\n{full_log}"
+        )
+
+
+class TestComplexHintScenarios:
+    """Complex scenarios testing hint validation with DNS, dependencies, auto-assignment."""
+
+    def test_hints_with_task_spanning_dns(self):
+        """Hints work correctly when task spans a DNS period."""
+        # DNS period in the middle of the schedule
+        dns_periods = [DNSPeriod(start=date(2025, 1, 8), end=date(2025, 1, 12))]
+
+        task = Task(
+            id="spanning_task",
+            duration_days=10.0,  # 10 work days
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            global_dns_periods=dns_periods,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        # Should schedule: work Jan 1-7 (7 days), DNS Jan 8-12, work Jan 13-15 (3 days)
+        # Total calendar span: Jan 1 -> Jan 16
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date == date(2025, 1, 1)
+        assert scheduled.end_date == date(2025, 1, 16)
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × (start + end + size) = 3
+        assert result.algorithm_metadata["hint_count"] == 3
+        assert result.algorithm_metadata["hints_complete"] is True
+
+    def test_hints_with_multiple_dns_periods(self):
+        """Hints work with multiple DNS periods affecting the schedule."""
+        dns_periods = [
+            DNSPeriod(start=date(2025, 1, 6), end=date(2025, 1, 8)),  # 3 days
+            DNSPeriod(start=date(2025, 1, 15), end=date(2025, 1, 17)),  # 3 days
+        ]
+
+        task = Task(
+            id="multi_dns_task",
+            duration_days=15.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            global_dns_periods=dns_periods,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × (start + end + size) = 3
+        assert result.algorithm_metadata["hint_count"] == 3
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date == date(2025, 1, 1)
+        # Work: Jan 1-5 (5d), DNS Jan 6-8, Work Jan 9-14 (6d), DNS Jan 15-17, Work Jan 18-21 (4d)
+        assert scheduled.end_date == date(2025, 1, 22)
+
+    def test_hints_with_dependency_chain_and_dns(self):
+        """Hints work with dependency chains where tasks span DNS periods."""
+        dns_periods = [DNSPeriod(start=date(2025, 1, 10), end=date(2025, 1, 12))]
+
+        tasks = [
+            Task(
+                id="task_a",
+                duration_days=5.0,
+                resources=[("alice", 1.0)],
+                dependencies=[],
+                meta={"priority": 80},
+            ),
+            Task(
+                id="task_b",
+                duration_days=5.0,
+                resources=[("alice", 1.0)],
+                dependencies=dep_list("task_a"),
+                meta={"priority": 50},
+            ),
+            Task(
+                id="task_c",
+                duration_days=3.0,
+                resources=[("alice", 1.0)],
+                dependencies=dep_list("task_b"),
+                meta={"priority": 30},
+            ),
+        ]
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            tasks,
+            date(2025, 1, 1),
+            global_dns_periods=dns_periods,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 3 tasks × (start + end + size) = 9
+        assert result.algorithm_metadata["hint_count"] == 9
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        tasks_by_id = {t.task_id: t for t in result.scheduled_tasks}
+        # Task A: Jan 1-6
+        assert tasks_by_id["task_a"].start_date == date(2025, 1, 1)
+        assert tasks_by_id["task_a"].end_date == date(2025, 1, 6)
+        # Task B: Jan 6-14 (spans DNS Jan 10-12)
+        assert tasks_by_id["task_b"].start_date == date(2025, 1, 6)
+        assert tasks_by_id["task_b"].end_date == date(2025, 1, 14)
+        # Task C: Jan 14-17
+        assert tasks_by_id["task_c"].start_date == date(2025, 1, 14)
+        assert tasks_by_id["task_c"].end_date == date(2025, 1, 17)
+
+    def test_hints_with_auto_assignment_and_different_dns(self):
+        """Auto-assignment hints work when resources have different DNS periods."""
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(
+                    name="alice",
+                    dns_periods=[DNSPeriod(start=date(2025, 1, 5), end=date(2025, 1, 10))],
+                ),
+                ResourceDefinition(
+                    name="bob",
+                    dns_periods=[DNSPeriod(start=date(2025, 1, 15), end=date(2025, 1, 20))],
+                ),
+            ]
+        )
+
+        task = Task(
+            id="auto_task",
+            duration_days=8.0,
+            resources=[],
+            resource_spec="alice|bob",
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task: start + end + size + 2 presences + 2 per-resource sizes + 2 per-resource completions = 9
+        assert result.algorithm_metadata["hint_count"] == 9
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        scheduled = result.scheduled_tasks[0]
+        # Bob is better choice - no DNS until Jan 15, so finishes Jan 9
+        # Alice would finish Jan 14 (work Jan 1-4, DNS Jan 5-10, work Jan 11-14)
+        assert scheduled.resources == ["bob"]
+        assert scheduled.start_date == date(2025, 1, 1)
+        assert scheduled.end_date == date(2025, 1, 9)
+
+    def test_hints_with_fixed_task_dependency_and_dns(self):
+        """Hints work when depending on fixed task with DNS affecting schedule."""
+        dns_periods = [DNSPeriod(start=date(2025, 1, 12), end=date(2025, 1, 15))]
+
+        tasks = [
+            # Fixed task in the past
+            Task(
+                id="fixed_past",
+                duration_days=5.0,
+                resources=[("alice", 1.0)],
+                dependencies=[],
+                start_on=date(2025, 1, 1),
+                meta={"priority": 50},
+            ),
+            # Dependent task that will span DNS
+            Task(
+                id="dependent",
+                duration_days=10.0,
+                resources=[("alice", 1.0)],
+                dependencies=dep_list("fixed_past"),
+                meta={"priority": 50},
+            ),
+        ]
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            tasks,
+            date(2025, 1, 10),  # Current date after fixed task
+            global_dns_periods=dns_periods,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # Fixed task doesn't get hints, only dependent task: start + end + size = 3
+        assert result.algorithm_metadata["hint_count"] == 3
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        tasks_by_id = {t.task_id: t for t in result.scheduled_tasks}
+        assert tasks_by_id["fixed_past"].start_date == date(2025, 1, 1)
+        assert tasks_by_id["fixed_past"].end_date == date(2025, 1, 6)
+        # Dependent: starts Jan 10, works Jan 10-11 (2d), DNS Jan 12-15, works Jan 16-23 (8d)
+        assert tasks_by_id["dependent"].start_date == date(2025, 1, 10)
+        assert tasks_by_id["dependent"].end_date == date(2025, 1, 24)
+
+    def test_hints_with_global_and_resource_dns(self):
+        """Hints work when both global and resource-specific DNS apply."""
+        global_dns = [DNSPeriod(start=date(2025, 1, 6), end=date(2025, 1, 8))]  # Company holiday
+
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(
+                    name="alice",
+                    dns_periods=[DNSPeriod(start=date(2025, 1, 13), end=date(2025, 1, 15))],
+                ),
+            ]
+        )
+
+        task = Task(
+            id="dual_dns_task",
+            duration_days=12.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            resource_config=resource_config,
+            global_dns_periods=global_dns,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × (start + end + size) = 3
+        assert result.algorithm_metadata["hint_count"] == 3
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date == date(2025, 1, 1)
+        # Work: Jan 1-5 (5d), global DNS Jan 6-8, work Jan 9-12 (4d),
+        # resource DNS Jan 13-15, work Jan 16-18 (3d) = 12 work days
+        assert scheduled.end_date == date(2025, 1, 19)
+
+    def test_hints_with_multiple_auto_assign_tasks(self):
+        """Multiple auto-assignment tasks correctly hint resources."""
+        resource_config = ResourceConfig(
+            resources=[
+                ResourceDefinition(
+                    name="alice",
+                    dns_periods=[DNSPeriod(start=date(2025, 1, 10), end=date(2025, 1, 12))],
+                ),
+                ResourceDefinition(name="bob"),
+            ]
+        )
+
+        tasks = [
+            Task(
+                id="task_a",
+                duration_days=5.0,
+                resources=[],
+                resource_spec="alice|bob",
+                dependencies=[],
+                meta={"priority": 80},
+            ),
+            Task(
+                id="task_b",
+                duration_days=5.0,
+                resources=[],
+                resource_spec="alice|bob",
+                dependencies=[],
+                meta={"priority": 50},
+            ),
+            Task(
+                id="task_c",
+                duration_days=5.0,
+                resources=[],
+                resource_spec="alice|bob",
+                dependencies=[],
+                meta={"priority": 30},
+            ),
+        ]
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            tasks,
+            date(2025, 1, 1),
+            resource_config=resource_config,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 3 tasks × (start + end + size + 2 presences + 1 alice size + 1 alice completion) = 21
+        assert result.algorithm_metadata["hint_count"] == 21
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        # Tasks should be distributed across resources
+        resources_used = {t.resources[0] for t in result.scheduled_tasks}
+        assert len(resources_used) == 2  # Both alice and bob should be used
+
+    def test_hints_with_deadline_spanning_dns(self):
+        """Hints work when deadline creates urgency and task spans DNS."""
+        dns_periods = [DNSPeriod(start=date(2025, 1, 8), end=date(2025, 1, 10))]
+
+        task = Task(
+            id="deadline_task",
+            duration_days=8.0,
+            resources=[("alice", 1.0)],
+            dependencies=[],
+            end_before=date(2025, 1, 15),  # Tight deadline
+            meta={"priority": 50},
+        )
+
+        config = SchedulingConfig(cpsat=CPSATConfig(use_greedy_hints=True))
+        scheduler = CPSATScheduler(
+            [task],
+            date(2025, 1, 1),
+            global_dns_periods=dns_periods,
+            config=config,
+        )
+        result = scheduler.schedule()
+
+        assert result.algorithm_metadata["greedy_seeded"] is True
+        # 1 task × (start + end + size + lateness) = 4
         assert result.algorithm_metadata["hint_count"] == 4
+        assert result.algorithm_metadata["hints_complete"] is True
+
+        scheduled = result.scheduled_tasks[0]
+        assert scheduled.start_date == date(2025, 1, 1)
+        # Work: Jan 1-7 (7d), DNS Jan 8-10, work Jan 11 (1d) = 8 work days
+        assert scheduled.end_date == date(2025, 1, 12)
+        # Should meet deadline
+        assert scheduled.end_date <= date(2025, 1, 15)

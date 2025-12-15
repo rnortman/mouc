@@ -1,5 +1,6 @@
 """CP-SAT optimal scheduler using Google OR-Tools."""
 
+import logging
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
 
@@ -123,6 +124,7 @@ class CPSATScheduler:
         fixed_tasks: list[ScheduledTask] = []
         tasks_to_schedule: list[Task] = []
 
+        fixed_task_objects: list[Task] = []  # Original Task objects for greedy
         for task in self.tasks.values():
             if task.id in self.completed_task_ids:
                 continue
@@ -130,6 +132,7 @@ class CPSATScheduler:
             if task.start_on is not None or task.end_on is not None:
                 # Fixed task - convert to ScheduledTask directly
                 fixed_tasks.append(self._create_fixed_scheduled_task(task))
+                fixed_task_objects.append(task)
             else:
                 tasks_to_schedule.append(task)
 
@@ -140,7 +143,9 @@ class CPSATScheduler:
             )
 
         # Run greedy for hints and tighter horizon
-        greedy_result = self._run_greedy_for_hints(tasks_to_schedule)
+        # Include fixed tasks so greedy can resolve dependencies on them
+        all_tasks_for_greedy = tasks_to_schedule + fixed_task_objects
+        greedy_result = self._run_greedy_for_hints(all_tasks_for_greedy)
 
         # Calculate planning horizon
         if greedy_result and greedy_result.scheduled_tasks:
@@ -162,15 +167,71 @@ class CPSATScheduler:
         if greedy_result:
             hint_count = self._add_greedy_hints(model, task_vars, greedy_result)
 
-        # Solve with deterministic settings
+        # Solve and extract results
+        solver, status_name, solver_log = self._solve_model(model)
+        scheduled_tasks = self._extract_solution(solver, task_vars)
+
+        # Check if hints were used. OR-Tools reports several cases:
+        # - "solution hint is complete and is feasible" - all vars hinted, hint is valid
+        # - "complete_hint" as solution source - hint was completed and used
+        # - "[hint]" as solution source - hint was used directly
+        # - "hint is incomplete" + any of above - partial hint was completed
+        solver_log_lower = solver_log.lower()
+        hints_complete = "solution hint is complete and is feasible" in solver_log_lower
+        hints_accepted = (
+            hints_complete or "complete_hint" in solver_log_lower or "[hint]" in solver_log_lower
+        )
+
+        # Log solver progress if configured (uses changes level for visibility)
+        cpsat_config = self.config.cpsat
+        if cpsat_config.log_solver_progress and solver_log:
+            logger.changes("CP-SAT solver log:\n%s", solver_log)
+
+        # Warn if hints were provided but not complete/accepted
+        if greedy_result and cpsat_config.warn_on_incomplete_hints and not hints_complete:
+            logger.warning(
+                "CP-SAT greedy hints incomplete: %d hints provided but solver reports "
+                "'%s'. This may indicate a bug in hint generation.",
+                hint_count,
+                "accepted (partial)" if hints_accepted else "not accepted",
+            )
+
+        return AlgorithmResult(
+            scheduled_tasks=fixed_tasks + scheduled_tasks,
+            algorithm_metadata={
+                "algorithm": "cpsat",
+                "status": status_name,
+                "objective_value": solver.ObjectiveValue() if status_name == "OPTIMAL" else None,
+                "solve_time_seconds": solver.WallTime(),
+                "greedy_seeded": greedy_result is not None,
+                "hint_count": hint_count,
+                "hints_complete": hints_complete,
+                "hints_accepted": hints_accepted,
+                "solver_log": solver_log,
+            },
+        )
+
+    def _solve_model(self, model: cp_model.CpModel) -> tuple[Any, str, str]:
+        """Configure and run the CP-SAT solver.
+
+        Returns:
+            Tuple of (solver, status_name, solver_log)
+        """
         solver = cp_model.CpSolver()
         solver.parameters.random_seed = self.config.cpsat.random_seed
         solver.parameters.num_workers = 1  # Single-threaded for determinism
         if self.config.cpsat.time_limit_seconds is not None:
             solver.parameters.max_time_in_seconds = self.config.cpsat.time_limit_seconds
 
+        # Capture solver log to verify hint acceptance
+        solver_log_lines: list[str] = []
+        solver.parameters.log_search_progress = True
+        solver.parameters.log_to_stdout = False
+        solver.log_callback = solver_log_lines.append
+
         status = solver.Solve(model)
         status_name = solver.status_name(status)
+        solver_log = "\n".join(solver_log_lines)
 
         if status_name == "INFEASIBLE":
             msg = "CP-SAT solver found the problem infeasible. Check constraints."
@@ -184,20 +245,7 @@ class CPSATScheduler:
             msg = f"CP-SAT solver failed with status: {status_name}"
             raise ValueError(msg)
 
-        # Extract solution
-        scheduled_tasks = self._extract_solution(solver, task_vars)
-
-        return AlgorithmResult(
-            scheduled_tasks=fixed_tasks + scheduled_tasks,
-            algorithm_metadata={
-                "algorithm": "cpsat",
-                "status": status_name,
-                "objective_value": solver.ObjectiveValue() if status_name == "OPTIMAL" else None,
-                "solve_time_seconds": solver.WallTime(),
-                "greedy_seeded": greedy_result is not None,
-                "hint_count": hint_count,
-            },
-        )
+        return solver, status_name, solver_log
 
     def get_computed_deadlines(self) -> dict[str, date]:
         """Get computed deadlines from preprocess result.
@@ -279,6 +327,10 @@ class CPSATScheduler:
         if not self.config.cpsat.use_greedy_hints:
             return None
 
+        # Temporarily silence logging while running greedy (it's very chatty)
+        original_level = logger.level
+        logger.setLevel(logging.WARNING)
+
         try:
             # Make copies of tasks since greedy may modify them in-place
             # (e.g., setting resources for auto-assigned tasks)
@@ -310,8 +362,81 @@ class CPSATScheduler:
         except ValueError:
             # Greedy scheduler may fail on tasks it can't handle (e.g., no resources)
             # Fall back to no hints
-            logger.debug("Greedy scheduler failed, proceeding without hints")
             return None
+        finally:
+            # Restore original logging level
+            logger.setLevel(original_level)
+
+    def _validate_hint_end_offset(  # noqa: PLR0913 - validation needs all context
+        self,
+        task_id: str,
+        start_offset: int,
+        end_offset: int,
+        duration: int,
+        completion_table: list[int] | None,
+        selected_resource: str | None,
+        greedy_task: ScheduledTask,
+    ) -> None:
+        """Validate that greedy's end offset matches completion table."""
+        if completion_table is not None:
+            if start_offset >= len(completion_table):
+                raise RuntimeError(
+                    f"Hint validation error for task '{task_id}': "
+                    f"start_offset {start_offset} exceeds completion table size "
+                    f"{len(completion_table)} (greedy start={greedy_task.start_date})"
+                )
+            expected_end = completion_table[start_offset]
+            if end_offset != expected_end:
+                resource_info = f" on resource '{selected_resource}'" if selected_resource else ""
+                raise RuntimeError(
+                    f"Hint validation error for task '{task_id}'{resource_info}: "
+                    f"greedy end_offset={end_offset} but completion_table[{start_offset}]={expected_end}. "
+                    f"Greedy dates: {greedy_task.start_date} -> {greedy_task.end_date}. "
+                    f"This indicates a bug in completion time calculation."
+                )
+        else:
+            # No completion table (no DNS) - end should be start + duration
+            expected_end = start_offset + duration
+            if end_offset != expected_end:
+                raise RuntimeError(
+                    f"Hint validation error for task '{task_id}': "
+                    f"greedy end_offset={end_offset} but expected start+duration={expected_end}. "
+                    f"Greedy dates: {greedy_task.start_date} -> {greedy_task.end_date}. "
+                    f"This indicates a bug in completion time calculation."
+                )
+
+    def _add_auto_assignment_hints(
+        self,
+        model: cp_model.CpModel,
+        vars_dict: dict[str, Any],
+        start_offset: int,
+        end_offset: int,
+        selected_resource: str | None,
+    ) -> int:
+        """Add hints for auto-assignment variables. Returns hint count."""
+        hint_count = 0
+        for resource, presence_var in vars_dict["resource_presences"].items():
+            model.add_hint(presence_var, 1 if resource == selected_resource else 0)
+            hint_count += 1
+
+        # Hint per-resource size and completion vars for all candidates
+        resource_size_vars = vars_dict.get("resource_size_vars", {})
+        resource_completion_vars = vars_dict.get("resource_completion_vars", {})
+        completion_tables = vars_dict.get("completion_tables_by_resource", {})
+
+        for resource in resource_size_vars:
+            table = completion_tables.get(resource)
+            res_end = table[start_offset] if table and start_offset < len(table) else end_offset
+            model.add_hint(resource_size_vars[resource], res_end - start_offset)
+            hint_count += 1
+
+        for resource in resource_completion_vars:
+            table = completion_tables.get(resource)
+            res_end = table[start_offset] if table and start_offset < len(table) else end_offset
+            model.add_hint(resource_completion_vars[resource], res_end)
+            hint_count += 1
+
+        return hint_count
 
     def _add_greedy_hints(
         self,
@@ -330,17 +455,71 @@ class CPSATScheduler:
             greedy_task = greedy_by_id[task_id]
             start_offset = self._date_to_offset(greedy_task.start_date)
             end_offset = self._date_to_offset(greedy_task.end_date)
+            duration = vars_dict["duration"]
 
+            # Determine completion table and selected resource
+            completion_table: list[int] | None = None
+            selected_resource: str | None = None
+            is_auto_assign = vars_dict.get("resource_presences") and greedy_task.resources
+
+            if is_auto_assign:
+                selected_resource = greedy_task.resources[0]
+                completion_tables = vars_dict.get("completion_tables_by_resource", {})
+                completion_table = completion_tables.get(selected_resource)
+            else:
+                completion_table = vars_dict.get("completion_table")
+
+            # Validate end offset matches completion table
+            self._validate_hint_end_offset(
+                task_id,
+                start_offset,
+                end_offset,
+                duration,
+                completion_table,
+                selected_resource,
+                greedy_task,
+            )
+
+            # Add core hints: start, end, size
             model.add_hint(vars_dict["start"], start_offset)
             model.add_hint(vars_dict["end"], end_offset)
             hint_count += 2
 
-            # Hint resource selection for auto-assignment
-            if vars_dict.get("resource_presences") and greedy_task.resources:
-                selected = greedy_task.resources[0]
-                for resource, presence_var in vars_dict["resource_presences"].items():
-                    model.add_hint(presence_var, 1 if resource == selected else 0)
-                    hint_count += 1
+            if vars_dict.get("size") is not None:
+                model.add_hint(vars_dict["size"], end_offset - start_offset)
+                hint_count += 1
+
+            # Add auto-assignment hints
+            if is_auto_assign:
+                hint_count += self._add_auto_assignment_hints(
+                    model, vars_dict, start_offset, end_offset, selected_resource
+                )
+
+            # Add objective variable hints (lateness, earliness)
+            hint_count += self._add_objective_hints(model, vars_dict, end_offset)
+
+        return hint_count
+
+    def _add_objective_hints(
+        self,
+        model: cp_model.CpModel,
+        vars_dict: dict[str, Any],
+        end_offset: int,
+    ) -> int:
+        """Add hints for objective-related variables (lateness, earliness). Returns hint count."""
+        hint_count = 0
+
+        if vars_dict.get("lateness") is not None and vars_dict.get("deadline_offset") is not None:
+            deadline_offset = vars_dict["deadline_offset"]
+            lateness_hint = max(0, end_offset - deadline_offset)
+            model.add_hint(vars_dict["lateness"], lateness_hint)
+            hint_count += 1
+
+        if vars_dict.get("earliness") is not None and vars_dict.get("deadline_offset") is not None:
+            deadline_offset = vars_dict["deadline_offset"]
+            earliness_hint = max(0, deadline_offset - end_offset)
+            model.add_hint(vars_dict["earliness"], earliness_hint)
+            hint_count += 1
 
         return hint_count
 
@@ -402,20 +581,27 @@ class CPSATScheduler:
                 resource_name = task.resources[0][0]
                 dns_periods = self._get_dns_periods_for_resource(resource_name)
 
+            # Store completion table for hint validation (if DNS-aware)
+            stored_completion_table: list[int] | None = None
+
+            # Track size_var for hinting (None if fixed duration)
+            stored_size_var = None
+
             if dns_periods or has_auto_assign:
                 # Use variable-size interval for DNS-aware completion
                 # Size represents calendar span (can be > duration due to DNS gaps)
                 size_var = model.new_int_var(duration, horizon * 2, f"size_{task.id}")
+                stored_size_var = size_var
                 interval_var = model.new_interval_var(
                     start_var, size_var, end_var, f"interval_{task.id}"
                 )
 
                 # For explicit resource with DNS, add element constraint
                 if has_explicit_resource and dns_periods:
-                    completion_table = self._build_completion_table(
+                    stored_completion_table = self._build_completion_table(
                         task.duration_days, dns_periods, horizon
                     )
-                    model.add_element(start_var, completion_table, end_var)
+                    model.add_element(start_var, stored_completion_table, end_var)
             else:
                 # No DNS periods - use fixed duration interval
                 interval_var = model.new_interval_var(
@@ -425,11 +611,14 @@ class CPSATScheduler:
             task_vars[task.id] = {
                 "start": start_var,
                 "end": end_var,
+                "size": stored_size_var,  # None if fixed duration
                 "interval": interval_var,
                 "duration": duration,
                 "resources": [],
                 "resource_intervals": {},
                 "resource_presences": {},
+                "completion_table": stored_completion_table,
+                "completion_tables_by_resource": {},  # For auto-assign
             }
 
             # Handle resource assignment
@@ -471,6 +660,9 @@ class CPSATScheduler:
         presences: list[Any] = []  # BoolVar instances
         resource_intervals: dict[str, Any] = {}  # IntervalVar instances
         resource_presences: dict[str, Any] = {}  # BoolVar instances
+        resource_size_vars: dict[str, Any] = {}  # Per-resource size vars for hinting
+        resource_completion_vars: dict[str, Any] = {}  # Per-resource completion vars for hinting
+        completion_tables_by_resource: dict[str, list[int] | None] = {}
 
         for resource in candidates:
             presence = model.new_bool_var(f"presence_{task.id}_{resource}")
@@ -485,6 +677,7 @@ class CPSATScheduler:
                 completion_table = self._build_completion_table(
                     task.duration_days, dns_periods, horizon
                 )
+                completion_tables_by_resource[resource] = completion_table
 
                 # Create completion var for this candidate
                 completion_var = model.new_int_var(
@@ -502,8 +695,13 @@ class CPSATScheduler:
                 optional_interval = model.new_optional_interval_var(
                     start_var, size_var, end_var, presence, f"opt_interval_{task.id}_{resource}"
                 )
+
+                # Store for hinting
+                resource_size_vars[resource] = size_var
+                resource_completion_vars[resource] = completion_var
             else:
                 # No DNS - use fixed duration
+                completion_tables_by_resource[resource] = None
                 optional_interval = model.new_optional_interval_var(
                     start_var, duration, end_var, presence, f"opt_interval_{task.id}_{resource}"
                 )
@@ -517,7 +715,10 @@ class CPSATScheduler:
 
         task_var_dict["resource_intervals"] = resource_intervals
         task_var_dict["resource_presences"] = resource_presences
+        task_var_dict["resource_size_vars"] = resource_size_vars
+        task_var_dict["resource_completion_vars"] = resource_completion_vars
         task_var_dict["candidate_resources"] = candidates
+        task_var_dict["completion_tables_by_resource"] = completion_tables_by_resource
 
     def _add_precedence_constraints(
         self,
@@ -670,6 +871,9 @@ class CPSATScheduler:
                 model.add_max_equality(lateness, [0, end_var - deadline_offset])
                 # Weight by priority (high priority deadline misses are worse)
                 tardiness_terms.append(lateness * priority)
+                # Store for hinting
+                vars_dict["lateness"] = lateness
+                vars_dict["deadline_offset"] = deadline_offset
 
                 # Earliness: reward for finishing before deadline (slack)
                 if cpsat_config.earliness_weight > 0:
@@ -678,6 +882,8 @@ class CPSATScheduler:
                     model.add_max_equality(earliness, [0, deadline_offset - end_var])
                     # Weight by priority (slack for high priority is more valuable)
                     earliness_terms.append(earliness * priority)
+                    # Store for hinting
+                    vars_dict["earliness"] = earliness
 
             # Priority: complete high-priority tasks earlier
             # minimize Σ(end_time * priority) encourages high-priority to finish early

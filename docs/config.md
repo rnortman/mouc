@@ -369,6 +369,8 @@ Valid values:
 - **`priority_weight`** (default: `1.0`): Weight for priority-based completion time optimization
 - **`random_seed`** (default: `42`): Fixed seed for deterministic results
 - **`use_greedy_hints`** (default: `true`): Run greedy scheduler first to seed CP-SAT with hints and compute a tighter horizon
+- **`warn_on_incomplete_hints`** (default: `true`): Log a warning if greedy hints are incomplete or rejected by the solver
+- **`log_solver_progress`** (default: `false`): Log CP-SAT solver progress at verbosity level 1 (`-v 1`)
 
 **Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
 

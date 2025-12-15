@@ -743,6 +743,8 @@ scheduler:
 | `priority_weight` | 1.0 | Multiplier for priority-based completion time optimization |
 | `random_seed` | 42 | Fixed seed for reproducible results |
 | `use_greedy_hints` | true | Run greedy scheduler first to seed CP-SAT with hints |
+| `warn_on_incomplete_hints` | true | Warn if greedy hints are incomplete or rejected |
+| `log_solver_progress` | false | Log solver progress at verbosity level 1 |
 
 ### Objective Function
 
@@ -844,12 +846,29 @@ By default (`use_greedy_hints: true`), CP-SAT runs the greedy Parallel SGS sched
 
 1. **Compute a tighter horizon**: Uses greedy makespan + 30 days instead of heuristic estimates. Smaller horizons mean faster solving.
 
-2. **Provide solution hints**: Seeds the solver with start times, end times, and resource selections from the greedy solution via `model.add_hint()`.
+2. **Provide complete solution hints**: Seeds the solver with values for ALL variables via `model.add_hint()`:
+   - Start and end times for each task
+   - Size variables (calendar span accounting for DNS gaps)
+   - Resource selection for auto-assigned tasks
+   - Per-resource size and completion variables
+   - Objective variables (lateness, earliness for deadline tasks)
 
 **Benefits:**
 - Solver immediately has a feasible solution
 - Better upper bound for pruning (branches worse than the hint are cut early)
 - Faster time to first solution and often faster to optimal
+- Complete hints allow OR-Tools to verify feasibility immediately
+
+**Production validation:**
+
+By default (`warn_on_incomplete_hints: true`), a warning is logged if hints are incomplete:
+```
+CP-SAT greedy hints incomplete: 3 hints provided but solver reports 'accepted (partial)'. This may indicate a bug in hint generation.
+```
+
+**Solver progress logging:**
+
+Enable `log_solver_progress: true` to see the full OR-Tools solver trace at verbosity level 1 (`-v 1`). This shows search progress, hint acceptance, and solution quality over time.
 
 **When to disable:**
 - If greedy and optimal solutions differ significantly (hints may slow search)
@@ -859,6 +878,8 @@ By default (`use_greedy_hints: true`), CP-SAT runs the greedy Parallel SGS sched
 scheduler:
   cpsat:
     use_greedy_hints: false  # Disable greedy seeding
+    warn_on_incomplete_hints: false  # Disable warning
+    log_solver_progress: true  # Enable solver trace at -v 1
 ```
 
 ### Solution Status

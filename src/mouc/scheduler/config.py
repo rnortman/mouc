@@ -66,6 +66,8 @@ class CPSATConfig(BaseModel):
     earliness_weight: float = 0.0  # Reward for slack before deadlines (0 = disabled)
     random_seed: int = 42
     use_greedy_hints: bool = True  # Run greedy scheduler to seed CP-SAT with hints
+    warn_on_incomplete_hints: bool = True  # Warn if greedy hints are incomplete/rejected
+    log_solver_progress: bool = False  # Log solver progress at debug verbosity
 
 
 class SchedulingConfig(BaseModel):

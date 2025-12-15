@@ -601,11 +601,13 @@ class ParallelScheduler:
 
         resource_schedules: dict[str, ResourceSchedule] = {}
         for resource in all_resources:
-            unavailable_periods = []
             if self.resource_config:
                 unavailable_periods = self.resource_config.get_dns_periods(
                     resource, self.global_dns_periods
                 )
+            else:
+                # No resource config - use global DNS periods directly
+                unavailable_periods = [(dns.start, dns.end) for dns in self.global_dns_periods]
             resource_schedules[resource] = ResourceSchedule(
                 unavailable_periods=unavailable_periods,
                 resource_name=resource,

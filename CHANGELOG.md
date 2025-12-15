@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `scheduler.auto_constraint_from_timeframe` config: control whether timeframe creates scheduling constraints (`both`, `start`, `end`, `none`)
 - `scheduler.strategy: atc` - Apparent Tardiness Cost scheduling strategy with exponential deadline urgency
 - `scheduler.cpsat.use_greedy_hints` - Run greedy scheduler first to seed CP-SAT with hints and tighter horizon (default: true)
+- `scheduler.cpsat.warn_on_incomplete_hints` - Warn if greedy hints are incomplete or rejected (default: true)
+- `scheduler.cpsat.log_solver_progress` - Log CP-SAT solver progress at verbosity level 1 (default: false)
 
 ## [0.6.4] - 2025-12-11
 
