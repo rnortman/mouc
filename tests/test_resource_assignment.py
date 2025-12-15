@@ -1,12 +1,14 @@
 """Tests for automatic resource assignment functionality."""
 
 from datetime import date, timedelta
+from typing import Any
 
 from mouc.resources import UNASSIGNED_RESOURCE, DNSPeriod, ResourceConfig, ResourceDefinition
-from mouc.scheduler import ParallelScheduler, Task
+from mouc.scheduler import Task
+from mouc.scheduler.config import AlgorithmType
 
 
-def test_wildcard_assignment_all_resources():
+def test_wildcard_assignment_all_resources(make_scheduler: Any) -> None:
     """Test that '*' assigns to first available resource."""
     config = ResourceConfig(
         resources=[
@@ -26,7 +28,7 @@ def test_wildcard_assignment_all_resources():
         resource_spec="*",  # Wildcard - should pick first available
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -34,7 +36,7 @@ def test_wildcard_assignment_all_resources():
     assert result[0].resources == ["alice"]
 
 
-def test_pipe_separated_assignment():
+def test_pipe_separated_assignment(make_scheduler: Any) -> None:
     """Test that 'john|mary|susan' picks first available from list."""
     config = ResourceConfig(
         resources=[
@@ -53,7 +55,7 @@ def test_pipe_separated_assignment():
         resource_spec="john|mary|susan",
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -61,7 +63,7 @@ def test_pipe_separated_assignment():
     assert result[0].resources == ["john"]
 
 
-def test_pipe_assignment_respects_order():
+def test_pipe_assignment_respects_order(make_scheduler: Any) -> None:
     """Test that pipe-separated list picks first available, not first in config."""
     config = ResourceConfig(
         resources=[
@@ -81,14 +83,14 @@ def test_pipe_assignment_respects_order():
         resource_spec="charlie|bob|alice",
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     assert result[0].resources == ["charlie"]
 
 
-def test_dns_period_blocks_assignment():
+def test_dns_period_blocks_assignment(make_scheduler: Any) -> None:
     """Test that DNS periods prevent resource assignment."""
     config = ResourceConfig(
         resources=[
@@ -110,7 +112,7 @@ def test_dns_period_blocks_assignment():
         resource_spec="alice|bob",
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 5), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 5), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -118,7 +120,7 @@ def test_dns_period_blocks_assignment():
     assert result[0].resources == ["bob"]
 
 
-def test_group_alias_expansion():
+def test_group_alias_expansion(make_scheduler: Any) -> None:
     """Test that group aliases are expanded correctly."""
     config = ResourceConfig(
         resources=[
@@ -137,7 +139,7 @@ def test_group_alias_expansion():
         resource_spec="team_a",
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -145,8 +147,10 @@ def test_group_alias_expansion():
     assert result[0].resources == ["john"]
 
 
-def test_assignment_with_busy_resources():
+def test_assignment_with_busy_resources(make_scheduler: Any, scheduler_variant: Any) -> None:
     """Test that busy resources are skipped in favor of available ones."""
+    algorithm_type, _ = scheduler_variant
+
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),
@@ -163,7 +167,7 @@ def test_assignment_with_busy_resources():
         dependencies=[],
     )
 
-    # Task 2 wants alice|bob but alice is busy
+    # Task 2 wants alice|bob but alice is busy (in greedy algorithms)
     task2 = Task(
         id="task2",
         duration_days=5.0,
@@ -172,7 +176,7 @@ def test_assignment_with_busy_resources():
         resource_spec="alice|bob",
     )
 
-    scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task1, task2], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -180,13 +184,28 @@ def test_assignment_with_busy_resources():
     task1_result = next(r for r in result if r.task_id == "task1")
     assert task1_result.resources == ["alice"]
 
-    # task2 gets bob (alice is busy)
     task2_result = next(r for r in result if r.task_id == "task2")
-    assert task2_result.resources == ["bob"]
+    # task2 must get either alice or bob (valid resource from spec)
+    assert task2_result.resources in [["alice"], ["bob"]]
+
+    # If both use alice, they must not overlap
+    if task2_result.resources == ["alice"]:
+        assert (
+            task1_result.end_date < task2_result.start_date
+            or task2_result.end_date < task1_result.start_date
+        )
+
+    # For greedy algorithms: task2 gets bob (alice is busy at same start time)
+    if algorithm_type == AlgorithmType.PARALLEL_SGS:
+        assert task2_result.resources == ["bob"]
 
 
-def test_assignment_waits_for_resource_availability():
+def test_assignment_waits_for_resource_availability(
+    make_scheduler: Any, scheduler_variant: Any
+) -> None:
     """Test that tasks wait if no resources in spec are available."""
+    algorithm_type, _ = scheduler_variant
+
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),
@@ -212,7 +231,7 @@ def test_assignment_waits_for_resource_availability():
         resource_spec="alice",  # Only alice, no pipe-separated alternatives
     )
 
-    scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task1, task2], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -220,17 +239,29 @@ def test_assignment_waits_for_resource_availability():
     task1_result = next(r for r in result if r.task_id == "task1")
     task2_result = next(r for r in result if r.task_id == "task2")
 
-    # task1 starts immediately
-    assert task1_result.start_date == date(2025, 1, 1)
-    assert task1_result.end_date == date(2025, 1, 1) + timedelta(days=5.0)
-
-    # task2 waits for alice to be free
-    assert task2_result.start_date == task1_result.end_date + timedelta(days=1)
+    # Both use alice
+    assert task1_result.resources == ["alice"]
     assert task2_result.resources == ["alice"]
 
+    # They don't overlap (one must wait for the other)
+    assert (
+        task1_result.end_date < task2_result.start_date
+        or task2_result.end_date < task1_result.start_date
+    )
 
-def test_deadline_priority_with_auto_assignment():
+    # For greedy algorithms, check exact timing: task1 first, task2 waits
+    if algorithm_type == AlgorithmType.PARALLEL_SGS:
+        assert task1_result.start_date == date(2025, 1, 1)
+        assert task1_result.end_date == date(2025, 1, 1) + timedelta(days=5.0)
+        assert task2_result.start_date == task1_result.end_date + timedelta(days=1)
+
+
+def test_deadline_priority_with_auto_assignment(
+    make_scheduler: Any, scheduler_variant: Any
+) -> None:
     """Test that tasks with tight deadlines get first pick of resources."""
+    algorithm_type, _ = scheduler_variant
+
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),
@@ -238,9 +269,7 @@ def test_deadline_priority_with_auto_assignment():
         groups={},
     )
 
-    # Task with tight deadline: 3 days away, 3 days duration → CR = 3/3 = 1.0 (critical!)
-    # Give it higher priority to ensure it wins
-    # With CR=1.0 and priority=80: score = 10*1.0 + 1*(100-80) = 30
+    # Task with tight deadline
     task1 = Task(
         id="task_urgent",
         duration_days=3.0,
@@ -251,9 +280,7 @@ def test_deadline_priority_with_auto_assignment():
         meta={"priority": 80},
     )
 
-    # Task without deadline (will get median CR = 1.0, priority=50)
-    # With CR=1.0 and priority=50: score = 10*1.0 + 1*(100-50) = 60
-    # Higher score = less urgent, so this task waits
+    # Task without deadline
     task2 = Task(
         id="task_regular",
         duration_days=3.0,
@@ -262,20 +289,25 @@ def test_deadline_priority_with_auto_assignment():
         resource_spec="*",
     )
 
-    scheduler = ParallelScheduler([task2, task1], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task2, task1], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
 
-    # Urgent task should be scheduled first (even though task2 is first in list)
     task1_result = next(r for r in result if r.task_id == "task_urgent")
     task2_result = next(r for r in result if r.task_id == "task_regular")
 
-    assert task1_result.start_date == date(2025, 1, 1)
-    assert task2_result.start_date > task1_result.end_date
+    # Both should be assigned alice
+    assert task1_result.resources == ["alice"]
+    assert task2_result.resources == ["alice"]
+
+    # For greedy algorithms, urgent task should be scheduled first
+    if algorithm_type == AlgorithmType.PARALLEL_SGS:
+        assert task1_result.start_date == date(2025, 1, 1)
+        assert task2_result.start_date > task1_result.end_date
 
 
-def test_no_resource_spec_no_assignment():
+def test_no_resource_spec_no_assignment(make_scheduler: Any) -> None:
     """Test that tasks without resource_spec are not auto-assigned."""
     config = ResourceConfig(
         resources=[
@@ -293,7 +325,7 @@ def test_no_resource_spec_no_assignment():
         resource_spec=None,  # No auto-assignment
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -301,7 +333,7 @@ def test_no_resource_spec_no_assignment():
     assert result[0].resources == ["bob"]
 
 
-def test_empty_resource_spec_uses_unassigned():
+def test_empty_resource_spec_uses_unassigned(make_scheduler: Any) -> None:
     """Test that tasks with no resources get assigned to 'unassigned' resource."""
     config = ResourceConfig(
         resources=[
@@ -329,7 +361,7 @@ def test_empty_resource_spec_uses_unassigned():
         resource_spec=None,
     )
 
-    scheduler = ParallelScheduler([task1, task2], date(2025, 1, 1), resource_config=config)
+    scheduler = make_scheduler([task1, task2], date(2025, 1, 1), resource_config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2

@@ -1,9 +1,13 @@
-"""Tests for bounded rollout scheduling algorithm."""
+"""Tests for bounded rollout scheduling algorithm.
+
+Tests use make_rollout_scheduler fixture to run on both Python and Rust implementations.
+Tests comparing greedy vs rollout use direct class imports for greedy (comparing algorithms).
+"""
 
 from datetime import date
+from typing import Any
 
 from mouc.scheduler import (
-    BoundedRolloutScheduler,
     ParallelScheduler,
     RolloutConfig,
     SchedulingConfig,
@@ -11,8 +15,14 @@ from mouc.scheduler import (
 )
 from tests.conftest import dep_list
 
+# =============================================================================
+# Tests that compare greedy vs rollout behavior
+# =============================================================================
 
-def test_bounded_rollout_waits_for_higher_priority_task():
+
+def test_bounded_rollout_waits_for_higher_priority_task(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test the canonical example: wait for high-priority task becoming eligible.
 
     Scenario:
@@ -52,11 +62,11 @@ def test_bounded_rollout_waits_for_higher_priority_task():
         meta={"priority": 90},
     )
 
-    # Test with greedy scheduler first
+    tasks = [task_a, task_b, task_c]
+
+    # Test with greedy scheduler first (compare algorithm behavior, not impl)
     config_greedy = SchedulingConfig(strategy="priority_first")
-    greedy_scheduler = ParallelScheduler(
-        [task_a, task_b, task_c], date(2025, 1, 1), config=config_greedy
-    )
+    greedy_scheduler = ParallelScheduler(tasks, date(2025, 1, 1), config=config_greedy)
     greedy_result = greedy_scheduler.schedule().scheduled_tasks
 
     # Greedy should schedule task_a first because it's eligible immediately
@@ -67,13 +77,36 @@ def test_bounded_rollout_waits_for_higher_priority_task():
     # Task B has to wait for task A to complete (starts on day 11)
     assert task_b_greedy.start_date > task_a_greedy.end_date
 
-    # Test with bounded rollout scheduler
+    # Test with bounded rollout scheduler (using fixture for Python/Rust parity)
     config_rollout = SchedulingConfig(
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    rollout_scheduler = BoundedRolloutScheduler(
-        [task_a, task_b, task_c], date(2025, 1, 1), config=config_rollout
+    # Need fresh tasks since scheduler may modify them
+    task_c2 = Task(
+        id="task_c",
+        duration_days=1.0,
+        resources=[("bob", 1.0)],
+        dependencies=[],
+        meta={"priority": 50},
+    )
+    task_a2 = Task(
+        id="task_a",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=[],
+        meta={"priority": 30},
+    )
+    task_b2 = Task(
+        id="task_b",
+        duration_days=10.0,
+        resources=[("alice", 1.0)],
+        dependencies=dep_list("task_c"),
+        end_before=date(2025, 1, 22),
+        meta={"priority": 90},
+    )
+    rollout_scheduler = make_rollout_scheduler(
+        [task_a2, task_b2, task_c2], date(2025, 1, 1), config=config_rollout
     )
     rollout_result = rollout_scheduler.schedule().scheduled_tasks
 
@@ -93,7 +126,7 @@ def test_bounded_rollout_waits_for_higher_priority_task():
     assert task_a_rollout.start_date > task_b_rollout.end_date
 
 
-def test_bounded_rollout_no_benefit_from_waiting():
+def test_bounded_rollout_no_benefit_from_waiting(make_rollout_scheduler: Any) -> None:
     """Test that rollout doesn't skip tasks when waiting doesn't help."""
     # Task A: low priority, takes 5 days
     task_a = Task(
@@ -126,7 +159,7 @@ def test_bounded_rollout_no_benefit_from_waiting():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_a, task_b, task_blocker], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -141,7 +174,9 @@ def test_bounded_rollout_no_benefit_from_waiting():
     assert task_b_result.start_date > date(2025, 1, 20)
 
 
-def test_bounded_rollout_respects_priority_threshold():
+def test_bounded_rollout_respects_priority_threshold(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that rollout only triggers for tasks below priority threshold AND with relaxed CR."""
     # Task A: medium-high priority (above threshold), tight deadline (low CR)
     # With 10 day duration and 12 days to deadline, CR = 12/10 = 1.2 (tight, not relaxed)
@@ -176,7 +211,7 @@ def test_bounded_rollout_respects_priority_threshold():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -186,7 +221,7 @@ def test_bounded_rollout_respects_priority_threshold():
     assert task_a_result.start_date == date(2025, 1, 1)
 
 
-def test_bounded_rollout_respects_min_priority_gap():
+def test_bounded_rollout_respects_min_priority_gap(make_rollout_scheduler: Any) -> None:
     """Test that rollout only triggers when priority gap is significant."""
     # Task A: low priority
     task_a = Task(
@@ -219,7 +254,7 @@ def test_bounded_rollout_respects_min_priority_gap():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -228,7 +263,9 @@ def test_bounded_rollout_respects_min_priority_gap():
     assert task_a_result.start_date == date(2025, 1, 1)
 
 
-def test_bounded_rollout_zero_duration_tasks_no_rollout():
+def test_bounded_rollout_zero_duration_tasks_no_rollout(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that zero-duration tasks (milestones) don't trigger rollout."""
     # Milestone: zero duration, low priority
     task_milestone = Task(
@@ -261,7 +298,7 @@ def test_bounded_rollout_zero_duration_tasks_no_rollout():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_milestone, task_b, task_c], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -273,7 +310,7 @@ def test_bounded_rollout_zero_duration_tasks_no_rollout():
     assert milestone_result.end_date == date(2025, 1, 1)
 
 
-def test_bounded_rollout_decisions_recorded():
+def test_bounded_rollout_decisions_recorded(make_rollout_scheduler: Any) -> None:
     """Test that rollout decisions are recorded for explainability."""
     # Task A: low priority
     task_a = Task(
@@ -306,7 +343,7 @@ def test_bounded_rollout_decisions_recorded():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     scheduler.schedule()
 
     decisions = scheduler.get_rollout_decisions()
@@ -325,7 +362,7 @@ def test_bounded_rollout_decisions_recorded():
     assert task_a_decision.decision == "skip"
 
 
-def test_bounded_rollout_multiple_resources():
+def test_bounded_rollout_multiple_resources(make_rollout_scheduler: Any) -> None:
     """Test rollout with multiple resources competing."""
     # Task A: low priority on alice
     task_a = Task(
@@ -367,7 +404,7 @@ def test_bounded_rollout_multiple_resources():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_a, task_b, task_c, task_d], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -383,7 +420,7 @@ def test_bounded_rollout_multiple_resources():
     assert task_b_result.start_date < task_a_result.start_date
 
 
-def test_bounded_rollout_deterministic():
+def test_bounded_rollout_deterministic(make_rollout_scheduler: Any) -> None:
     """Test that rollout produces deterministic results."""
     config = SchedulingConfig(
         strategy="priority_first",
@@ -417,7 +454,7 @@ def test_bounded_rollout_deterministic():
                 meta={"priority": 50},
             ),
         ]
-        scheduler = BoundedRolloutScheduler(fresh_tasks, date(2025, 1, 1), config=config)
+        scheduler = make_rollout_scheduler(fresh_tasks, date(2025, 1, 1), config=config)
         result = scheduler.schedule().scheduled_tasks
         results.append([(r.task_id, r.start_date, r.end_date) for r in result])
 
@@ -425,7 +462,7 @@ def test_bounded_rollout_deterministic():
     assert results[0] == results[1] == results[2]
 
 
-def test_bounded_rollout_with_start_after():
+def test_bounded_rollout_with_start_after(make_rollout_scheduler: Any) -> None:
     """Test rollout with start_after constraints."""
     # Task A: low priority, eligible now
     task_a = Task(
@@ -450,7 +487,7 @@ def test_bounded_rollout_with_start_after():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -463,7 +500,7 @@ def test_bounded_rollout_with_start_after():
     assert task_a_result.start_date > task_b_result.start_date
 
 
-def test_bounded_rollout_algorithm_metadata():
+def test_bounded_rollout_algorithm_metadata(make_rollout_scheduler: Any) -> None:
     """Test that algorithm metadata is correctly set."""
     task = Task(
         id="task_a",
@@ -474,7 +511,7 @@ def test_bounded_rollout_algorithm_metadata():
     )
 
     config = SchedulingConfig(strategy="priority_first")
-    scheduler = BoundedRolloutScheduler([task], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task], date(2025, 1, 1), config=config)
     result = scheduler.schedule()
 
     assert result.algorithm_metadata["algorithm"] == "bounded_rollout"
@@ -482,7 +519,7 @@ def test_bounded_rollout_algorithm_metadata():
     assert "rollout_decisions" in result.algorithm_metadata
 
 
-def test_bounded_rollout_cr_based_triggering():
+def test_bounded_rollout_cr_based_triggering(make_rollout_scheduler: Any) -> None:
     """Test that rollout triggers based on CR urgency, not just priority."""
     # Task A: medium priority but no deadline (high CR = relaxed)
     task_a = Task(
@@ -522,7 +559,7 @@ def test_bounded_rollout_cr_based_triggering():
             min_cr_urgency_gap=3.0,
         ),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -542,7 +579,9 @@ def test_bounded_rollout_cr_based_triggering():
     assert task_a_decision.task_cr > task_a_decision.competing_cr  # Task A more relaxed
 
 
-def test_bounded_rollout_existing_tests_compatibility():
+def test_bounded_rollout_existing_tests_compatibility(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that bounded rollout passes basic scheduling tests from parallel SGS."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -565,7 +604,7 @@ def test_bounded_rollout_existing_tests_compatibility():
         meta={"priority": 50},
     )
 
-    scheduler = BoundedRolloutScheduler([task_short, task_long], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_short, task_long], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -578,7 +617,9 @@ def test_bounded_rollout_existing_tests_compatibility():
     assert task_short_result.start_date > task_long_result.end_date
 
 
-def test_no_deadline_tasks_sort_after_deadline_tasks():
+def test_no_deadline_tasks_sort_after_deadline_tasks(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that tasks without deadlines sort after deadline-driven tasks of equal priority.
 
     This tests that the relaxed CR (used for no-deadline tasks) is high enough
@@ -603,7 +644,7 @@ def test_no_deadline_tasks_sort_after_deadline_tasks():
     )
 
     config = SchedulingConfig(strategy="priority_first")
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_with_deadline, task_without_deadline], date(2025, 1, 1), config=config
     )
 
@@ -615,7 +656,9 @@ def test_no_deadline_tasks_sort_after_deadline_tasks():
     assert task_deadline_result.start_date < task_no_deadline_result.start_date
 
 
-def test_relaxed_cr_scales_with_project_deadlines():
+def test_relaxed_cr_scales_with_project_deadlines(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that no-deadline tasks sort after ALL deadline tasks, not just tight ones.
 
     The relaxed CR is 2x the max CR in the project, ensuring no-deadline tasks
@@ -641,7 +684,7 @@ def test_relaxed_cr_scales_with_project_deadlines():
     )
 
     config = SchedulingConfig(strategy="priority_first")
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_loose_deadline, task_no_deadline], date(2025, 1, 1), config=config
     )
 
@@ -654,7 +697,9 @@ def test_relaxed_cr_scales_with_project_deadlines():
     assert task_loose_result.start_date < task_no_deadline_result.start_date
 
 
-def test_expected_tardiness_penalty_affects_rollout_decision():
+def test_expected_tardiness_penalty_affects_rollout_decision(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test that expected tardiness penalty makes rollout prefer scheduling urgent tasks.
 
     The expected tardiness penalty ensures that when comparing scenarios, leaving
@@ -694,7 +739,7 @@ def test_expected_tardiness_penalty_affects_rollout_decision():
         strategy="priority_first",
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -718,7 +763,7 @@ def test_expected_tardiness_penalty_affects_rollout_decision():
     assert task_a_decision.schedule_score > task_a_decision.skip_score
 
 
-def test_bounded_rollout_with_atc_strategy():
+def test_bounded_rollout_with_atc_strategy(make_rollout_scheduler: Any) -> None:
     """Test that bounded rollout works with ATC strategy.
 
     This test ensures all call sites of _compute_sort_key pass the
@@ -758,7 +803,7 @@ def test_bounded_rollout_with_atc_strategy():
         atc_default_urgency_floor=0.3,
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
-    scheduler = BoundedRolloutScheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
+    scheduler = make_rollout_scheduler([task_a, task_b, task_c], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     # Should schedule all 3 tasks without error
@@ -769,7 +814,9 @@ def test_bounded_rollout_with_atc_strategy():
     assert task_ids == {"task_a", "task_b", "task_c"}
 
 
-def test_bounded_rollout_atc_with_zero_duration_milestones():
+def test_bounded_rollout_atc_with_zero_duration_milestones(
+    make_rollout_scheduler: Any,
+) -> None:
     """Test ATC strategy when all unscheduled tasks are zero-duration milestones.
 
     This is a regression test for a ZeroDivisionError that occurred when
@@ -821,7 +868,7 @@ def test_bounded_rollout_atc_with_zero_duration_milestones():
         rollout=RolloutConfig(priority_threshold=70, min_priority_gap=20),
     )
 
-    scheduler = BoundedRolloutScheduler(
+    scheduler = make_rollout_scheduler(
         [task_a, milestone_1, milestone_2, milestone_3],
         date(2025, 1, 1),
         config=config,

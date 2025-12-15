@@ -9,15 +9,20 @@ The "greedy with foresight" algorithm should:
 2. Account for DNS interruptions in completion time calculations
 3. Assign task to resource that will complete it soonest, if that resource is available NOW
 4. Otherwise, skip the task and let other tasks use available resources
+
+Note: These tests use make_parallel_scheduler since they test greedy-specific behavior.
 """
 
 from datetime import date, timedelta
+from typing import Any
 
 from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
-from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
+from mouc.scheduler import SchedulingConfig, Task
 
 
-def test_dns_interruption_better_than_waiting_for_busy_resource():
+def test_dns_interruption_better_than_waiting_for_busy_resource(
+    make_parallel_scheduler: Any,
+) -> None:
     """Test that starting now with DNS interruption beats waiting for busy resource.
 
     Scenario:
@@ -69,7 +74,7 @@ def test_dns_interruption_better_than_waiting_for_busy_resource():
         meta={"priority": 80},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -85,7 +90,9 @@ def test_dns_interruption_better_than_waiting_for_busy_resource():
     )
 
 
-def test_wait_for_faster_resource_when_not_immediately_available():
+def test_wait_for_faster_resource_when_not_immediately_available(
+    make_parallel_scheduler: Any,
+) -> None:
     """Test that scheduler waits for faster resource when it's not available yet.
 
     Scenario:
@@ -132,7 +139,7 @@ def test_wait_for_faster_resource_when_not_immediately_available():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -150,7 +157,9 @@ def test_wait_for_faster_resource_when_not_immediately_available():
     )
 
 
-def test_lower_priority_work_fills_gap_while_waiting():
+def test_lower_priority_work_fills_gap_while_waiting(
+    make_parallel_scheduler: Any,
+) -> None:
     """Test that lower-priority tasks use available resources while high-priority waits.
 
     Scenario:
@@ -194,7 +203,7 @@ def test_lower_priority_work_fills_gap_while_waiting():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a, task_b], start_date, resource_config=resource_config, config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -218,7 +227,7 @@ def test_lower_priority_work_fills_gap_while_waiting():
     )
 
 
-def test_very_long_dns_makes_waiting_worthwhile():
+def test_very_long_dns_makes_waiting_worthwhile(make_parallel_scheduler: Any) -> None:
     """Test that very long DNS periods make waiting for alternative resource better.
 
     Scenario:
@@ -264,7 +273,7 @@ def test_very_long_dns_makes_waiting_worthwhile():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -283,7 +292,9 @@ def test_very_long_dns_makes_waiting_worthwhile():
     )
 
 
-def test_multiple_resources_pick_soonest_completion():
+def test_multiple_resources_pick_soonest_completion(
+    make_parallel_scheduler: Any,
+) -> None:
     """Test that scheduler picks resource with soonest completion from multiple options.
 
     Scenario:
@@ -331,7 +342,7 @@ def test_multiple_resources_pick_soonest_completion():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a], start_date, resource_config=resource_config, config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -349,7 +360,9 @@ def test_multiple_resources_pick_soonest_completion():
     )
 
 
-def test_short_dns_vs_long_dns_different_decisions():
+def test_short_dns_vs_long_dns_different_decisions(
+    make_parallel_scheduler: Any,
+) -> None:
     """Test that decision depends on DNS length relative to alternative wait time.
 
     Scenario A - SHORT DNS (better to start now):
@@ -393,7 +406,7 @@ def test_short_dns_vs_long_dns_different_decisions():
         meta={"priority": 50},
     )
 
-    scheduler_a = ParallelScheduler(
+    scheduler_a = make_parallel_scheduler(
         [task_a], start_date, resource_config=resource_config_a, config=config
     )
     result_a = scheduler_a.schedule().scheduled_tasks
@@ -433,7 +446,7 @@ def test_short_dns_vs_long_dns_different_decisions():
         meta={"priority": 50},
     )
 
-    scheduler_b = ParallelScheduler(
+    scheduler_b = make_parallel_scheduler(
         [task_b], start_date, resource_config=resource_config_b, config=config
     )
     result_b = scheduler_b.schedule().scheduled_tasks

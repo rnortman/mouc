@@ -7,7 +7,7 @@ use thiserror::Error;
 use crate::backward_pass::{backward_pass, BackwardPassConfig};
 use crate::config::{RolloutConfig, SchedulingConfig};
 use crate::models::{AlgorithmResult, ScheduledTask, Task};
-use crate::sorting::{sort_tasks, AtcParams, TaskSortInfo};
+use crate::sorting::{sort_tasks, AtcParams, SortingError, TaskSortInfo};
 
 use super::resource_schedule::ResourceSchedule;
 use super::rollout::RolloutDecision;
@@ -24,6 +24,22 @@ pub enum SchedulerError {
     ResourceNotFound(String),
     #[error("Invalid configuration: {0}")]
     InvalidConfig(String),
+    #[error("Unknown scheduling strategy: {0}")]
+    UnknownStrategy(String),
+}
+
+impl From<SortingError> for SchedulerError {
+    fn from(err: SortingError) -> Self {
+        match err {
+            SortingError::UnknownStrategy(s) => SchedulerError::UnknownStrategy(s),
+            SortingError::AtcParamsMissing => {
+                SchedulerError::InvalidConfig("ATC strategy requires atc_params".to_string())
+            }
+            SortingError::TaskNotFound(id) => {
+                SchedulerError::InvalidConfig(format!("Task not found: {}", id))
+            }
+        }
+    }
 }
 
 /// Resource configuration for the scheduler.
@@ -52,24 +68,59 @@ impl ResourceConfig {
     }
 
     /// Expand a resource spec to list of candidate resource names.
+    ///
+    /// Supports:
+    /// - "*" -> all resources in config order
+    /// - "john|mary|susan" -> split by | (preserves order)
+    /// - "team_a" -> expand group alias
+    /// - "!john" -> all resources except john
+    /// - "*|!john|!mary" -> all resources except john and mary
+    /// - "team_a|!john" -> team_a members except john
     pub fn expand_resource_spec(&self, spec: &str) -> Vec<String> {
-        // Handle "*" wildcard: return all resources
-        if spec == "*" {
-            return self.resource_order.clone();
+        // Parse spec into parts separated by |
+        let parts: Vec<&str> = spec.split('|').map(|s| s.trim()).collect();
+
+        // Separate inclusions and exclusions
+        let mut inclusions: Vec<&str> = Vec::new();
+        let mut exclusions: Vec<&str> = Vec::new();
+        for part in &parts {
+            if let Some(excluded) = part.strip_prefix('!') {
+                exclusions.push(excluded);
+            } else if !part.is_empty() {
+                inclusions.push(part);
+            }
         }
-        // Check if it's in the expansion map (group alias)
-        if let Some(resources) = self.spec_expansion.get(spec) {
-            return resources.clone();
+
+        // Build the result starting from inclusions
+        let mut result: Vec<String> = Vec::new();
+
+        // If no inclusions specified, start with all resources
+        if inclusions.is_empty() {
+            result = self.resource_order.clone();
+        } else {
+            // Process each inclusion
+            for inclusion in &inclusions {
+                if *inclusion == "*" {
+                    result.extend(self.resource_order.clone());
+                } else if let Some(group_members) = self.spec_expansion.get(*inclusion) {
+                    result.extend(group_members.clone());
+                } else {
+                    result.push(inclusion.to_string());
+                }
+            }
         }
-        // If not in expansion map, check if it's a direct resource name
-        if self.resource_order.contains(&spec.to_string()) {
-            return vec![spec.to_string()];
+
+        // Remove duplicates while preserving order
+        let mut seen = std::collections::HashSet::new();
+        result.retain(|r| seen.insert(r.clone()));
+
+        // Apply exclusions
+        if !exclusions.is_empty() {
+            let exclusion_set: std::collections::HashSet<&str> = exclusions.into_iter().collect();
+            result.retain(|r| !exclusion_set.contains(r.as_str()));
         }
-        // Fallback: treat as pipe-separated list
-        spec.split('|')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+
+        result
     }
 }
 
@@ -111,6 +162,12 @@ impl ParallelScheduler {
         precomputed_deadlines: Option<HashMap<String, NaiveDate>>,
         precomputed_priorities: Option<HashMap<String, i32>>,
     ) -> Result<Self, SchedulerError> {
+        // Validate strategy upfront
+        let valid_strategies = ["priority_first", "cr_first", "weighted", "atc"];
+        if !valid_strategies.contains(&config.strategy.as_str()) {
+            return Err(SchedulerError::UnknownStrategy(config.strategy.clone()));
+        }
+
         let tasks_map: HashMap<String, Task> =
             tasks.iter().map(|t| (t.id.clone(), t.clone())).collect();
 
@@ -352,7 +409,7 @@ impl ParallelScheduler {
 
             // Sort eligible tasks by strategy
             let sorted_eligible =
-                self.sort_eligible_tasks(&eligible, current_time, default_cr, atc_params.as_ref());
+                self.sort_eligible_tasks(&eligible, current_time, default_cr, atc_params.as_ref())?;
 
             // Try to schedule each eligible task
             let mut scheduled_any = false;
@@ -526,9 +583,9 @@ impl ParallelScheduler {
         current_time: NaiveDate,
         default_cr: f64,
         atc_params: Option<&AtcParams>,
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>, SchedulerError> {
         if eligible.is_empty() {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         // Build task info map
@@ -553,17 +610,14 @@ impl ParallelScheduler {
         }
 
         let task_ids: Vec<String> = eligible.to_vec();
-        match sort_tasks(
+        Ok(sort_tasks(
             &task_ids,
             &task_infos,
             current_time,
             default_cr,
             &self.config,
             atc_params,
-        ) {
-            Ok(sorted) => sorted,
-            Err(_) => eligible.to_vec(), // Fallback to original order
-        }
+        )?)
     }
 
     /// Compute default CR for tasks without deadlines.
@@ -898,11 +952,15 @@ impl ParallelScheduler {
 
         // Scenario A: Schedule the task
         let schedule_state = state.clone_for_rollout();
-        let (_, schedule_score) = self.run_rollout_simulation(schedule_state, horizon, None);
+        let (_, schedule_score) = self
+            .run_rollout_simulation(schedule_state, horizon, None)
+            .ok()?;
 
         // Scenario B: Skip the task
         let skip_state = state.clone_for_rollout();
-        let (_, skip_score) = self.run_rollout_simulation(skip_state, horizon, Some(task_id));
+        let (_, skip_score) = self
+            .run_rollout_simulation(skip_state, horizon, Some(task_id))
+            .ok()?;
 
         // Record decision
         if let Some((competing_id, competing_priority, competing_cr, competing_date)) =
@@ -1057,7 +1115,7 @@ impl ParallelScheduler {
         mut state: SchedulerState,
         horizon: NaiveDate,
         skip_task_id: Option<&str>,
-    ) -> (SchedulerState, f64) {
+    ) -> Result<(SchedulerState, f64), SchedulerError> {
         let max_iterations = self.tasks.len() * 10;
         let initial_time = state.current_time;
 
@@ -1092,7 +1150,7 @@ impl ParallelScheduler {
                 state.current_time,
                 default_cr,
                 atc_params.as_ref(),
-            );
+            )?;
 
             // Try to schedule
             let mut scheduled_any = false;
@@ -1128,7 +1186,7 @@ impl ParallelScheduler {
         }
 
         let score = self.evaluate_partial_schedule(&state, horizon);
-        (state, score)
+        Ok((state, score))
     }
 
     fn try_schedule_task_in_simulation(

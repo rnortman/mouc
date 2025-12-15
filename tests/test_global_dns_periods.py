@@ -1,12 +1,13 @@
 """Tests for global DNS (Do Not Schedule) periods."""
 
 from datetime import date
+from typing import Any
 
 from mouc.resources import DNSPeriod, ResourceConfig, ResourceDefinition
-from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
+from mouc.scheduler import SchedulingConfig, Task
 
 
-def test_global_dns_periods_applied_to_all_resources():
+def test_global_dns_periods_applied_to_all_resources(make_scheduler: Any) -> None:
     """Test that global DNS periods apply to all resources."""
     # Setup: Two resources, one global DNS period
     resource_config = ResourceConfig(
@@ -30,7 +31,7 @@ def test_global_dns_periods_applied_to_all_resources():
     )
 
     start_date = date(2025, 1, 8)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -50,7 +51,7 @@ def test_global_dns_periods_applied_to_all_resources():
     assert scheduled_task.end_date == date(2025, 1, 19)
 
 
-def test_global_dns_merged_with_per_resource_dns():
+def test_global_dns_merged_with_per_resource_dns(make_scheduler: Any) -> None:
     """Test that global DNS periods are merged with per-resource DNS periods."""
     # Setup: Alice has personal vacation, global has company holiday
     resource_config = ResourceConfig(
@@ -79,7 +80,7 @@ def test_global_dns_merged_with_per_resource_dns():
     )
 
     start_date = date(2025, 1, 15)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -99,7 +100,7 @@ def test_global_dns_merged_with_per_resource_dns():
     assert scheduled_task.end_date == date(2025, 1, 28)
 
 
-def test_overlapping_dns_periods_full_overlap():
+def test_overlapping_dns_periods_full_overlap(make_scheduler: Any) -> None:
     """Test DNS periods that completely overlap."""
     # Setup: Global DNS period that completely overlaps with per-resource DNS
     resource_config = ResourceConfig(
@@ -124,7 +125,7 @@ def test_overlapping_dns_periods_full_overlap():
     )
 
     start_date = date(2025, 1, 5)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -143,7 +144,7 @@ def test_overlapping_dns_periods_full_overlap():
     assert scheduled_task.end_date == date(2025, 1, 21)
 
 
-def test_overlapping_dns_periods_partial_overlap():
+def test_overlapping_dns_periods_partial_overlap(make_scheduler: Any) -> None:
     """Test DNS periods that partially overlap."""
     # Setup: Global DNS and per-resource DNS with partial overlap
     resource_config = ResourceConfig(
@@ -168,7 +169,7 @@ def test_overlapping_dns_periods_partial_overlap():
     )
 
     start_date = date(2025, 1, 5)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -190,7 +191,7 @@ def test_overlapping_dns_periods_partial_overlap():
     assert scheduled_task.end_date == date(2025, 1, 31)
 
 
-def test_multiple_global_dns_periods():
+def test_multiple_global_dns_periods(make_scheduler: Any) -> None:
     """Test multiple non-overlapping global DNS periods."""
     resource_config = ResourceConfig(
         resources=[
@@ -212,7 +213,7 @@ def test_multiple_global_dns_periods():
     )
 
     start_date = date(2025, 1, 10)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -234,7 +235,7 @@ def test_multiple_global_dns_periods():
     assert scheduled_task.end_date == date(2025, 2, 5)
 
 
-def test_global_dns_with_resource_selection():
+def test_global_dns_with_resource_selection(make_scheduler: Any) -> None:
     """Test that global DNS affects resource selection in wildcard scenarios."""
     # Setup: Alice has additional DNS, Bob doesn't
     resource_config = ResourceConfig(
@@ -263,7 +264,7 @@ def test_global_dns_with_resource_selection():
     start_date = date(2025, 1, 8)
     config = SchedulingConfig(strategy="priority_first")
 
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -286,7 +287,7 @@ def test_global_dns_with_resource_selection():
     assert scheduled_task.end_date == date(2025, 1, 16)
 
 
-def test_no_global_dns_periods():
+def test_no_global_dns_periods(make_scheduler: Any) -> None:
     """Test that scheduler works correctly when no global DNS periods are provided."""
     resource_config = ResourceConfig(
         resources=[
@@ -307,7 +308,7 @@ def test_no_global_dns_periods():
 
     start_date = date(2025, 1, 5)
     # No global DNS periods passed
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -326,7 +327,7 @@ def test_no_global_dns_periods():
     assert scheduled_task.end_date == date(2025, 1, 21)
 
 
-def test_adjacent_dns_periods():
+def test_adjacent_dns_periods(make_scheduler: Any) -> None:
     """Test DNS periods that are adjacent (end of one is day before start of another)."""
     resource_config = ResourceConfig(
         resources=[
@@ -350,7 +351,7 @@ def test_adjacent_dns_periods():
     )
 
     start_date = date(2025, 1, 5)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,
@@ -371,7 +372,7 @@ def test_adjacent_dns_periods():
     assert scheduled_task.end_date == date(2025, 1, 31)
 
 
-def test_per_resource_dns_before_global_dns():
+def test_per_resource_dns_before_global_dns(make_scheduler: Any) -> None:
     """Test that per-resource DNS periods that START BEFORE global DNS periods are properly merged.
 
     This is a regression test for a bug where DNS periods were not sorted after merging,
@@ -408,7 +409,7 @@ def test_per_resource_dns_before_global_dns():
 
     # Try to start in November (during alice's vacation)
     start_date = date(2025, 11, 18)
-    scheduler = ParallelScheduler(
+    scheduler = make_scheduler(
         [task],
         start_date,
         resource_config=resource_config,

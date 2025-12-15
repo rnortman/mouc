@@ -2,15 +2,190 @@
 
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 from mouc.gantt import GanttScheduler
 from mouc.logger import setup_logger
 from mouc.parser import FeatureMapParser
 from mouc.resources import ResourceConfig, ResourceDefinition
+from mouc.scheduler import Task
 from mouc.unified_config import load_unified_config
 
 # Enable debug logging for tests
 setup_logger(3)
+
+
+# =============================================================================
+# Low-level scheduler tests (run against all 5 algorithm variants)
+# =============================================================================
+
+
+def test_exclusion_simple(make_scheduler: Any) -> None:
+    """Test simple exclusion syntax: !bob excludes bob from assignment."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ],
+        groups={},
+    )
+
+    task = Task(
+        id="task1",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="!bob",  # Anyone except bob
+    )
+
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 1
+    # Should be alice or charlie, NOT bob
+    assert result[0].resources[0] in ["alice", "charlie"]
+    assert result[0].resources[0] != "bob"
+
+
+def test_exclusion_wildcard_with_exclusions(make_scheduler: Any) -> None:
+    """Test wildcard with multiple exclusions: *|!bob|!charlie."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+            ResourceDefinition(name="dave", dns_periods=[]),
+        ],
+        groups={},
+    )
+
+    task = Task(
+        id="task1",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="*|!bob|!charlie",  # Anyone except bob and charlie
+    )
+
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 1
+    # Should be alice or dave only
+    assert result[0].resources[0] in ["alice", "dave"]
+
+
+def test_exclusion_group_with_exclusion(make_scheduler: Any) -> None:
+    """Test group with exclusion: backend_team|!bob."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ],
+        groups={"backend_team": ["alice", "bob", "charlie"]},
+    )
+
+    task = Task(
+        id="task1",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="backend_team|!bob",  # Backend team except bob
+    )
+
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 1
+    # Should be alice or charlie, NOT bob
+    assert result[0].resources[0] in ["alice", "charlie"]
+    assert result[0].resources[0] != "bob"
+
+
+def test_exclusion_preserves_order(make_scheduler: Any) -> None:
+    """Test that exclusions preserve resource order: *|!bob should pick alice first."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ],
+        groups={},
+    )
+
+    task = Task(
+        id="task1",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="*|!bob",  # All except bob, should pick alice (first)
+    )
+
+    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 1
+    # Should pick alice (first in config order after excluding bob)
+    assert result[0].resources[0] == "alice"
+
+
+def test_exclusion_multiple_tasks(make_scheduler: Any) -> None:
+    """Test multiple tasks with different exclusion patterns."""
+    config = ResourceConfig(
+        resources=[
+            ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
+            ResourceDefinition(name="charlie", dns_periods=[]),
+        ],
+        groups={},
+    )
+
+    task1 = Task(
+        id="task1",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="!bob",
+    )
+    task2 = Task(
+        id="task2",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="!alice",
+    )
+    task3 = Task(
+        id="task3",
+        duration_days=5.0,
+        resources=[],
+        dependencies=[],
+        resource_spec="*",  # Anyone
+    )
+
+    scheduler = make_scheduler([task1, task2, task3], date(2025, 1, 1), resource_config=config)
+    result = scheduler.schedule().scheduled_tasks
+
+    assert len(result) == 3
+
+    task1_result = next(r for r in result if r.task_id == "task1")
+    task2_result = next(r for r in result if r.task_id == "task2")
+    task3_result = next(r for r in result if r.task_id == "task3")
+
+    # Task 1 can't be bob
+    assert task1_result.resources[0] != "bob"
+
+    # Task 2 can't be alice
+    assert task2_result.resources[0] != "alice"
+
+    # Task 3 can be anyone
+    assert task3_result.resources[0] in ["alice", "bob", "charlie"]
+
+
+# =============================================================================
+# High-level integration tests (GanttScheduler with YAML parsing)
+# =============================================================================
 
 
 def test_exclusion_in_feature_map_simple(tmp_path: Path):

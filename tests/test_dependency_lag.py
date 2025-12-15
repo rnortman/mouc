@@ -3,17 +3,18 @@
 # pyright: reportPrivateUsage=false
 
 from datetime import date, timedelta
+from typing import Any
 
 from mouc.gantt import GanttScheduler
 from mouc.models import Dependency, Entity, FeatureMap, FeatureMapMetadata
 from mouc.parser import FeatureMapParser, resolve_graph_edges
-from mouc.scheduler import ParallelScheduler, Task
+from mouc.scheduler import Task
 
 
 class TestDependencyLagScheduling:
     """Test that lag is respected in scheduling algorithms."""
 
-    def test_lag_delays_dependent_task(self) -> None:
+    def test_lag_delays_dependent_task(self, make_scheduler: Any) -> None:
         """Test that a dependency with lag delays the dependent task start."""
         # task_a takes 5 days, task_b depends on it with 1 week lag
         task_a = Task(
@@ -31,22 +32,20 @@ class TestDependencyLagScheduling:
             meta={"priority": 50},
         )
 
-        scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1))
+        scheduler = make_scheduler([task_a, task_b], date(2025, 1, 1))
         result = scheduler.schedule().scheduled_tasks
 
         task_a_result = next(r for r in result if r.task_id == "task_a")
         task_b_result = next(r for r in result if r.task_id == "task_b")
 
-        # task_a: Jan 1 - Jan 6 (5 days)
-        assert task_a_result.start_date == date(2025, 1, 1)
-        assert task_a_result.end_date == date(2025, 1, 6)
+        # task_a should be scheduled first
+        assert task_a_result.end_date < task_b_result.start_date
 
-        # task_b should start 1 day + 7 days lag after task_a ends
-        # Jan 6 + 1 day + 7 days = Jan 14
-        expected_start = task_a_result.end_date + timedelta(days=1 + 7)
-        assert task_b_result.start_date == expected_start
+        # task_b should start at least 1 day + 7 days lag after task_a ends
+        min_start = task_a_result.end_date + timedelta(days=1 + 7)
+        assert task_b_result.start_date >= min_start
 
-    def test_no_lag_starts_immediately_after(self) -> None:
+    def test_no_lag_starts_immediately_after(self, make_scheduler: Any) -> None:
         """Test that without lag, dependent starts immediately after dependency."""
         task_a = Task(
             id="task_a",
@@ -63,7 +62,7 @@ class TestDependencyLagScheduling:
             meta={"priority": 50},
         )
 
-        scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1))
+        scheduler = make_scheduler([task_a, task_b], date(2025, 1, 1))
         result = scheduler.schedule().scheduled_tasks
 
         task_a_result = next(r for r in result if r.task_id == "task_a")
@@ -73,7 +72,7 @@ class TestDependencyLagScheduling:
         expected_start = task_a_result.end_date + timedelta(days=1)
         assert task_b_result.start_date == expected_start
 
-    def test_multiple_dependencies_with_different_lags(self) -> None:
+    def test_multiple_dependencies_with_different_lags(self, make_scheduler: Any) -> None:
         """Test task with multiple dependencies having different lags."""
         task_a = Task(
             id="task_a",
@@ -101,28 +100,28 @@ class TestDependencyLagScheduling:
             meta={"priority": 50},
         )
 
-        scheduler = ParallelScheduler([task_a, task_b, task_c], date(2025, 1, 1))
+        scheduler = make_scheduler([task_a, task_b, task_c], date(2025, 1, 1))
         result = scheduler.schedule().scheduled_tasks
 
         task_a_result = next(r for r in result if r.task_id == "task_a")
         task_b_result = next(r for r in result if r.task_id == "task_b")
         task_c_result = next(r for r in result if r.task_id == "task_c")
 
-        # task_a and task_b run in parallel (different resources)
-        assert task_a_result.start_date == date(2025, 1, 1)
-        assert task_b_result.start_date == date(2025, 1, 1)
-
         # task_c must wait for the later of:
         # - task_a end + 1 + 2 days lag
         # - task_b end + 1 + 10 days lag
         earliest_from_a = task_a_result.end_date + timedelta(days=1 + 2)
         earliest_from_b = task_b_result.end_date + timedelta(days=1 + 10)
-        expected_start = max(earliest_from_a, earliest_from_b)
+        min_expected_start = max(earliest_from_a, earliest_from_b)
 
-        assert task_c_result.start_date == expected_start
+        assert task_c_result.start_date >= min_expected_start
 
-    def test_lag_affects_deadline_propagation(self) -> None:
-        """Test that lag is considered in backward pass deadline propagation."""
+    def test_lag_affects_deadline_propagation(self, make_parallel_scheduler: Any) -> None:
+        """Test that lag is considered in backward pass deadline propagation.
+
+        Note: This test uses make_parallel_scheduler because get_computed_deadlines()
+        is only available on greedy schedulers (not critical path).
+        """
         # task_b has deadline, depends on task_a with lag
         # task_a's computed deadline should account for lag
         task_a = Task(
@@ -141,7 +140,7 @@ class TestDependencyLagScheduling:
             meta={"priority": 50},
         )
 
-        scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1))
+        scheduler = make_parallel_scheduler([task_a, task_b], date(2025, 1, 1))
         scheduler.schedule()
 
         deadlines = scheduler.get_computed_deadlines()

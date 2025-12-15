@@ -1,12 +1,15 @@
 """Tests for priority and critical ratio scheduling."""
 
 from datetime import date, timedelta
+from typing import Any
 
-from mouc.scheduler import ParallelScheduler, SchedulingConfig, Task
+import pytest
+
+from mouc.scheduler import SchedulingConfig, Task
 from tests.conftest import dep_list
 
 
-def test_cr_computation_same_deadline_different_duration():
+def test_cr_computation_same_deadline_different_duration(make_parallel_scheduler: Any) -> None:
     """Test that longer duration tasks get lower CR (more urgent)."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -31,7 +34,7 @@ def test_cr_computation_same_deadline_different_duration():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task_short, task_long], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_short, task_long], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -45,7 +48,7 @@ def test_cr_computation_same_deadline_different_duration():
     assert task_short_result.start_date > task_long_result.end_date
 
 
-def test_priority_first_strategy():
+def test_priority_first_strategy(make_parallel_scheduler: Any) -> None:
     """Test that priority_first strategy prioritizes by priority, then CR."""
     config = SchedulingConfig(strategy="priority_first")
 
@@ -69,7 +72,7 @@ def test_priority_first_strategy():
         meta={"priority": 20},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_urgent, task_high_priority], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -84,7 +87,7 @@ def test_priority_first_strategy():
     assert task_urgent_result.start_date > task_high_result.end_date
 
 
-def test_cr_first_strategy():
+def test_cr_first_strategy(make_parallel_scheduler: Any) -> None:
     """Test that cr_first strategy prioritizes by CR, then priority."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -108,7 +111,7 @@ def test_cr_first_strategy():
         meta={"priority": 20},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high_priority, task_urgent], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -123,7 +126,7 @@ def test_cr_first_strategy():
     assert task_high_result.start_date > task_urgent_result.end_date
 
 
-def test_weighted_strategy_default_weights():
+def test_weighted_strategy_default_weights(make_parallel_scheduler: Any) -> None:
     """Test weighted strategy with default weights (CR heavy)."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
@@ -149,7 +152,7 @@ def test_weighted_strategy_default_weights():
         meta={"priority": 80},
     )
 
-    scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_a, task_b], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -162,7 +165,7 @@ def test_weighted_strategy_default_weights():
     assert task_a_result.start_date > task_b_result.end_date
 
 
-def test_no_deadline_tasks_use_max_cr_multiplier():
+def test_no_deadline_tasks_use_max_cr_multiplier(make_parallel_scheduler: Any) -> None:
     """Test that tasks without deadlines get max_cr * multiplier as default CR."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
@@ -189,7 +192,7 @@ def test_no_deadline_tasks_use_max_cr_multiplier():
         meta={"priority": 90},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -204,7 +207,7 @@ def test_no_deadline_tasks_use_max_cr_multiplier():
     assert task_no_deadline_result.start_date > task_deadline_result.end_date
 
 
-def test_max_multiplier_cr_with_multiple_deadline_tasks():
+def test_max_multiplier_cr_with_multiple_deadline_tasks(make_parallel_scheduler: Any) -> None:
     """Test default CR computation using max*multiplier with multiple deadline tasks."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
@@ -251,7 +254,7 @@ def test_max_multiplier_cr_with_multiple_deadline_tasks():
         meta={"priority": 55},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high_cr, task_mid_cr, task_low_cr, task_no_deadline], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -269,7 +272,7 @@ def test_max_multiplier_cr_with_multiple_deadline_tasks():
     assert task_no_deadline_result.start_date > task_high_cr_result.start_date
 
 
-def test_configurable_default_cr_floor():
+def test_configurable_default_cr_floor(make_parallel_scheduler: Any) -> None:
     """Test that default_cr_floor config affects scheduling."""
     # Set a low floor so multiplier result is used instead
     config = SchedulingConfig(
@@ -301,7 +304,7 @@ def test_configurable_default_cr_floor():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_no_deadline, task_deadline], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -316,7 +319,7 @@ def test_configurable_default_cr_floor():
     assert task_no_deadline_result.start_date > task_deadline_result.end_date
 
 
-def test_zero_duration_task_avoids_division_by_zero():
+def test_zero_duration_task_avoids_division_by_zero(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks don't cause division by zero."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -329,14 +332,14 @@ def test_zero_duration_task_avoids_division_by_zero():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should complete without error
 
 
-def test_zero_duration_task_consumes_no_time():
+def test_zero_duration_task_consumes_no_time(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks complete on their start date."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -348,7 +351,7 @@ def test_zero_duration_task_consumes_no_time():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
@@ -358,7 +361,7 @@ def test_zero_duration_task_consumes_no_time():
     assert task_result.start_date == date(2025, 1, 1)
 
 
-def test_zero_duration_task_does_not_block_resource():
+def test_zero_duration_task_does_not_block_resource(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks (milestones) don't block resource availability.
 
     Zero-duration tasks are treated as milestones - they complete instantly without
@@ -384,7 +387,7 @@ def test_zero_duration_task_does_not_block_resource():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task_zero, task_normal], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_zero, task_normal], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -400,7 +403,7 @@ def test_zero_duration_task_does_not_block_resource():
     assert task_normal_result.start_date == date(2025, 1, 1)
 
 
-def test_zero_duration_scheduled_by_priority_when_no_deadline():
+def test_zero_duration_scheduled_by_priority_when_no_deadline(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks without deadlines are scheduled by priority."""
     config = SchedulingConfig(strategy="priority_first")
 
@@ -422,7 +425,9 @@ def test_zero_duration_scheduled_by_priority_when_no_deadline():
         meta={"priority": 30},
     )
 
-    scheduler = ParallelScheduler([task_zero_low, task_zero_high], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler(
+        [task_zero_low, task_zero_high], date(2025, 1, 1), config=config
+    )
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -436,7 +441,7 @@ def test_zero_duration_scheduled_by_priority_when_no_deadline():
     assert task_low_result.start_date == task_low_result.end_date
 
 
-def test_zero_duration_task_respects_deadline_urgency():
+def test_zero_duration_task_respects_deadline_urgency(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks with urgent deadlines are scheduled appropriately.
 
     This test verifies that a 0-duration task with an urgent deadline
@@ -465,7 +470,7 @@ def test_zero_duration_task_respects_deadline_urgency():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_normal_relaxed, task_zero_urgent], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -482,7 +487,7 @@ def test_zero_duration_task_respects_deadline_urgency():
     assert task_normal_result.end_date is not None
 
 
-def test_zero_duration_task_with_dependencies():
+def test_zero_duration_task_with_dependencies(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks work correctly in dependency chains."""
     config = SchedulingConfig(strategy="priority_first")
 
@@ -513,7 +518,7 @@ def test_zero_duration_task_with_dependencies():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_first, task_middle_zero, task_last], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -537,7 +542,7 @@ def test_zero_duration_task_with_dependencies():
     assert task_last_result.start_date >= task_middle_result.end_date
 
 
-def test_zero_duration_cr_not_artificially_inflated():
+def test_zero_duration_cr_not_artificially_inflated(make_parallel_scheduler: Any) -> None:
     """Test that zero-duration tasks don't get artificially high CR values.
 
     BUG: The CR formula uses `slack / max(duration, 0.1)` which makes 0-duration
@@ -586,7 +591,7 @@ def test_zero_duration_cr_not_artificially_inflated():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_a_zero, task_b_urgent, task_c_relaxed], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -608,7 +613,7 @@ def test_zero_duration_cr_not_artificially_inflated():
     )
 
 
-def test_multiple_zero_duration_tasks_same_resource():
+def test_multiple_zero_duration_tasks_same_resource(make_parallel_scheduler: Any) -> None:
     """Test multiple zero-duration tasks (milestones) all complete on the same day.
 
     Zero-duration tasks are milestones that complete instantly without blocking
@@ -627,7 +632,7 @@ def test_multiple_zero_duration_tasks_same_resource():
         for i in range(5)
     ]
 
-    scheduler = ParallelScheduler(tasks, date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler(tasks, date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 5
@@ -639,7 +644,7 @@ def test_multiple_zero_duration_tasks_same_resource():
         assert r.resources == []  # Milestones have no resource assignment
 
 
-def test_zero_duration_milestone_waits_for_dependencies():
+def test_zero_duration_milestone_waits_for_dependencies(make_parallel_scheduler: Any) -> None:
     """Test that 0d milestones complete on the day their dependencies finish."""
     config = SchedulingConfig(strategy="priority_first")
 
@@ -658,7 +663,9 @@ def test_zero_duration_milestone_waits_for_dependencies():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task_work, task_milestone], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler(
+        [task_work, task_milestone], date(2025, 1, 1), config=config
+    )
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -675,7 +682,7 @@ def test_zero_duration_milestone_waits_for_dependencies():
     assert milestone_result.resources == []
 
 
-def test_negative_slack_handling():
+def test_negative_slack_handling(make_parallel_scheduler: Any) -> None:
     """Test handling of tasks with deadlines in the past (negative slack)."""
     config = SchedulingConfig(strategy="cr_first")
 
@@ -689,14 +696,14 @@ def test_negative_slack_handling():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 1
     # Should still schedule (negative CR will be very low, making it urgent)
 
 
-def test_pure_cr_scheduling():
+def test_pure_cr_scheduling(make_parallel_scheduler: Any) -> None:
     """Test weighted strategy with priority_weight=0 (pure CR)."""
     config = SchedulingConfig(strategy="weighted", cr_weight=1.0, priority_weight=0.0)
 
@@ -720,7 +727,7 @@ def test_pure_cr_scheduling():
         meta={"priority": 20},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high_priority, task_urgent], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -735,7 +742,7 @@ def test_pure_cr_scheduling():
     assert task_high_result.start_date > task_urgent_result.end_date
 
 
-def test_pure_priority_scheduling():
+def test_pure_priority_scheduling(make_parallel_scheduler: Any) -> None:
     """Test weighted strategy with cr_weight=0 (pure priority)."""
     config = SchedulingConfig(strategy="weighted", cr_weight=0.0, priority_weight=1.0)
 
@@ -759,7 +766,7 @@ def test_pure_priority_scheduling():
         meta={"priority": 20},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_urgent, task_high_priority], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -774,7 +781,7 @@ def test_pure_priority_scheduling():
     assert task_urgent_result.start_date > task_high_result.end_date
 
 
-def test_default_priority_is_50():
+def test_default_priority_is_50(make_parallel_scheduler: Any) -> None:
     """Test that tasks without priority metadata default to 50."""
     config = SchedulingConfig(strategy="priority_first")
 
@@ -796,7 +803,7 @@ def test_default_priority_is_50():
         meta={},
     )
 
-    scheduler = ParallelScheduler([task_default, task_high], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_default, task_high], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -809,7 +816,7 @@ def test_default_priority_is_50():
     assert task_default_result.start_date > task_high_result.end_date
 
 
-def test_configurable_default_priority():
+def test_configurable_default_priority(make_parallel_scheduler: Any) -> None:
     """Test that default_priority config affects scheduling."""
     # Set default priority to 90 (high)
     config = SchedulingConfig(strategy="priority_first", default_priority=90)
@@ -832,7 +839,9 @@ def test_configurable_default_priority():
         meta={},
     )
 
-    scheduler = ParallelScheduler([task_explicit, task_default], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler(
+        [task_explicit, task_default], date(2025, 1, 1), config=config
+    )
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -845,7 +854,7 @@ def test_configurable_default_priority():
     assert task_explicit_result.start_date > task_default_result.end_date
 
 
-def test_all_no_deadline_tasks_use_fallback():
+def test_all_no_deadline_tasks_use_fallback(make_parallel_scheduler: Any) -> None:
     """Test that fallback CR is used when no deadline tasks exist."""
     config = SchedulingConfig(strategy="weighted", cr_weight=10.0, priority_weight=1.0)
 
@@ -866,7 +875,7 @@ def test_all_no_deadline_tasks_use_fallback():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task2, task1], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task2, task1], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -879,7 +888,7 @@ def test_all_no_deadline_tasks_use_fallback():
     assert task2_result.start_date > task1_result.end_date
 
 
-def test_invalid_strategy_raises_error():
+def test_invalid_strategy_raises_error(make_parallel_scheduler: Any) -> None:
     """Test that invalid strategy raises ValueError."""
     config = SchedulingConfig(strategy="invalid_strategy")
 
@@ -891,16 +900,13 @@ def test_invalid_strategy_raises_error():
         meta={"priority": 50},
     )
 
-    scheduler = ParallelScheduler([task], date(2025, 1, 1), config=config)
-
-    try:
+    # Error may be raised during construction (Rust) or scheduling (Python)
+    with pytest.raises(ValueError, match="[Uu]nknown.*strategy"):
+        scheduler = make_parallel_scheduler([task], date(2025, 1, 1), config=config)
         scheduler.schedule()
-        raise AssertionError("Should have raised ValueError")
-    except ValueError as e:
-        assert "Unknown scheduling strategy" in str(e)
 
 
-def test_priority_propagation_linear_chain():
+def test_priority_propagation_linear_chain(make_parallel_scheduler: Any) -> None:
     """Test that priorities propagate backward through a linear dependency chain."""
     # Setup: A (priority 90) → B (priority 40) → C (priority 40)
     # A is high priority and depends on B, B depends on C
@@ -930,7 +936,7 @@ def test_priority_propagation_linear_chain():
         meta={"priority": 40},
     )
 
-    scheduler = ParallelScheduler([task_a, task_b, task_c], date(2025, 1, 1))
+    scheduler = make_parallel_scheduler([task_a, task_b, task_c], date(2025, 1, 1))
     scheduler.schedule()
 
     # Verify priorities propagated correctly
@@ -940,7 +946,7 @@ def test_priority_propagation_linear_chain():
     assert priorities["task_c"] == 90  # Inherits from B (which got it from A)
 
 
-def test_priority_propagation_diamond():
+def test_priority_propagation_diamond(make_parallel_scheduler: Any) -> None:
     """Test that priorities propagate correctly through diamond dependencies."""
     # Setup:    D (priority 95)
     #          / \
@@ -982,7 +988,7 @@ def test_priority_propagation_diamond():
         meta={"priority": 95},
     )
 
-    scheduler = ParallelScheduler([task_a, task_b, task_c, task_d], date(2025, 1, 1))
+    scheduler = make_parallel_scheduler([task_a, task_b, task_c, task_d], date(2025, 1, 1))
     scheduler.schedule()
 
     priorities = scheduler.get_computed_priorities()
@@ -992,7 +998,7 @@ def test_priority_propagation_diamond():
     assert priorities["task_a"] == 95  # Inherits max from both B and C
 
 
-def test_priority_propagation_mixed_priorities():
+def test_priority_propagation_mixed_priorities(make_parallel_scheduler: Any) -> None:
     """Test priority propagation with mixed explicit and default priorities."""
     # Setup: A (priority 85) → B (priority 30) → C (default 50)
     # A is high priority and depends on B, B depends on C
@@ -1022,7 +1028,7 @@ def test_priority_propagation_mixed_priorities():
         meta={},  # Default priority 50
     )
 
-    scheduler = ParallelScheduler([task_a, task_b, task_c], date(2025, 1, 1))
+    scheduler = make_parallel_scheduler([task_a, task_b, task_c], date(2025, 1, 1))
     scheduler.schedule()
 
     priorities = scheduler.get_computed_priorities()
@@ -1031,7 +1037,7 @@ def test_priority_propagation_mixed_priorities():
     assert priorities["task_c"] == 85  # Inherits from B (overrides default of 50)
 
 
-def test_priority_propagation_no_lowering():
+def test_priority_propagation_no_lowering(make_parallel_scheduler: Any) -> None:
     """Test that high-priority tasks don't get lowered by low-priority dependents."""
     # Setup: task_high (priority 90) enables task_low (priority 30)
     # task_competing (priority 80) competes with task_high
@@ -1063,7 +1069,7 @@ def test_priority_propagation_no_lowering():
     )
 
     config = SchedulingConfig(strategy="priority_first")
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high, task_low, task_competing], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -1075,7 +1081,7 @@ def test_priority_propagation_no_lowering():
     assert task_high_result.start_date < task_competing_result.start_date
 
 
-def test_priority_propagation_affects_scheduling():
+def test_priority_propagation_affects_scheduling(make_parallel_scheduler: Any) -> None:
     """Test that propagated priorities actually affect scheduling order."""
     # Setup: task_low (priority 40) enables task_dependent (priority 90)
     # task_competing (priority 70) competes with task_low for same resource
@@ -1107,7 +1113,7 @@ def test_priority_propagation_affects_scheduling():
     )
 
     config = SchedulingConfig(strategy="priority_first")
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_low, task_dependent, task_competing], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -1122,7 +1128,7 @@ def test_priority_propagation_affects_scheduling():
 # === ATC Strategy Tests ===
 
 
-def test_atc_strategy_deadline_imminent_wins():
+def test_atc_strategy_deadline_imminent_wins(make_parallel_scheduler: Any) -> None:
     """Test that ATC prioritizes tasks with imminent deadlines."""
     config = SchedulingConfig(strategy="atc", atc_k=2.0)
 
@@ -1146,7 +1152,7 @@ def test_atc_strategy_deadline_imminent_wins():
         meta={"priority": 30},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high_priority, task_urgent], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -1161,7 +1167,7 @@ def test_atc_strategy_deadline_imminent_wins():
     assert task_high_result.start_date > task_urgent_result.end_date
 
 
-def test_atc_strategy_high_priority_no_deadline_competes():
+def test_atc_strategy_high_priority_no_deadline_competes(make_parallel_scheduler: Any) -> None:
     """Test that high-priority tasks without deadlines can still be scheduled early."""
     config = SchedulingConfig(
         strategy="atc",
@@ -1188,7 +1194,7 @@ def test_atc_strategy_high_priority_no_deadline_competes():
         meta={"priority": 30},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_low_deadline, task_high_no_deadline], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -1205,7 +1211,7 @@ def test_atc_strategy_high_priority_no_deadline_competes():
     assert task_low_result.start_date > task_high_result.end_date
 
 
-def test_atc_strategy_wspt_component():
+def test_atc_strategy_wspt_component(make_parallel_scheduler: Any) -> None:
     """Test that ATC's WSPT component prioritizes high-priority short tasks."""
     config = SchedulingConfig(strategy="atc", atc_k=2.0)
 
@@ -1230,7 +1236,7 @@ def test_atc_strategy_wspt_component():
         meta={"priority": 40},
     )
 
-    scheduler = ParallelScheduler([task_a, task_b], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_a, task_b], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2
@@ -1243,7 +1249,7 @@ def test_atc_strategy_wspt_component():
     assert task_a_result.start_date > task_b_result.end_date
 
 
-def test_atc_strategy_k_parameter_affects_urgency():
+def test_atc_strategy_k_parameter_affects_urgency(make_parallel_scheduler: Any) -> None:
     """Test that atc_k parameter affects how quickly urgency ramps up."""
     # With low K (1.5), urgency ramps up faster
     config_low_k = SchedulingConfig(strategy="atc", atc_k=1.5)
@@ -1272,13 +1278,13 @@ def test_atc_strategy_k_parameter_affects_urgency():
     )
 
     # With low K, deadline task appears more urgent
-    scheduler_low = ParallelScheduler(
+    scheduler_low = make_parallel_scheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_low_k
     )
     result_low = scheduler_low.schedule().scheduled_tasks
 
     # With high K, deadline task appears less urgent, priority might win
-    scheduler_high = ParallelScheduler(
+    scheduler_high = make_parallel_scheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_high_k
     )
     result_high = scheduler_high.schedule().scheduled_tasks
@@ -1288,7 +1294,7 @@ def test_atc_strategy_k_parameter_affects_urgency():
     assert len(result_high) == 2
 
 
-def test_atc_strategy_default_urgency_floor():
+def test_atc_strategy_default_urgency_floor(make_parallel_scheduler: Any) -> None:
     """Test that atc_default_urgency_floor affects no-deadline task scheduling."""
     # Very low floor - no-deadline tasks get very low urgency
     config_low_floor = SchedulingConfig(
@@ -1324,13 +1330,13 @@ def test_atc_strategy_default_urgency_floor():
     )
 
     # With low floor, deadline task likely wins (no-deadline gets ~0 urgency)
-    scheduler_low = ParallelScheduler(
+    scheduler_low = make_parallel_scheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_low_floor
     )
     result_low = scheduler_low.schedule().scheduled_tasks
 
     # With high floor, no-deadline task can compete better
-    scheduler_high = ParallelScheduler(
+    scheduler_high = make_parallel_scheduler(
         [task_deadline, task_no_deadline], date(2025, 1, 1), config=config_high_floor
     )
     result_high = scheduler_high.schedule().scheduled_tasks
@@ -1343,7 +1349,7 @@ def test_atc_strategy_default_urgency_floor():
     assert result_high_no_deadline.start_date == date(2025, 1, 1)
 
 
-def test_atc_strategy_negative_slack_full_urgency():
+def test_atc_strategy_negative_slack_full_urgency(make_parallel_scheduler: Any) -> None:
     """Test that tasks past their deadline get maximum urgency."""
     config = SchedulingConfig(strategy="atc", atc_k=2.0)
 
@@ -1367,7 +1373,7 @@ def test_atc_strategy_negative_slack_full_urgency():
         meta={"priority": 95},
     )
 
-    scheduler = ParallelScheduler(
+    scheduler = make_parallel_scheduler(
         [task_high_priority, task_overdue], date(2025, 1, 1), config=config
     )
     result = scheduler.schedule().scheduled_tasks
@@ -1382,7 +1388,7 @@ def test_atc_strategy_negative_slack_full_urgency():
     assert task_high_result.start_date > task_overdue_result.end_date
 
 
-def test_atc_strategy_all_no_deadline_tasks():
+def test_atc_strategy_all_no_deadline_tasks(make_parallel_scheduler: Any) -> None:
     """Test ATC with only no-deadline tasks uses priority via WSPT."""
     config = SchedulingConfig(strategy="atc", atc_k=2.0, atc_default_urgency_floor=0.5)
 
@@ -1404,7 +1410,7 @@ def test_atc_strategy_all_no_deadline_tasks():
         meta={"priority": 30},
     )
 
-    scheduler = ParallelScheduler([task_low, task_high], date(2025, 1, 1), config=config)
+    scheduler = make_parallel_scheduler([task_low, task_high], date(2025, 1, 1), config=config)
     result = scheduler.schedule().scheduled_tasks
 
     assert len(result) == 2

@@ -1,7 +1,7 @@
 """Adapter to use Rust scheduler implementation from Python."""
 
 from datetime import date
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from mouc import rust
 
@@ -225,3 +225,19 @@ class RustSchedulerAdapter:
         # ParallelScheduler has this method
         assert isinstance(self._rust_scheduler, rust.ParallelScheduler)
         return dict(self._rust_scheduler.get_computed_priorities())
+
+    def get_rollout_decisions(self) -> list[Any]:
+        """Get rollout decisions from Rust scheduler.
+
+        Returns a list of RolloutDecision-like objects with attributes:
+        - task_id, task_priority, task_cr
+        - competing_task_id, competing_priority, competing_cr, competing_eligible_date
+        - schedule_score, skip_score, decision
+
+        Note: Critical path scheduler doesn't use rollout.
+        """
+        if self._algorithm_type == AlgorithmType.CRITICAL_PATH:
+            return []
+        # ParallelScheduler has this method
+        assert isinstance(self._rust_scheduler, rust.ParallelScheduler)
+        return list(self._rust_scheduler.get_rollout_decisions())
