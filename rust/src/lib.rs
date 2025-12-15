@@ -11,12 +11,16 @@ use std::collections::{HashMap, HashSet};
 
 pub mod backward_pass;
 mod config;
+pub mod critical_path;
 mod models;
 pub mod scheduler;
 pub mod sorting;
 
 pub use backward_pass::{backward_pass, BackwardPassConfig, BackwardPassError, BackwardPassResult};
 pub use config::{RolloutConfig, SchedulingConfig};
+pub use critical_path::{
+    CriticalPathConfig, CriticalPathScheduler, CriticalPathSchedulerError, TargetInfo, TaskTiming,
+};
 pub use models::{AlgorithmResult, Dependency, PreProcessResult, ScheduledTask, Task};
 pub use scheduler::{ParallelScheduler, ResourceConfig, RolloutDecision, SchedulerError};
 pub use sorting::{sort_tasks, AtcParams, SortKey, SortingError, TaskSortInfo};
@@ -335,6 +339,63 @@ impl PyParallelScheduler {
     }
 }
 
+/// Rust critical path scheduler (PyO3 wrapper).
+#[pyclass(name = "CriticalPathScheduler")]
+pub struct PyCriticalPathScheduler {
+    inner: CriticalPathScheduler,
+}
+
+#[pymethods]
+impl PyCriticalPathScheduler {
+    #[new]
+    #[pyo3(signature = (
+        tasks,
+        current_date,
+        completed_task_ids=None,
+        config=None,
+        resource_config=None,
+        global_dns_periods=None
+    ))]
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        tasks: Vec<Task>,
+        current_date: NaiveDate,
+        completed_task_ids: Option<HashSet<String>>,
+        config: Option<CriticalPathConfig>,
+        resource_config: Option<PyResourceConfig>,
+        global_dns_periods: Option<Vec<(NaiveDate, NaiveDate)>>,
+    ) -> PyResult<Self> {
+        let rust_resource_config = resource_config.map(|rc| ResourceConfig {
+            resource_order: rc.resource_order,
+            dns_periods: rc.dns_periods,
+            spec_expansion: rc.spec_expansion,
+        });
+
+        let scheduler = CriticalPathScheduler::new(
+            tasks,
+            current_date,
+            completed_task_ids.unwrap_or_default(),
+            config.unwrap_or_default(),
+            rust_resource_config,
+            global_dns_periods.unwrap_or_default(),
+        );
+
+        Ok(Self { inner: scheduler })
+    }
+
+    /// Run the scheduling algorithm.
+    fn schedule(&mut self) -> PyResult<AlgorithmResult> {
+        match self.inner.schedule() {
+            Ok(result) => Ok(result),
+            Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e.to_string())),
+        }
+    }
+
+    fn __repr__(&self) -> String {
+        "CriticalPathScheduler(...)".to_string()
+    }
+}
+
 /// The mouc.rust Python module.
 #[pymodule]
 fn rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
@@ -354,6 +415,10 @@ fn rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
     // Scheduler
     m.add_class::<PyParallelScheduler>()?;
     m.add_class::<PyRolloutDecision>()?;
+
+    // Critical path scheduler
+    m.add_class::<CriticalPathConfig>()?;
+    m.add_class::<PyCriticalPathScheduler>()?;
 
     // Algorithms
     m.add_function(wrap_pyfunction!(run_backward_pass, m)?)?;

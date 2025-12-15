@@ -13,11 +13,13 @@ if TYPE_CHECKING:
 
 
 class RustSchedulerAdapter:
-    """Adapts Rust ParallelScheduler to Python scheduler interface.
+    """Adapts Rust schedulers to Python scheduler interface.
 
     Converts Python types to Rust types, runs the Rust scheduler,
     and converts results back to Python types.
     """
+
+    _rust_scheduler: rust.ParallelScheduler | rust.CriticalPathScheduler
 
     def __init__(  # noqa: PLR0913
         self,
@@ -36,7 +38,7 @@ class RustSchedulerAdapter:
         Args:
             tasks: List of tasks to schedule
             current_date: The current date (baseline for scheduling)
-            algorithm_type: Which algorithm to use (PARALLEL_SGS or BOUNDED_ROLLOUT)
+            algorithm_type: Which algorithm to use (PARALLEL_SGS, BOUNDED_ROLLOUT, or CRITICAL_PATH)
             resource_config: Optional resource configuration for auto-assignment
             completed_task_ids: Set of task IDs that are already completed
             config: Optional scheduling configuration for prioritization strategy
@@ -54,23 +56,34 @@ class RustSchedulerAdapter:
 
         # Convert to Rust types
         rust_tasks = self._convert_tasks(tasks)
-        rust_config = self._convert_config(self._config)
         rust_resource_config = self._convert_resource_config(resource_config)
         rust_global_dns = self._convert_global_dns(self._global_dns_periods)
-        rust_preprocess = self._convert_preprocess_result(preprocess_result)
-        rust_rollout = self._convert_rollout_config(self._config, algorithm_type)
 
-        # Create Rust scheduler
-        self._rust_scheduler = rust.ParallelScheduler(
-            tasks=rust_tasks,
-            current_date=current_date,
-            completed_task_ids=self._completed_task_ids,
-            config=rust_config,
-            rollout_config=rust_rollout,
-            resource_config=rust_resource_config,
-            global_dns_periods=rust_global_dns,
-            preprocess_result=rust_preprocess,
-        )
+        # Create appropriate Rust scheduler based on algorithm type
+        if algorithm_type == AlgorithmType.CRITICAL_PATH:
+            rust_cp_config = self._convert_critical_path_config(self._config)
+            self._rust_scheduler = rust.CriticalPathScheduler(
+                tasks=rust_tasks,
+                current_date=current_date,
+                completed_task_ids=self._completed_task_ids,
+                config=rust_cp_config,
+                resource_config=rust_resource_config,
+                global_dns_periods=rust_global_dns,
+            )
+        else:
+            rust_config = self._convert_config(self._config)
+            rust_preprocess = self._convert_preprocess_result(preprocess_result)
+            rust_rollout = self._convert_rollout_config(self._config, algorithm_type)
+            self._rust_scheduler = rust.ParallelScheduler(
+                tasks=rust_tasks,
+                current_date=current_date,
+                completed_task_ids=self._completed_task_ids,
+                config=rust_config,
+                rollout_config=rust_rollout,
+                resource_config=rust_resource_config,
+                global_dns_periods=rust_global_dns,
+                preprocess_result=rust_preprocess,
+            )
 
     def _convert_tasks(self, tasks: list[Task]) -> "list[rust.Task]":
         """Convert Python Task objects to Rust Task objects."""
@@ -157,6 +170,15 @@ class RustSchedulerAdapter:
             max_horizon_days=config.rollout.max_horizon_days,
         )
 
+    def _convert_critical_path_config(self, config: SchedulingConfig) -> rust.CriticalPathConfig:
+        """Convert Python CriticalPathConfig to Rust CriticalPathConfig."""
+        return rust.CriticalPathConfig(
+            default_priority=config.critical_path.default_priority,
+            k=config.critical_path.k,
+            no_deadline_urgency_multiplier=config.critical_path.no_deadline_urgency_multiplier,
+            urgency_floor=config.critical_path.urgency_floor,
+        )
+
     def schedule(self) -> AlgorithmResult:
         """Run the Rust scheduler and convert results back to Python types.
 
@@ -183,9 +205,23 @@ class RustSchedulerAdapter:
         )
 
     def get_computed_deadlines(self) -> dict[str, date]:
-        """Get computed deadlines from Rust scheduler."""
+        """Get computed deadlines from Rust scheduler.
+
+        Note: Critical path scheduler doesn't compute deadlines via backward pass.
+        """
+        if self._algorithm_type == AlgorithmType.CRITICAL_PATH:
+            return {}
+        # ParallelScheduler has this method
+        assert isinstance(self._rust_scheduler, rust.ParallelScheduler)
         return dict(self._rust_scheduler.get_computed_deadlines())
 
     def get_computed_priorities(self) -> dict[str, int]:
-        """Get computed priorities from Rust scheduler."""
+        """Get computed priorities from Rust scheduler.
+
+        Note: Critical path scheduler doesn't propagate priorities via backward pass.
+        """
+        if self._algorithm_type == AlgorithmType.CRITICAL_PATH:
+            return {}
+        # ParallelScheduler has this method
+        assert isinstance(self._rust_scheduler, rust.ParallelScheduler)
         return dict(self._rust_scheduler.get_computed_priorities())

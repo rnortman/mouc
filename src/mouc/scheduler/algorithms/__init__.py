@@ -42,10 +42,11 @@ def create_algorithm(  # noqa: PLR0913 - Factory function with keyword-only para
     """
     effective_config = config or SchedulingConfig()
 
-    # Use Rust implementation for greedy algorithms if requested
+    # Use Rust implementation for supported algorithms if requested
     if effective_config.implementation == ImplementationType.RUST and algorithm_type in (
         AlgorithmType.PARALLEL_SGS,
         AlgorithmType.BOUNDED_ROLLOUT,
+        AlgorithmType.CRITICAL_PATH,
     ):
         return RustSchedulerAdapter(
             tasks,
@@ -57,6 +58,12 @@ def create_algorithm(  # noqa: PLR0913 - Factory function with keyword-only para
             global_dns_periods=global_dns_periods,
             preprocess_result=preprocess_result,
         )
+
+    # Critical path is Rust-only
+    if algorithm_type == AlgorithmType.CRITICAL_PATH:
+        msg = "Critical path scheduler is only available with Rust implementation"
+        raise ValueError(msg)
+
     # Fall through to Python for CP-SAT or if Rust not requested
 
     if algorithm_type == AlgorithmType.PARALLEL_SGS:

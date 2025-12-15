@@ -20,6 +20,7 @@ class AlgorithmType(str, Enum):
     PARALLEL_SGS = "parallel_sgs"
     BOUNDED_ROLLOUT = "bounded_rollout"
     CP_SAT = "cpsat"
+    CRITICAL_PATH = "critical_path"
 
 
 class PreProcessorType(str, Enum):
@@ -78,6 +79,23 @@ class CPSATConfig(BaseModel):
     log_solver_progress: bool = False  # Log solver progress at debug verbosity
 
 
+class CriticalPathConfig(BaseModel):
+    """Configuration for critical path scheduler.
+
+    The critical path scheduler eliminates priority contamination by focusing
+    only on tasks that are actually on the critical path to attractive targets.
+    """
+
+    # Default priority for tasks without explicit priority (0-100)
+    default_priority: int = 50
+    # Urgency decay parameter K (higher = more tolerant of slack)
+    k: float = 2.0
+    # Multiplier for urgency of non-deadline targets
+    no_deadline_urgency_multiplier: float = 0.5
+    # Minimum urgency floor for all targets
+    urgency_floor: float = 0.1
+
+
 class SchedulingConfig(BaseModel):
     """Configuration for task prioritization and algorithm selection."""
 
@@ -108,6 +126,9 @@ class SchedulingConfig(BaseModel):
 
     # CP-SAT configuration
     cpsat: CPSATConfig = CPSATConfig()
+
+    # Critical path configuration
+    critical_path: CriticalPathConfig = CriticalPathConfig()
 
     # Implementation language (python or rust)
     implementation: ImplementationType = ImplementationType.PYTHON

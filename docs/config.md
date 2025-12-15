@@ -352,6 +352,7 @@ Valid values:
 Valid values:
 - `"parallel_sgs"` - Standard greedy chronological scheduling (fast, good quality)
 - `"bounded_rollout"` - Lookahead simulation for better priority handling
+- `"critical_path"` - Target-focused scheduling that eliminates priority contamination (Rust only)
 - `"cpsat"` - Optimal scheduling using OR-Tools constraint solver (slower, best quality)
 
 **`implementation`** (optional, default: `"python"`): Implementation language for greedy schedulers.
@@ -380,6 +381,13 @@ Valid values:
 - **`use_greedy_hints`** (default: `true`): Run greedy scheduler first to seed CP-SAT with hints and compute a tighter horizon
 - **`warn_on_incomplete_hints`** (default: `true`): Log a warning if greedy hints are incomplete or rejected by the solver
 - **`log_solver_progress`** (default: `false`): Log CP-SAT solver progress at verbosity level 1 (`-v 1`)
+
+**Critical Path Configuration** (only used when `algorithm.type` is `"critical_path"`):
+
+- **`default_priority`** (default: `50`): Default priority (0-100) for tasks without explicit priority metadata
+- **`k`** (default: `2.0`): Urgency decay parameter controlling how quickly urgency ramps up as deadlines approach. Lower values (1.5) mean urgency kicks in earlier; higher values (3.0) only get urgent near deadlines.
+- **`no_deadline_urgency_multiplier`** (default: `0.5`): Multiplier for computing urgency of tasks without deadlines. Applied to the minimum urgency of deadline tasks.
+- **`urgency_floor`** (default: `0.1`): Minimum urgency for any task, preventing zero-urgency tasks from never being scheduled.
 
 **Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
 
@@ -423,6 +431,19 @@ scheduler:
     min_priority_gap: 20
     cr_relaxed_threshold: 5.0
     min_cr_urgency_gap: 3.0
+```
+
+```yaml
+# Critical path scheduling - eliminates priority contamination
+scheduler:
+  algorithm:
+    type: critical_path
+  implementation: rust  # Required - critical_path is Rust-only
+  critical_path:
+    default_priority: 50
+    k: 2.0
+    no_deadline_urgency_multiplier: 0.5
+    urgency_floor: 0.1
 ```
 
 See [Scheduling Documentation](scheduling.md) for detailed algorithm behavior.

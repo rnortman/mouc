@@ -682,6 +682,101 @@ Use standard Parallel SGS when:
 - **Bounded horizon**: Only looks ahead to current task's completion time
 - **Performance overhead**: Runs simulations, so slower than pure greedy
 
+## Critical Path Scheduler
+
+The critical path scheduler is an alternative approach that **eliminates priority contamination** - a problem where slack tasks inherit urgency from high-priority dependents in traditional backward-pass schedulers.
+
+### The Priority Contamination Problem
+
+With standard backward pass deadline propagation, consider this scenario:
+
+```
+Target A (priority 90, deadline Jan 31)
+  └─ Slack Task (priority 20, no deadline)
+
+Target B (priority 80, deadline Jan 31)
+```
+
+The backward pass propagates Target A's deadline to Slack Task, making it appear as urgent as A itself. But Slack Task has low priority (20) - it's not critical, just happens to be a dependency. The greedy scheduler may prioritize Slack Task over Target B's actual work, even though B is more important.
+
+### How Critical Path Scheduling Works
+
+The critical path scheduler takes a different approach:
+
+1. **Every task is a potential target** - not just leaves, every unscheduled task
+2. **Targets are scored by attractiveness**: `(priority / total_work) × urgency`
+3. **Only critical path tasks are considered** - tasks with zero slack to the target
+4. **Recalculate after each decision** - critical paths change as tasks complete
+
+**Target Scoring:**
+```
+target_score = (priority / total_work) × urgency
+```
+- `priority`: Task's priority (0-100)
+- `total_work`: Sum of all dependency durations leading to this target
+- `urgency`: Exponential decay based on deadline proximity
+
+This naturally favors **low-hanging fruit** (high priority, low total work) while respecting deadlines.
+
+**Urgency Calculation:**
+```
+urgency = exp(-max(0, slack) / (K × avg_work))
+```
+- Tasks with tight deadlines get urgency → 1.0
+- Tasks with slack get exponentially decreasing urgency
+- No-deadline tasks get: `min(deadline_urgency) × multiplier`, with a floor
+
+**Task Scoring (within critical path):**
+```
+task_score = priority / duration  # WSPT (Weighted Shortest Processing Time)
+```
+
+### Configuration
+
+Enable via CLI:
+```bash
+mouc gantt feature_map.yaml --algorithm critical_path --rust
+mouc schedule feature_map.yaml --algorithm critical_path --rust
+```
+
+Or in `mouc_config.yaml`:
+```yaml
+scheduler:
+  algorithm:
+    type: critical_path
+  implementation: rust  # Required - critical_path is Rust-only
+  critical_path:
+    default_priority: 50           # Default priority for tasks without metadata
+    k: 2.0                         # Urgency decay parameter
+    no_deadline_urgency_multiplier: 0.5  # Multiplier for no-deadline tasks
+    urgency_floor: 0.1             # Minimum urgency (prevents zero)
+```
+
+**Parameters:**
+- `default_priority` (default: 50): Priority for tasks without explicit priority
+- `k` (default: 2.0): Controls urgency ramp-up. Lower = more aggressive (1.5), higher = relaxed (3.0)
+- `no_deadline_urgency_multiplier` (default: 0.5): No-deadline tasks get `min_urgency × multiplier`
+- `urgency_floor` (default: 0.1): Minimum urgency to prevent tasks from never scheduling
+
+### When to Use Critical Path Scheduling
+
+Use critical path scheduling when:
+- You have complex dependency graphs with mixed priorities
+- Low-priority tasks are blocking high-priority targets inappropriately
+- You want "low-hanging fruit" behavior (quick wins first)
+- Traditional greedy scheduling produces counterintuitive results
+
+Use Parallel SGS or Bounded Rollout when:
+- Dependency graphs are simple or flat
+- All tasks have similar priorities
+- You need the Python implementation (critical_path is Rust-only)
+
+### Limitations
+
+- **Rust only**: No Python implementation available
+- **No rollout support yet**: Architecture allows for future rollout integration
+- **Recomputes each iteration**: More expensive than simple greedy (but still fast)
+
 ## CP-SAT Optimal Scheduler
 
 The scheduler supports an **optimal** scheduling algorithm using Google OR-Tools CP-SAT (Constraint Programming with SAT solving). Unlike the greedy algorithms above, CP-SAT finds globally optimal solutions by exploring the entire solution space.
@@ -947,20 +1042,23 @@ With these inputs, CP-SAT will:
 
 ### Comparison with Other Algorithms
 
-| Feature | Parallel SGS | Bounded Rollout | CP-SAT |
-|---------|--------------|-----------------|--------|
-| Speed | Fast (ms) | Moderate (ms-s) | Slow (s-min) |
-| Solution quality | Good | Better | Optimal* |
-| Handles priority/deadline trade-offs | Heuristically | With lookahead | Globally |
-| Deterministic | Yes | Yes | Yes |
-| Scales to 500+ tasks | Yes | Yes | Limited |
-| Explainability | High | High | Medium |
+| Feature | Parallel SGS | Bounded Rollout | Critical Path | CP-SAT |
+|---------|--------------|-----------------|---------------|--------|
+| Speed | Fast (ms) | Moderate (ms-s) | Fast (ms) | Slow (s-min) |
+| Solution quality | Good | Better | Better | Optimal* |
+| Handles priority/deadline trade-offs | Heuristically | With lookahead | Per-target | Globally |
+| Priority contamination | Yes | Yes | **No** | No |
+| Deterministic | Yes | Yes | Yes | Yes |
+| Scales to 500+ tasks | Yes | Yes | Yes | Limited |
+| Explainability | High | High | High | Medium |
+| Python implementation | Yes | Yes | No | Yes |
+| Rust implementation | Yes | Yes | Yes | No |
 
 *Optimal when solver completes; best-found when time-limited.
 
 ## Rust Implementation
 
-The greedy schedulers (Parallel SGS and Bounded Rollout) have both Python and Rust implementations with identical behavior. The Rust implementation offers better performance for large projects.
+The greedy schedulers (Parallel SGS and Bounded Rollout) have both Python and Rust implementations with identical behavior. The Critical Path scheduler is **Rust-only**. The Rust implementation offers better performance for large projects.
 
 ### Usage
 
@@ -975,13 +1073,14 @@ Via configuration:
 scheduler:
   implementation: "rust"  # or "python" (default)
   algorithm:
-    type: parallel_sgs  # or bounded_rollout
+    type: parallel_sgs  # or bounded_rollout, critical_path
 ```
 
 ### When to Use Rust
 
 - **Large projects**: 100+ tasks benefit from Rust's speed
+- **Critical path scheduling**: Only available in Rust
 - **Benchmarking**: Compare Python vs Rust performance
 - **CI/CD pipelines**: Faster scheduling in automated workflows
 
-Note: CP-SAT always uses Python (OR-Tools). The Rust implementation only applies to greedy algorithms.
+Note: CP-SAT always uses Python (OR-Tools). Critical Path is Rust-only. Parallel SGS and Bounded Rollout have both implementations.
