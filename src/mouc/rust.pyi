@@ -117,6 +117,19 @@ class RolloutConfig:
     ) -> None: ...
     def __repr__(self) -> str: ...
 
+class TaskSortInfo:
+    duration_days: float
+    deadline: date | None
+    priority: int
+
+    def __init__(
+        self,
+        duration_days: float,
+        priority: int,
+        deadline: date | None = None,
+    ) -> None: ...
+    def __repr__(self) -> str: ...
+
 # Functions
 
 def run_backward_pass(
@@ -136,5 +149,33 @@ def run_backward_pass(
 
     Raises:
         ValueError: If circular dependency is detected
+    """
+    ...
+
+def py_sort_tasks(
+    task_ids: list[str],
+    task_infos: dict[str, TaskSortInfo],
+    current_time: date,
+    default_cr: float,
+    config: SchedulingConfig,
+    atc_avg_duration: float | None = None,
+    atc_default_urgency: float | None = None,
+) -> list[str]:
+    """Sort task IDs by their sort keys using the specified strategy.
+
+    Args:
+        task_ids: List of task IDs to sort
+        task_infos: Dict mapping task ID to TaskSortInfo
+        current_time: Current scheduling time
+        default_cr: Default critical ratio for tasks without deadlines
+        config: Scheduling configuration (strategy, weights, etc.)
+        atc_avg_duration: Average task duration for ATC strategy
+        atc_default_urgency: Default urgency for no-deadline tasks in ATC
+
+    Returns:
+        List of task IDs sorted by priority (most urgent first)
+
+    Raises:
+        ValueError: If unknown strategy, missing ATC params, or task not found
     """
     ...
