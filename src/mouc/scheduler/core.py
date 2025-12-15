@@ -1,5 +1,6 @@
 """Core dataclasses for the scheduling system."""
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from typing import TYPE_CHECKING, Any
@@ -107,4 +108,6 @@ def compute_dependency_deadline(
     Returns:
         Latest date the dependency (A) can finish
     """
-    return dependent_deadline - timedelta(days=dependent_duration_days + lag_days)
+    # Ceiling ensures fractional days round up to whole days for scheduling
+    total_days = math.ceil(dependent_duration_days + lag_days)
+    return dependent_deadline - timedelta(days=total_days)

@@ -116,3 +116,25 @@ class RolloutConfig:
         max_horizon_days: int | None = 30,
     ) -> None: ...
     def __repr__(self) -> str: ...
+
+# Functions
+
+def run_backward_pass(
+    tasks: list[Task],
+    completed_task_ids: set[str],
+    default_priority: int = 50,
+) -> PreProcessResult:
+    """Run the backward pass algorithm to compute deadlines and priorities.
+
+    Args:
+        tasks: List of tasks to process
+        completed_task_ids: Set of task IDs already completed (excluded from propagation)
+        default_priority: Default priority for tasks without explicit priority (0-100)
+
+    Returns:
+        PreProcessResult with computed deadlines and priorities
+
+    Raises:
+        ValueError: If circular dependency is detected
+    """
+    ...

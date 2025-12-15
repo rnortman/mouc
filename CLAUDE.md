@@ -34,9 +34,16 @@ Don't Repeat Yourself. Refactor code as necessary to avoid duplication of logic.
 Use `uv run` to run commands within the project environment.
 Use `uv sync` after updating pyproject.toml to install packages.
 
-Always run `uv run ruff format && uv run ruff check --fix && uv run pyright && uv run pytest` before considering an iteration done.
+Always run the following before considering an iteration done:
+```bash
+# Rust (if modified)
+cargo fmt && cargo clippy -- -D warnings && cargo test
 
-Target is Python 3.10+.
+# Python
+uv run ruff format && uv run ruff check --fix && uv run pyright && uv run pytest
+```
+
+Target is Python 3.10+, Rust stable.
 
 ## Changes and Releasing
 

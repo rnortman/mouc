@@ -26,7 +26,10 @@ impl Dependency {
     }
 
     fn __repr__(&self) -> String {
-        format!("Dependency(entity_id={:?}, lag_days={})", self.entity_id, self.lag_days)
+        format!(
+            "Dependency(entity_id={:?}, lag_days={})",
+            self.entity_id, self.lag_days
+        )
     }
 }
 
