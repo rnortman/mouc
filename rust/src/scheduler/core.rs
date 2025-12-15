@@ -53,6 +53,11 @@ impl ResourceConfig {
 
     /// Expand a resource spec to list of candidate resource names.
     pub fn expand_resource_spec(&self, spec: &str) -> Vec<String> {
+        // Handle "*" wildcard: return all resources
+        if spec == "*" {
+            return self.resource_order.clone();
+        }
+        // Check if it's in the expansion map (group alias)
         if let Some(resources) = self.spec_expansion.get(spec) {
             return resources.clone();
         }
@@ -60,7 +65,7 @@ impl ResourceConfig {
         if self.resource_order.contains(&spec.to_string()) {
             return vec![spec.to_string()];
         }
-        // Fallback: treat as comma-separated list
+        // Fallback: treat as pipe-separated list
         spec.split('|')
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
