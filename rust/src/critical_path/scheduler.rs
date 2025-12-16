@@ -9,10 +9,9 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
 use super::calculation::{calculate_critical_path, CriticalPathError};
-use super::rollout::{
-    find_competing_targets, run_forward_simulation, CriticalPathCache, ResourceReservation,
-};
+use super::rollout::{score_schedule, ResourceReservation};
 use super::scoring::{compute_urgency_with_context, score_task};
+use super::state::CriticalPathSchedulerState;
 use super::types::{CriticalPathConfig, TargetInfo};
 
 /// Errors that can occur during critical path scheduling.
@@ -175,18 +174,17 @@ impl CriticalPathScheduler {
 
     /// Main critical path scheduling loop.
     fn schedule_critical_path(
-        &mut self,
+        &self,
         fixed_tasks: &[ScheduledTask],
     ) -> Result<Vec<ScheduledTask>, CriticalPathSchedulerError> {
         // Initialize state
         let mut scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
-        let mut unscheduled: FxHashSet<String> = self
+        let unscheduled: FxHashSet<String> = self
             .tasks
             .keys()
             .filter(|id| !self.completed_task_ids.contains(*id))
             .cloned()
             .collect();
-        let mut result: Vec<ScheduledTask> = Vec::new();
 
         // Pre-populate scheduled dict with fixed tasks
         for fixed_task in fixed_tasks {
@@ -235,26 +233,82 @@ impl CriticalPathScheduler {
             }
         }
 
-        let mut current_time = self.current_date;
-        let max_iterations = self.tasks.len() * 100;
-        let verbosity = self.config.verbosity;
+        // Create initial state
+        let state = CriticalPathSchedulerState::new(
+            scheduled,
+            unscheduled,
+            resource_schedules,
+            self.current_date,
+        );
 
-        // Track resource reservations from rollout decisions
-        let mut reservations: FxHashMap<String, ResourceReservation> = FxHashMap::default();
+        // Run the main scheduling loop with rollout enabled
+        let final_state = self.schedule_from_state(state, None, true)?;
+        Ok(final_state.result)
+    }
+
+    /// Run scheduling from a given state.
+    ///
+    /// This is the core scheduling loop, extracted to support both normal scheduling
+    /// and rollout simulation (which runs the same logic on a cloned state).
+    ///
+    /// # Arguments
+    /// * `state` - Initial scheduler state
+    /// * `horizon` - Optional date limit; stop scheduling after this date
+    /// * `enable_rollout` - Whether to check rollout decisions (false during simulation)
+    fn schedule_from_state(
+        &self,
+        state: CriticalPathSchedulerState,
+        horizon: Option<NaiveDate>,
+        enable_rollout: bool,
+    ) -> Result<CriticalPathSchedulerState, CriticalPathSchedulerError> {
+        self.schedule_from_state_with_skip(state, horizon, enable_rollout, None)
+    }
+
+    /// Run scheduling from a given state, optionally skipping a task at the initial time.
+    ///
+    /// # Arguments
+    /// * `state` - Initial scheduler state
+    /// * `horizon` - Optional date limit; stop scheduling after this date
+    /// * `enable_rollout` - Whether to check rollout decisions (false during simulation)
+    /// * `skip_task_at_initial_time` - If Some, skip this task at the initial current_time only
+    fn schedule_from_state_with_skip(
+        &self,
+        mut state: CriticalPathSchedulerState,
+        horizon: Option<NaiveDate>,
+        enable_rollout: bool,
+        skip_task_at_initial_time: Option<&str>,
+    ) -> Result<CriticalPathSchedulerState, CriticalPathSchedulerError> {
+        let initial_time = state.current_time;
+        let max_iterations = self.tasks.len() * 100;
+        let verbosity = if enable_rollout {
+            self.config.verbosity
+        } else {
+            0 // Silence logging during simulation
+        };
 
         for _iteration in 0..max_iterations {
-            if unscheduled.is_empty() {
+            if state.unscheduled.is_empty() {
                 break;
             }
 
-            log_changes!(verbosity, "Time: {}", current_time);
+            // Check horizon limit
+            if let Some(h) = horizon {
+                if state.current_time > h {
+                    break;
+                }
+            }
+
+            log_changes!(verbosity, "Time: {}", state.current_time);
 
             // Calculate critical paths for all unscheduled tasks (each is a potential target)
-            let target_infos =
-                self.calculate_all_target_infos(&scheduled, &unscheduled, current_time)?;
+            let target_infos = self.calculate_all_target_infos(
+                &state.scheduled,
+                &state.unscheduled,
+                state.current_time,
+            )?;
 
             // Rank targets by attractiveness
-            let ranked_targets = self.rank_targets(&target_infos, current_time);
+            let ranked_targets = self.rank_targets(&target_infos, state.current_time);
 
             log_debug!(
                 verbosity,
@@ -285,9 +339,9 @@ impl CriticalPathScheduler {
                 // Get eligible tasks on this target's critical path
                 let eligible = self.get_eligible_critical_path_tasks(
                     target,
-                    &scheduled,
-                    &unscheduled,
-                    current_time,
+                    &state.scheduled,
+                    &state.unscheduled,
+                    state.current_time,
                 );
 
                 if eligible.is_empty() {
@@ -296,6 +350,15 @@ impl CriticalPathScheduler {
 
                 // Pick best task by WSPT
                 let best_task_id = self.pick_best_task(&eligible);
+
+                // Skip this task at initial time if requested (for rollout simulation)
+                if state.current_time == initial_time {
+                    if let Some(skip_id) = skip_task_at_initial_time {
+                        if best_task_id == skip_id {
+                            continue; // Skip this task at initial time, try next target
+                        }
+                    }
+                }
 
                 let task = self.tasks.get(&best_task_id);
                 let priority = task
@@ -311,15 +374,15 @@ impl CriticalPathScheduler {
                 );
 
                 // Check rollout: should we skip this task for a better upcoming task?
-                if self.config.rollout_enabled {
+                if enable_rollout && self.config.rollout_enabled {
                     if let Some((skip_reason, reservation)) = self.check_rollout_skip(
                         &best_task_id,
                         target,
                         &ranked_targets,
-                        &scheduled,
-                        &unscheduled,
-                        &resource_schedules,
-                        current_time,
+                        &state.scheduled,
+                        &state.unscheduled,
+                        &state.resource_schedules,
+                        state.current_time,
                     ) {
                         log_checks!(
                             verbosity,
@@ -328,7 +391,9 @@ impl CriticalPathScheduler {
                             skip_reason
                         );
                         // Store the reservation
-                        reservations.insert(reservation.resource.clone(), reservation);
+                        state
+                            .reservations
+                            .insert(reservation.resource.clone(), reservation);
                         continue;
                     }
                 }
@@ -336,22 +401,22 @@ impl CriticalPathScheduler {
                 // Try to schedule it (passing reservations for resource checking)
                 if let Some(scheduled_task) = self.try_schedule_task(
                     &best_task_id,
-                    current_time,
-                    &mut resource_schedules,
-                    &reservations,
+                    state.current_time,
+                    &mut state.resource_schedules,
+                    &state.reservations,
                 ) {
-                    scheduled.insert(
+                    state.scheduled.insert(
                         best_task_id.clone(),
                         (scheduled_task.start_date, scheduled_task.end_date),
                     );
-                    unscheduled.remove(&best_task_id);
+                    state.unscheduled.remove(&best_task_id);
 
                     if scheduled_task.duration_days == 0.0 {
                         log_changes!(
                             verbosity,
                             "  Scheduled milestone {} at {}",
                             best_task_id,
-                            current_time
+                            state.current_time
                         );
                     } else {
                         log_changes!(
@@ -365,9 +430,9 @@ impl CriticalPathScheduler {
                     }
 
                     // Clear any reservation for this task (it's now scheduled)
-                    reservations.retain(|_, r| r.task_id != best_task_id);
+                    state.reservations.retain(|_, r| r.task_id != best_task_id);
 
-                    result.push(scheduled_task);
+                    state.result.push(scheduled_task);
                     scheduled_any = true;
                     break; // Single-target focus per iteration
                 } else {
@@ -382,19 +447,25 @@ impl CriticalPathScheduler {
             if !scheduled_any {
                 // No eligible tasks - advance time
                 match self.find_next_event_time(
-                    &scheduled,
-                    &unscheduled,
-                    &resource_schedules,
-                    current_time,
+                    &state.scheduled,
+                    &state.unscheduled,
+                    &state.resource_schedules,
+                    state.current_time,
                 ) {
                     Some(next_time) => {
+                        // Check horizon before advancing
+                        if let Some(h) = horizon {
+                            if next_time > h {
+                                break;
+                            }
+                        }
                         log_debug!(
                             verbosity,
                             "  No tasks scheduled at {}, advancing to {}",
-                            current_time,
+                            state.current_time,
                             next_time
                         );
-                        current_time = next_time;
+                        state.current_time = next_time;
                     }
                     None => {
                         log_debug!(verbosity, "  No more events, stopping");
@@ -403,17 +474,68 @@ impl CriticalPathScheduler {
                 }
 
                 // Clear expired reservations (reserved_from is in the past)
-                reservations.retain(|_, r| r.reserved_from >= current_time);
+                state
+                    .reservations
+                    .retain(|_, r| r.reserved_from >= state.current_time);
             }
         }
 
-        if !unscheduled.is_empty() {
+        // For normal scheduling, error if not all tasks scheduled
+        // For simulation (with horizon), partial schedule is OK
+        if horizon.is_none() && !state.unscheduled.is_empty() {
             return Err(CriticalPathSchedulerError::FailedToSchedule(
-                unscheduled.into_iter().collect(),
+                state.unscheduled.into_iter().collect(),
             ));
         }
 
-        Ok(result)
+        Ok(state)
+    }
+
+    /// Score a scheduler state for rollout comparison (lower is better).
+    fn score_state(
+        &self,
+        state: &CriticalPathSchedulerState,
+        start_time: NaiveDate,
+        horizon: NaiveDate,
+    ) -> f64 {
+        // Build list of all scheduled tasks from state.scheduled
+        let all_scheduled_tasks: Vec<ScheduledTask> = state
+            .scheduled
+            .iter()
+            .filter_map(|(task_id, (start, end))| {
+                self.tasks.get(task_id).map(|task| ScheduledTask {
+                    task_id: task_id.clone(),
+                    start_date: *start,
+                    end_date: *end,
+                    duration_days: task.duration_days,
+                    resources: task.resources.iter().map(|(r, _)| r.clone()).collect(),
+                })
+            })
+            .collect();
+
+        // Build computed deadlines/priorities
+        let computed_deadlines: FxHashMap<String, NaiveDate> = self
+            .tasks
+            .iter()
+            .filter_map(|(id, t)| t.end_before.map(|d| (id.clone(), d)))
+            .collect();
+        let computed_priorities: FxHashMap<String, i32> = self
+            .tasks
+            .iter()
+            .filter_map(|(id, t)| t.priority.map(|p| (id.clone(), p)))
+            .collect();
+
+        score_schedule(
+            &all_scheduled_tasks,
+            &state.unscheduled,
+            &self.tasks,
+            &computed_deadlines,
+            &computed_priorities,
+            &state.scheduled,
+            start_time,
+            horizon,
+            self.default_priority,
+        )
     }
 
     /// Calculate target info (including critical path) for all unscheduled tasks.
@@ -797,6 +919,9 @@ impl CriticalPathScheduler {
     ///
     /// Returns Some((reason, reservation)) if we should skip, None if we should proceed.
     /// The reservation can be used to hold the resource for the competing task.
+    ///
+    /// This uses the actual scheduler logic for simulation instead of separate
+    /// simulation code, ensuring that rollout predictions match real behavior.
     #[allow(clippy::too_many_arguments)]
     fn check_rollout_skip(
         &self,
@@ -808,6 +933,8 @@ impl CriticalPathScheduler {
         resource_schedules: &FxHashMap<String, ResourceSchedule>,
         current_time: NaiveDate,
     ) -> Option<(String, ResourceReservation)> {
+        use super::rollout::find_competing_targets;
+
         let task = self.tasks.get(task_id)?;
 
         // Skip rollout for zero-duration tasks (milestones complete instantly)
@@ -854,73 +981,56 @@ impl CriticalPathScheduler {
             horizon
         };
 
-        // Build computed deadlines/priorities from tasks
-        let computed_deadlines: FxHashMap<String, NaiveDate> = self
-            .tasks
-            .iter()
-            .filter_map(|(id, t)| t.end_before.map(|d| (id.clone(), d)))
-            .collect();
-        let computed_priorities: FxHashMap<String, i32> = self
-            .tasks
-            .iter()
-            .filter_map(|(id, t)| t.priority.map(|p| (id.clone(), p)))
-            .collect();
-
-        // Build cache from pre-computed targets (avoid recomputing critical paths in simulation)
-        let cache = CriticalPathCache::from_targets(all_targets);
-
-        // Scenario A: Schedule this task now
-        let mut scheduled_a = scheduled.clone();
-        scheduled_a.insert(task_id.to_string(), (current_time, completion));
-        let mut unscheduled_a = unscheduled.clone();
-        unscheduled_a.remove(task_id);
-        let mut resource_schedules_a = resource_schedules.clone();
-        if let Some(schedule) = resource_schedules_a.get_mut(&resource) {
-            schedule.add_busy_period(current_time, completion);
-        }
-
-        // Clone cache for scenario A and invalidate the scheduled task
-        let mut cache_a = cache.clone();
-        let _ = cache_a.invalidate_for_scheduled_task(task_id);
-
-        let result_a = run_forward_simulation(
-            &self.tasks,
-            scheduled_a,
-            unscheduled_a,
-            resource_schedules_a,
-            horizon,
-            None,
-            current_time,
-            &self.config,
-            self.resource_config.as_ref(),
-            &computed_deadlines,
-            &computed_priorities,
-            self.default_priority,
-            cache_a,
-        );
-
-        // Scenario B: Skip this task (leave resource idle)
-        // Use original cache (task not scheduled yet)
-        let cache_b = cache;
-
-        let result_b = run_forward_simulation(
-            &self.tasks,
+        // Create state for simulation
+        let state = CriticalPathSchedulerState::new(
             scheduled.clone(),
             unscheduled.clone(),
             resource_schedules.clone(),
-            horizon,
-            Some(task_id),
             current_time,
-            &self.config,
-            self.resource_config.as_ref(),
-            &computed_deadlines,
-            &computed_priorities,
-            self.default_priority,
-            cache_b,
         );
 
+        // Scenario A: Schedule this task now
+        let mut state_a = state.clone_for_rollout();
+        state_a
+            .scheduled
+            .insert(task_id.to_string(), (current_time, completion));
+        state_a.unscheduled.remove(task_id);
+        if let Some(schedule) = state_a.resource_schedules.get_mut(&resource) {
+            schedule.add_busy_period(current_time, completion);
+        }
+        // Run the scheduler (without rollout to prevent infinite recursion)
+        let final_state_a = self
+            .schedule_from_state(state_a, Some(horizon), false)
+            .unwrap_or_else(|_| {
+                CriticalPathSchedulerState::new(
+                    FxHashMap::default(),
+                    FxHashSet::default(),
+                    FxHashMap::default(),
+                    current_time,
+                )
+            });
+        let score_a = self.score_state(&final_state_a, current_time, horizon);
+
+        // Scenario B: Skip this task (leave resource idle)
+        let final_state_b = self
+            .schedule_from_state_with_skip(
+                state.clone_for_rollout(),
+                Some(horizon),
+                false,
+                Some(task_id),
+            )
+            .unwrap_or_else(|_| {
+                CriticalPathSchedulerState::new(
+                    FxHashMap::default(),
+                    FxHashSet::default(),
+                    FxHashMap::default(),
+                    current_time,
+                )
+            });
+        let score_b = self.score_state(&final_state_b, current_time, horizon);
+
         // Compare: lower score is better
-        if result_b.score < result_a.score {
+        if score_b < score_a {
             let best_competing = &competing[0];
             let reason = format!(
                 "better to wait for {} (target score {:.2} vs {:.2})",
