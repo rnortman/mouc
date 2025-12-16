@@ -1,6 +1,7 @@
 //! Critical path calculation using forward and backward passes.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 
 use crate::models::Task;
 
@@ -28,9 +29,9 @@ impl std::error::Error for CriticalPathError {}
 #[derive(Clone, Debug)]
 pub struct CriticalPathResult {
     /// Timing information for each task in the subgraph.
-    pub task_timings: HashMap<String, TaskTiming>,
+    pub task_timings: FxHashMap<String, TaskTiming>,
     /// Set of task IDs on the critical path.
-    pub critical_path_tasks: HashSet<String>,
+    pub critical_path_tasks: FxHashSet<String>,
     /// Critical path length (makespan).
     pub critical_path_length: f64,
     /// Total work (sum of all task durations in subgraph).
@@ -49,12 +50,12 @@ pub struct CriticalPathResult {
 /// * `completed_task_ids` - Set of completed task IDs
 pub fn calculate_critical_path(
     target_id: &str,
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, f64>, // task_id -> scheduled end time (days from start)
-    completed_task_ids: &HashSet<String>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, f64>, // task_id -> scheduled end time (days from start)
+    completed_task_ids: &FxHashSet<String>,
 ) -> Result<CriticalPathResult, CriticalPathError> {
     // Scheduled task IDs - treat as complete for subgraph traversal
-    let scheduled_ids: HashSet<String> = scheduled.keys().cloned().collect();
+    let scheduled_ids: FxHashSet<String> = scheduled.keys().cloned().collect();
 
     // Find all tasks in the subgraph leading to this target
     let subgraph = find_dependency_subgraph(target_id, tasks, completed_task_ids, &scheduled_ids);
@@ -64,7 +65,7 @@ pub fn calculate_critical_path(
         let target = tasks.get(target_id);
         let duration = target.map(|t| t.duration_days).unwrap_or(0.0);
 
-        let mut task_timings = HashMap::new();
+        let mut task_timings = FxHashMap::default();
         task_timings.insert(
             target_id.to_string(),
             TaskTiming {
@@ -76,7 +77,7 @@ pub fn calculate_critical_path(
             },
         );
 
-        let mut critical_path_tasks = HashSet::new();
+        let mut critical_path_tasks = FxHashSet::default();
         critical_path_tasks.insert(target_id.to_string());
 
         return Ok(CriticalPathResult {
@@ -91,7 +92,7 @@ pub fn calculate_critical_path(
     let topo_order = topological_sort_subgraph(&subgraph, target_id, tasks)?;
 
     // Forward pass: compute earliest start/finish times
-    let mut task_timings: HashMap<String, TaskTiming> = HashMap::new();
+    let mut task_timings: FxHashMap<String, TaskTiming> = FxHashMap::default();
     let mut total_work = 0.0;
 
     for task_id in &topo_order {
@@ -200,7 +201,7 @@ pub fn calculate_critical_path(
     }
 
     // Identify critical path tasks (slack = 0)
-    let critical_path_tasks: HashSet<String> = task_timings
+    let critical_path_tasks: FxHashSet<String> = task_timings
         .iter()
         .filter(|(_, timing)| timing.is_critical())
         .map(|(id, _)| id.clone())
@@ -220,11 +221,11 @@ pub fn calculate_critical_path(
 /// effectively complete for the purpose of determining what work remains.
 fn find_dependency_subgraph(
     target_id: &str,
-    tasks: &HashMap<String, Task>,
-    completed_task_ids: &HashSet<String>,
-    scheduled_task_ids: &HashSet<String>,
-) -> HashSet<String> {
-    let mut subgraph = HashSet::new();
+    tasks: &FxHashMap<String, Task>,
+    completed_task_ids: &FxHashSet<String>,
+    scheduled_task_ids: &FxHashSet<String>,
+) -> FxHashSet<String> {
+    let mut subgraph = FxHashSet::default();
     let mut queue = VecDeque::new();
 
     // Start from target, traverse dependencies backward
@@ -263,16 +264,16 @@ fn find_dependency_subgraph(
 
 /// Topological sort of subgraph (dependencies before dependents).
 fn topological_sort_subgraph(
-    subgraph: &HashSet<String>,
+    subgraph: &FxHashSet<String>,
     target_id: &str,
-    tasks: &HashMap<String, Task>,
+    tasks: &FxHashMap<String, Task>,
 ) -> Result<Vec<String>, CriticalPathError> {
     // Include target in the set to sort
-    let mut nodes: HashSet<&str> = subgraph.iter().map(|s| s.as_str()).collect();
+    let mut nodes: FxHashSet<&str> = subgraph.iter().map(|s| s.as_str()).collect();
     nodes.insert(target_id);
 
     // Calculate in-degrees (within subgraph)
-    let mut in_degree: HashMap<&str, usize> = nodes.iter().map(|&id| (id, 0)).collect();
+    let mut in_degree: FxHashMap<&str, usize> = nodes.iter().map(|&id| (id, 0)).collect();
 
     for &task_id in &nodes {
         if let Some(task) = tasks.get(task_id) {
@@ -350,11 +351,12 @@ mod tests {
 
     #[test]
     fn test_single_task_critical_path() {
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 5.0, vec![]));
 
         let result =
-            calculate_critical_path("a", &tasks, &HashMap::new(), &HashSet::new()).unwrap();
+            calculate_critical_path("a", &tasks, &FxHashMap::default(), &FxHashSet::default())
+                .unwrap();
 
         assert_eq!(result.critical_path_length, 5.0);
         assert_eq!(result.total_work, 5.0);
@@ -365,13 +367,14 @@ mod tests {
     #[test]
     fn test_chain_critical_path() {
         // a -> b -> c (all on critical path)
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 2.0, vec![]));
         tasks.insert("b".to_string(), make_task("b", 3.0, vec![("a", 0.0)]));
         tasks.insert("c".to_string(), make_task("c", 4.0, vec![("b", 0.0)]));
 
         let result =
-            calculate_critical_path("c", &tasks, &HashMap::new(), &HashSet::new()).unwrap();
+            calculate_critical_path("c", &tasks, &FxHashMap::default(), &FxHashSet::default())
+                .unwrap();
 
         assert_eq!(result.critical_path_length, 9.0); // 2 + 3 + 4
         assert_eq!(result.total_work, 9.0);
@@ -385,7 +388,7 @@ mod tests {
         // a (2d) -> target (1d)
         // b (5d) -> target (1d)
         // b is on critical path, a has slack
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 2.0, vec![]));
         tasks.insert("b".to_string(), make_task("b", 5.0, vec![]));
         tasks.insert(
@@ -393,8 +396,13 @@ mod tests {
             make_task("target", 1.0, vec![("a", 0.0), ("b", 0.0)]),
         );
 
-        let result =
-            calculate_critical_path("target", &tasks, &HashMap::new(), &HashSet::new()).unwrap();
+        let result = calculate_critical_path(
+            "target",
+            &tasks,
+            &FxHashMap::default(),
+            &FxHashSet::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.critical_path_length, 6.0); // 5 + 1
         assert_eq!(result.total_work, 8.0); // 2 + 5 + 1
@@ -415,7 +423,7 @@ mod tests {
         // a -> c -> d
         // Path via b: 2 + 3 + 1 = 6
         // Path via c: 2 + 5 + 1 = 8 (critical)
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 2.0, vec![]));
         tasks.insert("b".to_string(), make_task("b", 3.0, vec![("a", 0.0)]));
         tasks.insert("c".to_string(), make_task("c", 5.0, vec![("a", 0.0)]));
@@ -425,7 +433,8 @@ mod tests {
         );
 
         let result =
-            calculate_critical_path("d", &tasks, &HashMap::new(), &HashSet::new()).unwrap();
+            calculate_critical_path("d", &tasks, &FxHashMap::default(), &FxHashSet::default())
+                .unwrap();
 
         assert_eq!(result.critical_path_length, 8.0);
 
@@ -443,12 +452,13 @@ mod tests {
     #[test]
     fn test_with_lag() {
         // a (2d) -[3d lag]-> b (1d)
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 2.0, vec![]));
         tasks.insert("b".to_string(), make_task("b", 1.0, vec![("a", 3.0)]));
 
         let result =
-            calculate_critical_path("b", &tasks, &HashMap::new(), &HashSet::new()).unwrap();
+            calculate_critical_path("b", &tasks, &FxHashMap::default(), &FxHashSet::default())
+                .unwrap();
 
         // Critical path: 2 + 3 (lag) + 1 = 6
         assert_eq!(result.critical_path_length, 6.0);
@@ -456,14 +466,15 @@ mod tests {
 
     #[test]
     fn test_completed_dependency_excluded() {
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert("a".to_string(), make_task("a", 10.0, vec![]));
         tasks.insert("b".to_string(), make_task("b", 5.0, vec![("a", 0.0)]));
 
-        let mut completed = HashSet::new();
+        let mut completed = FxHashSet::default();
         completed.insert("a".to_string());
 
-        let result = calculate_critical_path("b", &tasks, &HashMap::new(), &completed).unwrap();
+        let result =
+            calculate_critical_path("b", &tasks, &FxHashMap::default(), &completed).unwrap();
 
         // Only b in the subgraph since a is completed
         assert_eq!(result.critical_path_length, 5.0);

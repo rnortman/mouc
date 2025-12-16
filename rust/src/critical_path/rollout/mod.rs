@@ -13,7 +13,7 @@ pub use detection::find_competing_targets;
 pub use evaluation::score_schedule;
 pub use simulation::{build_initial_cache, run_forward_simulation};
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use chrono::NaiveDate;
 
@@ -70,6 +70,24 @@ pub struct RolloutConfig {
     pub max_horizon_days: Option<i32>,
 }
 
+/// A reservation for a resource by a higher-priority target.
+///
+/// When rollout analysis decides to skip a task, a reservation is created
+/// to ensure the resource is held for the competing target's task.
+#[derive(Clone, Debug)]
+pub struct ResourceReservation {
+    /// The resource being reserved.
+    pub resource: String,
+    /// The target that needs this resource.
+    pub target_id: String,
+    /// The specific task on the target's critical path that needs this resource.
+    pub task_id: String,
+    /// Score of the target (higher = more important).
+    pub target_score: f64,
+    /// The date from which this reservation is valid.
+    pub reserved_from: NaiveDate,
+}
+
 impl Default for RolloutConfig {
     fn default() -> Self {
         Self {
@@ -88,17 +106,17 @@ impl Default for RolloutConfig {
 #[derive(Clone, Debug)]
 pub struct CriticalPathCache {
     /// Cached target info by target_id.
-    targets: HashMap<String, TargetInfo>,
+    targets: FxHashMap<String, TargetInfo>,
     /// Reverse index: task_id -> set of target_ids that have this task on their CP.
-    task_to_targets: HashMap<String, HashSet<String>>,
+    task_to_targets: FxHashMap<String, FxHashSet<String>>,
 }
 
 impl CriticalPathCache {
     /// Create a new empty cache.
     pub fn new() -> Self {
         Self {
-            targets: HashMap::new(),
-            task_to_targets: HashMap::new(),
+            targets: FxHashMap::default(),
+            task_to_targets: FxHashMap::default(),
         }
     }
 
@@ -130,8 +148,8 @@ impl CriticalPathCache {
     ///
     /// Returns the set of target IDs that were invalidated (excluding the
     /// scheduled task itself), so the caller can recompute them if needed.
-    pub fn invalidate_for_scheduled_task(&mut self, task_id: &str) -> HashSet<String> {
-        let mut invalidated = HashSet::new();
+    pub fn invalidate_for_scheduled_task(&mut self, task_id: &str) -> FxHashSet<String> {
+        let mut invalidated = FxHashSet::default();
 
         // Remove the task itself as a target
         if let Some(target) = self.targets.remove(task_id) {
@@ -185,7 +203,7 @@ impl CriticalPathCache {
     }
 
     /// Get the set of target IDs that are still cached.
-    pub fn target_ids(&self) -> HashSet<String> {
+    pub fn target_ids(&self) -> FxHashSet<String> {
         self.targets.keys().cloned().collect()
     }
 

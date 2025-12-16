@@ -1,7 +1,7 @@
 //! Critical path scheduler implementation.
 
 use chrono::{Days, NaiveDate};
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 use thiserror::Error;
 
 use crate::models::{AlgorithmResult, ScheduledTask, Task};
@@ -9,7 +9,9 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
 use super::calculation::{calculate_critical_path, CriticalPathError};
-use super::rollout::{find_competing_targets, run_forward_simulation, CriticalPathCache};
+use super::rollout::{
+    find_competing_targets, run_forward_simulation, CriticalPathCache, ResourceReservation,
+};
 use super::scoring::{compute_urgency_with_context, score_task};
 use super::types::{CriticalPathConfig, TargetInfo};
 
@@ -34,9 +36,9 @@ impl From<CriticalPathError> for CriticalPathSchedulerError {
 
 /// Critical path scheduler that eliminates priority contamination.
 pub struct CriticalPathScheduler {
-    tasks: HashMap<String, Task>,
+    tasks: FxHashMap<String, Task>,
     current_date: NaiveDate,
-    completed_task_ids: HashSet<String>,
+    completed_task_ids: FxHashSet<String>,
     default_priority: i32,
     config: CriticalPathConfig,
     resource_config: Option<ResourceConfig>,
@@ -49,13 +51,13 @@ impl CriticalPathScheduler {
     pub fn new(
         tasks: Vec<Task>,
         current_date: NaiveDate,
-        completed_task_ids: HashSet<String>,
+        completed_task_ids: FxHashSet<String>,
         default_priority: i32,
         config: CriticalPathConfig,
         resource_config: Option<ResourceConfig>,
         global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
     ) -> Self {
-        let tasks_map: HashMap<String, Task> =
+        let tasks_map: FxHashMap<String, Task> =
             tasks.iter().map(|t| (t.id.clone(), t.clone())).collect();
 
         Self {
@@ -81,7 +83,7 @@ impl CriticalPathScheduler {
         let mut all_tasks = fixed_tasks;
         all_tasks.extend(scheduled_tasks);
 
-        let mut metadata = HashMap::new();
+        let mut metadata = std::collections::HashMap::new();
         metadata.insert("algorithm".to_string(), "critical_path".to_string());
 
         Ok(AlgorithmResult {
@@ -177,8 +179,8 @@ impl CriticalPathScheduler {
         fixed_tasks: &[ScheduledTask],
     ) -> Result<Vec<ScheduledTask>, CriticalPathSchedulerError> {
         // Initialize state
-        let mut scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
-        let mut unscheduled: HashSet<String> = self
+        let mut scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
+        let mut unscheduled: FxHashSet<String> = self
             .tasks
             .keys()
             .filter(|id| !self.completed_task_ids.contains(*id))
@@ -195,7 +197,7 @@ impl CriticalPathScheduler {
         }
 
         // Initialize resource schedules
-        let mut all_resources: HashSet<String> = HashSet::new();
+        let mut all_resources: FxHashSet<String> = FxHashSet::default();
         for task in self.tasks.values() {
             for (resource_name, _) in &task.resources {
                 all_resources.insert(resource_name.clone());
@@ -212,7 +214,7 @@ impl CriticalPathScheduler {
             }
         }
 
-        let mut resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
         for resource in &all_resources {
             let unavailable_periods = match &self.resource_config {
                 Some(rc) => rc.get_dns_periods(resource, &self.global_dns_periods),
@@ -236,6 +238,9 @@ impl CriticalPathScheduler {
         let mut current_time = self.current_date;
         let max_iterations = self.tasks.len() * 100;
         let verbosity = self.config.verbosity;
+
+        // Track resource reservations from rollout decisions
+        let mut reservations: FxHashMap<String, ResourceReservation> = FxHashMap::default();
 
         for _iteration in 0..max_iterations {
             if unscheduled.is_empty() {
@@ -307,7 +312,7 @@ impl CriticalPathScheduler {
 
                 // Check rollout: should we skip this task for a better upcoming task?
                 if self.config.rollout_enabled {
-                    if let Some(skip_reason) = self.check_rollout_skip(
+                    if let Some((skip_reason, reservation)) = self.check_rollout_skip(
                         &best_task_id,
                         target,
                         &ranked_targets,
@@ -322,14 +327,19 @@ impl CriticalPathScheduler {
                             best_task_id,
                             skip_reason
                         );
+                        // Store the reservation
+                        reservations.insert(reservation.resource.clone(), reservation);
                         continue;
                     }
                 }
 
-                // Try to schedule it
-                if let Some(scheduled_task) =
-                    self.try_schedule_task(&best_task_id, current_time, &mut resource_schedules)
-                {
+                // Try to schedule it (passing reservations for resource checking)
+                if let Some(scheduled_task) = self.try_schedule_task(
+                    &best_task_id,
+                    current_time,
+                    &mut resource_schedules,
+                    &reservations,
+                ) {
                     scheduled.insert(
                         best_task_id.clone(),
                         (scheduled_task.start_date, scheduled_task.end_date),
@@ -353,6 +363,9 @@ impl CriticalPathScheduler {
                             scheduled_task.end_date
                         );
                     }
+
+                    // Clear any reservation for this task (it's now scheduled)
+                    reservations.retain(|_, r| r.task_id != best_task_id);
 
                     result.push(scheduled_task);
                     scheduled_any = true;
@@ -388,6 +401,9 @@ impl CriticalPathScheduler {
                         break;
                     }
                 }
+
+                // Clear expired reservations (reserved_from is in the past)
+                reservations.retain(|_, r| r.reserved_from >= current_time);
             }
         }
 
@@ -403,12 +419,12 @@ impl CriticalPathScheduler {
     /// Calculate target info (including critical path) for all unscheduled tasks.
     fn calculate_all_target_infos(
         &self,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
     ) -> Result<Vec<TargetInfo>, CriticalPathSchedulerError> {
         // Convert scheduled to days from current_time for critical path calculation
-        let scheduled_days: HashMap<String, f64> = scheduled
+        let scheduled_days: FxHashMap<String, f64> = scheduled
             .iter()
             .map(|(id, (_, end))| {
                 let days = (*end - current_time).num_days() as f64;
@@ -493,8 +509,8 @@ impl CriticalPathScheduler {
     fn get_eligible_critical_path_tasks(
         &self,
         target: &TargetInfo,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
     ) -> Vec<String> {
         let mut eligible = Vec::new();
@@ -566,12 +582,16 @@ impl CriticalPathScheduler {
         best_id
     }
 
-    /// Try to schedule a task at current_time.
+    /// Try to schedule a task at current_time, optionally respecting reservations.
+    ///
+    /// Reservations protect resources for higher-priority tasks. A task can only
+    /// use a reserved resource if it's the task the reservation was made for.
     fn try_schedule_task(
         &self,
         task_id: &str,
         current_time: NaiveDate,
-        resource_schedules: &mut HashMap<String, ResourceSchedule>,
+        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
+        reservations: &FxHashMap<String, ResourceReservation>,
     ) -> Option<ScheduledTask> {
         let task = self.tasks.get(task_id)?;
 
@@ -593,20 +613,28 @@ impl CriticalPathScheduler {
                 task,
                 current_time,
                 resource_schedules,
+                reservations,
             );
         }
 
         // Explicit resource assignment
-        self.try_schedule_explicit_resources(task_id, task, current_time, resource_schedules)
+        self.try_schedule_explicit_resources(
+            task_id,
+            task,
+            current_time,
+            resource_schedules,
+            reservations,
+        )
     }
 
-    /// Try to schedule with auto-assignment.
+    /// Try to schedule with auto-assignment, optionally respecting reservations.
     fn try_schedule_auto_assignment(
         &self,
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut HashMap<String, ResourceSchedule>,
+        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
+        reservations: &FxHashMap<String, ResourceReservation>,
     ) -> Option<ScheduledTask> {
         let resource_config = self.resource_config.as_ref()?;
         let spec = task.resource_spec.as_ref()?;
@@ -616,6 +644,14 @@ impl CriticalPathScheduler {
         let mut best_completion: Option<NaiveDate> = None;
 
         for resource_name in candidates {
+            // Check if resource is reserved for a different task
+            if let Some(reservation) = reservations.get(&resource_name) {
+                // Allow if this is the reserved task
+                if reservation.task_id != task_id {
+                    continue;
+                }
+            }
+
             if let Some(schedule) = resource_schedules.get_mut(&resource_name) {
                 let available_at = schedule.next_available_time(current_time);
                 if available_at == current_time {
@@ -646,20 +682,28 @@ impl CriticalPathScheduler {
         })
     }
 
-    /// Try to schedule with explicit resources.
+    /// Try to schedule with explicit resources, optionally respecting reservations.
     fn try_schedule_explicit_resources(
         &self,
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut HashMap<String, ResourceSchedule>,
+        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
+        reservations: &FxHashMap<String, ResourceReservation>,
     ) -> Option<ScheduledTask> {
         if task.resources.is_empty() {
             return None;
         }
 
-        // Check all resources are available NOW
+        // Check all resources are available NOW and not reserved for other tasks
         for (resource_name, _) in &task.resources {
+            // Check reservation
+            if let Some(reservation) = reservations.get(resource_name) {
+                if reservation.task_id != task_id {
+                    return None; // Resource is reserved for a different task
+                }
+            }
+
             let schedule = resource_schedules.get(resource_name)?;
             let next_avail = schedule.next_available_time(current_time);
             if next_avail != current_time {
@@ -700,9 +744,9 @@ impl CriticalPathScheduler {
     /// Find next event time to advance to.
     fn find_next_event_time(
         &self,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
-        resource_schedules: &HashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
+        resource_schedules: &FxHashMap<String, ResourceSchedule>,
         current_time: NaiveDate,
     ) -> Option<NaiveDate> {
         let mut next_events: Vec<NaiveDate> = Vec::new();
@@ -751,18 +795,19 @@ impl CriticalPathScheduler {
 
     /// Check if we should skip scheduling this task due to rollout analysis.
     ///
-    /// Returns Some(reason) if we should skip, None if we should proceed.
+    /// Returns Some((reason, reservation)) if we should skip, None if we should proceed.
+    /// The reservation can be used to hold the resource for the competing task.
     #[allow(clippy::too_many_arguments)]
     fn check_rollout_skip(
         &self,
         task_id: &str,
         current_target: &TargetInfo,
         all_targets: &[TargetInfo],
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
-        resource_schedules: &HashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
+        resource_schedules: &FxHashMap<String, ResourceSchedule>,
         current_time: NaiveDate,
-    ) -> Option<String> {
+    ) -> Option<(String, ResourceReservation)> {
         let task = self.tasks.get(task_id)?;
 
         // Skip rollout for zero-duration tasks (milestones complete instantly)
@@ -810,12 +855,12 @@ impl CriticalPathScheduler {
         };
 
         // Build computed deadlines/priorities from tasks
-        let computed_deadlines: HashMap<String, NaiveDate> = self
+        let computed_deadlines: FxHashMap<String, NaiveDate> = self
             .tasks
             .iter()
             .filter_map(|(id, t)| t.end_before.map(|d| (id.clone(), d)))
             .collect();
-        let computed_priorities: HashMap<String, i32> = self
+        let computed_priorities: FxHashMap<String, i32> = self
             .tasks
             .iter()
             .filter_map(|(id, t)| t.priority.map(|p| (id.clone(), p)))
@@ -877,10 +922,18 @@ impl CriticalPathScheduler {
         // Compare: lower score is better
         if result_b.score < result_a.score {
             let best_competing = &competing[0];
-            Some(format!(
+            let reason = format!(
                 "better to wait for {} (target score {:.2} vs {:.2})",
                 best_competing.critical_task_id, best_competing.target_score, current_target.score
-            ))
+            );
+            let reservation = ResourceReservation {
+                resource: resource.clone(),
+                target_id: best_competing.target_id.clone(),
+                task_id: best_competing.critical_task_id.clone(),
+                target_score: best_competing.target_score,
+                reserved_from: current_time,
+            };
+            Some((reason, reservation))
         } else {
             None
         }
@@ -890,7 +943,7 @@ impl CriticalPathScheduler {
     fn get_task_resource(
         &self,
         task: &Task,
-        resource_schedules: &HashMap<String, ResourceSchedule>,
+        resource_schedules: &FxHashMap<String, ResourceSchedule>,
         current_time: NaiveDate,
     ) -> Option<String> {
         // Check explicit resources first
@@ -966,7 +1019,7 @@ mod tests {
         let mut scheduler = CriticalPathScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
             None,
@@ -1002,7 +1055,7 @@ mod tests {
         let mut scheduler = CriticalPathScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
             None,
@@ -1030,7 +1083,7 @@ mod tests {
         let mut scheduler = CriticalPathScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
             None,
@@ -1066,7 +1119,7 @@ mod tests {
         let mut scheduler = CriticalPathScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
             None,
@@ -1108,7 +1161,7 @@ mod tests {
         let mut scheduler = CriticalPathScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
             None,

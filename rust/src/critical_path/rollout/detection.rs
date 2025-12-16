@@ -1,6 +1,6 @@
 //! Detection of competing targets for rollout decisions.
 
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 use chrono::NaiveDate;
 
@@ -22,10 +22,10 @@ pub fn find_competing_targets(
     resource: &str,
     score_ratio_threshold: f64,
     all_targets: &[TargetInfo],
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     resource_config: Option<&ResourceConfig>,
-    resource_schedules: &HashMap<String, ResourceSchedule>,
+    resource_schedules: &FxHashMap<String, ResourceSchedule>,
     current_time: NaiveDate,
 ) -> Vec<CompetingTarget> {
     let mut competing = Vec::new();
@@ -69,10 +69,10 @@ fn find_eligible_cp_task_for_resource(
     target: &TargetInfo,
     resource: &str,
     deadline: NaiveDate,
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     resource_config: Option<&ResourceConfig>,
-    resource_schedules: &HashMap<String, ResourceSchedule>,
+    resource_schedules: &FxHashMap<String, ResourceSchedule>,
     current_time: NaiveDate,
 ) -> Option<CompetingTarget> {
     // Check each task on the critical path to this target
@@ -150,7 +150,7 @@ fn task_needs_resource(
 /// Calculate when a task becomes eligible (all dependencies satisfied).
 fn calculate_eligible_date(
     task: &Task,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     current_time: NaiveDate,
 ) -> Option<NaiveDate> {
     let mut eligible = current_time;
@@ -188,7 +188,7 @@ fn estimate_completion(
     task: &Task,
     eligible_date: NaiveDate,
     _resource: &str,
-    _resource_schedules: &HashMap<String, ResourceSchedule>,
+    _resource_schedules: &FxHashMap<String, ResourceSchedule>,
     _resource_config: Option<&ResourceConfig>,
 ) -> NaiveDate {
     // Simple duration calculation - good enough for detection purposes
@@ -199,6 +199,7 @@ fn estimate_completion(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn make_task(id: &str, duration: f64, resource_spec: Option<&str>) -> Task {
         Task {
@@ -234,9 +235,9 @@ mod tests {
 
     #[test]
     fn test_no_competing_targets_when_score_lower() {
-        let tasks: HashMap<String, Task> = HashMap::new();
-        let scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
-        let resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let tasks: FxHashMap<String, Task> = FxHashMap::default();
+        let scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
+        let resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
 
         let targets = vec![make_target("t1", 5.0, vec!["task1"])];
 
@@ -258,13 +259,13 @@ mod tests {
 
     #[test]
     fn test_finds_competing_target_with_higher_score() {
-        let mut tasks: HashMap<String, Task> = HashMap::new();
-        let mut task1 = make_task("task1", 5.0, Some("alice"));
+        let mut tasks: FxHashMap<String, Task> = FxHashMap::default();
+        let task1 = make_task("task1", 5.0, Some("alice"));
         tasks.insert("task1".to_string(), task1);
 
-        let scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
+        let scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
 
-        let mut resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
         resource_schedules.insert(
             "alice".to_string(),
             ResourceSchedule::new(None, "alice".to_string()),

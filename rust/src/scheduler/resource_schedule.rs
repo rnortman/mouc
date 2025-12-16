@@ -1,7 +1,7 @@
 //! Resource schedule tracking with sorted, non-overlapping busy periods.
 
 use chrono::{Days, NaiveDate};
-use std::collections::HashMap;
+use rustc_hash::FxHashMap;
 
 /// Tracks busy periods for a resource using sorted, non-overlapping intervals.
 ///
@@ -16,7 +16,7 @@ pub struct ResourceSchedule {
     pub busy_periods: Vec<(NaiveDate, NaiveDate)>,
     /// Cache for calculate_completion_time results
     /// Key is (start_date, duration_centdays) where duration is stored as centdays (i32)
-    completion_cache: HashMap<(NaiveDate, i32), NaiveDate>,
+    completion_cache: FxHashMap<(NaiveDate, i32), NaiveDate>,
 }
 
 impl ResourceSchedule {
@@ -32,7 +32,7 @@ impl ResourceSchedule {
         Self {
             resource_name,
             busy_periods,
-            completion_cache: HashMap::new(),
+            completion_cache: FxHashMap::default(),
         }
     }
 

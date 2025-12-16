@@ -1,7 +1,8 @@
 //! Backward pass algorithm for deadline and priority propagation.
 
 use chrono::{Duration, NaiveDate};
-use std::collections::{HashMap, HashSet, VecDeque};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::VecDeque;
 
 use crate::models::Task;
 
@@ -43,9 +44,9 @@ impl Default for BackwardPassConfig {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct BackwardPassResult {
     /// Computed deadlines for each task (latest acceptable finish date).
-    pub computed_deadlines: HashMap<String, NaiveDate>,
+    pub computed_deadlines: FxHashMap<String, NaiveDate>,
     /// Computed priorities for each task (effective priority after propagation).
-    pub computed_priorities: HashMap<String, i32>,
+    pub computed_priorities: FxHashMap<String, i32>,
 }
 
 /// Compute when a dependency must finish for its dependent to meet its deadline.
@@ -66,9 +67,9 @@ fn compute_dependency_deadline(
 ///
 /// Returns task IDs in order such that tasks with dependents come before their dependencies.
 /// This allows backward propagation of deadlines.
-fn topological_sort(tasks: &HashMap<&str, &Task>) -> Result<Vec<String>, BackwardPassError> {
+fn topological_sort(tasks: &FxHashMap<&str, &Task>) -> Result<Vec<String>, BackwardPassError> {
     // Calculate in-degrees (how many tasks depend on each task)
-    let mut in_degree: HashMap<&str, usize> = tasks.keys().map(|&id| (id, 0)).collect();
+    let mut in_degree: FxHashMap<&str, usize> = tasks.keys().map(|&id| (id, 0)).collect();
 
     for task in tasks.values() {
         for dep in &task.dependencies {
@@ -112,13 +113,13 @@ fn topological_sort(tasks: &HashMap<&str, &Task>) -> Result<Vec<String>, Backwar
 
 /// Calculate latest acceptable finish dates and effective priorities for each task.
 fn calculate_deadlines_and_priorities(
-    tasks: &HashMap<&str, &Task>,
+    tasks: &FxHashMap<&str, &Task>,
     topo_order: &[String],
-    completed_task_ids: &HashSet<String>,
+    completed_task_ids: &FxHashSet<String>,
     config: &BackwardPassConfig,
 ) -> BackwardPassResult {
-    let mut deadlines: HashMap<String, NaiveDate> = HashMap::new();
-    let mut priorities: HashMap<String, i32> = HashMap::new();
+    let mut deadlines: FxHashMap<String, NaiveDate> = FxHashMap::default();
+    let mut priorities: FxHashMap<String, i32> = FxHashMap::default();
 
     // Initialize with explicit deadlines
     for (&task_id, task) in tasks {
@@ -194,10 +195,10 @@ fn calculate_deadlines_and_priorities(
 /// * `Err(BackwardPassError::CircularDependency)` if the task graph has cycles
 pub fn backward_pass(
     tasks: &[Task],
-    completed_task_ids: &HashSet<String>,
+    completed_task_ids: &FxHashSet<String>,
     config: &BackwardPassConfig,
 ) -> Result<BackwardPassResult, BackwardPassError> {
-    let task_map: HashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
+    let task_map: FxHashMap<&str, &Task> = tasks.iter().map(|t| (t.id.as_str(), t)).collect();
     let topo_order = topological_sort(&task_map)?;
     Ok(calculate_deadlines_and_priorities(
         &task_map,
@@ -242,8 +243,12 @@ mod tests {
     #[test]
     fn test_single_task_no_deadline() {
         let tasks = vec![make_task("a", 5.0, vec![], None, Some(50))];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         assert!(result.computed_deadlines.is_empty());
         assert_eq!(result.computed_priorities.get("a"), Some(&50));
@@ -253,8 +258,12 @@ mod tests {
     fn test_single_task_with_deadline() {
         let deadline = NaiveDate::from_ymd_opt(2025, 1, 20).unwrap();
         let tasks = vec![make_task("a", 5.0, vec![], Some(deadline), Some(50))];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.computed_deadlines.get("a"), Some(&deadline));
         assert_eq!(result.computed_priorities.get("a"), Some(&50));
@@ -268,8 +277,12 @@ mod tests {
             make_task("a", 5.0, vec![], None, Some(50)),
             make_task("b", 3.0, vec![("a", 0.0)], Some(deadline), Some(50)),
         ];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         // a's deadline = b's deadline - b's duration - lag = Jan 20 - 3 - 0 = Jan 17
         let expected_a_deadline = NaiveDate::from_ymd_opt(2025, 1, 17).unwrap();
@@ -287,8 +300,12 @@ mod tests {
             make_task("a", 5.0, vec![], None, Some(50)),
             make_task("b", 3.0, vec![("a", 2.0)], Some(deadline), Some(50)), // 2 day lag
         ];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         // a's deadline = b's deadline - b's duration - lag = Jan 20 - 3 - 2 = Jan 15
         let expected_a_deadline = NaiveDate::from_ymd_opt(2025, 1, 15).unwrap();
@@ -305,8 +322,12 @@ mod tests {
             make_task("a", 5.0, vec![], None, Some(50)),
             make_task("b", 3.0, vec![("a", 0.0)], None, Some(80)),
         ];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         assert_eq!(result.computed_priorities.get("a"), Some(&80)); // Inherited from b
         assert_eq!(result.computed_priorities.get("b"), Some(&80));
@@ -329,8 +350,12 @@ mod tests {
                 Some(50),
             ),
         ];
-        let result =
-            backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default()).unwrap();
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        )
+        .unwrap();
 
         // d's deadline: Jan 30
         // b's deadline: Jan 30 - 4 = Jan 26
@@ -351,7 +376,11 @@ mod tests {
             make_task("a", 5.0, vec![("b", 0.0)], None, Some(50)),
             make_task("b", 3.0, vec![("a", 0.0)], None, Some(50)),
         ];
-        let result = backward_pass(&tasks, &HashSet::new(), &BackwardPassConfig::default());
+        let result = backward_pass(
+            &tasks,
+            &FxHashSet::default(),
+            &BackwardPassConfig::default(),
+        );
 
         assert_eq!(result, Err(BackwardPassError::CircularDependency));
     }
@@ -364,7 +393,7 @@ mod tests {
             make_task("a", 5.0, vec![], None, Some(50)),
             make_task("b", 3.0, vec![("a", 0.0)], Some(deadline), Some(80)),
         ];
-        let completed = HashSet::from(["a".to_string()]);
+        let completed = FxHashSet::from_iter(["a".to_string()]);
         let result = backward_pass(&tasks, &completed, &BackwardPassConfig::default()).unwrap();
 
         // a should not inherit b's priority or get a propagated deadline
@@ -378,7 +407,7 @@ mod tests {
         let config = BackwardPassConfig {
             default_priority: 75,
         };
-        let result = backward_pass(&tasks, &HashSet::new(), &config).unwrap();
+        let result = backward_pass(&tasks, &FxHashSet::default(), &config).unwrap();
 
         assert_eq!(result.computed_priorities.get("a"), Some(&75));
     }

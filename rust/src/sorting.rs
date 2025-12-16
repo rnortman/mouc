@@ -7,8 +7,8 @@
 //! - `atc`: Apparent Tardiness Cost with exponential urgency
 
 use chrono::NaiveDate;
+use rustc_hash::FxHashMap;
 use std::cmp::Ordering;
-use std::collections::HashMap;
 
 use crate::SchedulingConfig;
 
@@ -267,7 +267,7 @@ pub fn compute_sort_key(
 /// Returns the task IDs sorted in priority order (most urgent first).
 pub fn sort_tasks(
     task_ids: &[String],
-    tasks: &HashMap<String, TaskSortInfo>,
+    tasks: &FxHashMap<String, TaskSortInfo>,
     current_time: NaiveDate,
     default_cr: f64,
     config: &SchedulingConfig,
@@ -348,7 +348,7 @@ mod tests {
         let current = make_date(2025, 1, 1);
         let deadline = make_date(2025, 1, 31);
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert(
             "high_pri".to_string(),
             TaskSortInfo {
@@ -378,7 +378,7 @@ mod tests {
         let config = make_config("cr_first");
         let current = make_date(2025, 1, 1);
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         // Tight deadline (CR = 30/20 = 1.5)
         tasks.insert(
             "tight".to_string(),
@@ -411,7 +411,7 @@ mod tests {
         let current = make_date(2025, 1, 1);
         let deadline = make_date(2025, 1, 31);
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         // Task A: CR=3.0 (30/10), priority=90 -> score = 10*3.0 + 1*(100-90) = 40
         tasks.insert(
             "task_a".to_string(),
@@ -448,7 +448,7 @@ mod tests {
             default_urgency: 0.3,
         };
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         // Imminent deadline: high urgency
         tasks.insert(
             "urgent".to_string(),
@@ -486,7 +486,7 @@ mod tests {
             default_urgency: 0.5, // High default urgency
         };
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         // No deadline, uses default_urgency=0.5
         tasks.insert(
             "no_deadline".to_string(),
@@ -517,7 +517,7 @@ mod tests {
     #[test]
     fn test_unknown_strategy_error() {
         let config = make_config("unknown");
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert(
             "task".to_string(),
             TaskSortInfo {
@@ -540,7 +540,7 @@ mod tests {
     #[test]
     fn test_atc_missing_params_error() {
         let config = make_config("atc");
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         tasks.insert(
             "task".to_string(),
             TaskSortInfo {
@@ -563,7 +563,7 @@ mod tests {
     #[test]
     fn test_task_not_found_error() {
         let config = make_config("weighted");
-        let tasks = HashMap::new();
+        let tasks = FxHashMap::default();
         let result = sort_tasks(
             &["missing".to_string()],
             &tasks,
@@ -581,7 +581,7 @@ mod tests {
         let current = make_date(2025, 1, 1);
         let deadline = make_date(2025, 1, 31);
 
-        let mut tasks = HashMap::new();
+        let mut tasks = FxHashMap::default();
         // Identical scores, different IDs
         tasks.insert(
             "task_b".to_string(),

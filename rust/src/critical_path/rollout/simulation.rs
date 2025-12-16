@@ -1,6 +1,6 @@
 //! Forward simulation for rollout decisions.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use chrono::NaiveDate;
 
@@ -23,17 +23,17 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 /// which is a reasonable approximation for comparing two scenarios.
 #[allow(clippy::too_many_arguments)]
 pub fn run_forward_simulation(
-    tasks: &HashMap<String, Task>,
-    initial_scheduled: HashMap<String, (NaiveDate, NaiveDate)>,
-    initial_unscheduled: HashSet<String>,
-    initial_resource_schedules: HashMap<String, ResourceSchedule>,
+    tasks: &FxHashMap<String, Task>,
+    initial_scheduled: FxHashMap<String, (NaiveDate, NaiveDate)>,
+    initial_unscheduled: FxHashSet<String>,
+    initial_resource_schedules: FxHashMap<String, ResourceSchedule>,
     horizon: NaiveDate,
     skip_task_id: Option<&str>,
     current_time: NaiveDate,
     _config: &CriticalPathConfig,
     resource_config: Option<&ResourceConfig>,
-    computed_deadlines: &HashMap<String, NaiveDate>,
-    computed_priorities: &HashMap<String, i32>,
+    computed_deadlines: &FxHashMap<String, NaiveDate>,
+    computed_priorities: &FxHashMap<String, i32>,
     default_priority: i32,
     mut cache: CriticalPathCache,
 ) -> SimulationResult {
@@ -179,13 +179,13 @@ pub fn run_forward_simulation(
 /// This is used to initialize the cache before running simulation.
 #[allow(clippy::too_many_arguments)]
 pub fn build_initial_cache(
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-    unscheduled: &HashSet<String>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+    unscheduled: &FxHashSet<String>,
     current_time: NaiveDate,
     config: &CriticalPathConfig,
-    computed_deadlines: &HashMap<String, NaiveDate>,
-    computed_priorities: &HashMap<String, i32>,
+    computed_deadlines: &FxHashMap<String, NaiveDate>,
+    computed_priorities: &FxHashMap<String, i32>,
     default_priority: i32,
 ) -> CriticalPathCache {
     let targets = calculate_all_targets(
@@ -204,26 +204,26 @@ pub fn build_initial_cache(
 /// Calculate target info for all unscheduled tasks.
 #[allow(clippy::too_many_arguments)]
 fn calculate_all_targets(
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-    unscheduled: &HashSet<String>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+    unscheduled: &FxHashSet<String>,
     current_time: NaiveDate,
     config: &CriticalPathConfig,
-    computed_deadlines: &HashMap<String, NaiveDate>,
-    computed_priorities: &HashMap<String, i32>,
+    computed_deadlines: &FxHashMap<String, NaiveDate>,
+    computed_priorities: &FxHashMap<String, i32>,
     default_priority: i32,
 ) -> Vec<TargetInfo> {
     let mut targets = Vec::new();
     let mut total_work_sum = 0.0;
 
     // Convert scheduled dates to days from current_time for calculate_critical_path
-    let scheduled_days: HashMap<String, f64> = scheduled
+    let scheduled_days: FxHashMap<String, f64> = scheduled
         .iter()
         .map(|(id, (_, end))| (id.clone(), (*end - current_time).num_days() as f64))
         .collect();
 
     // Empty set for completed tasks (all completed tasks are already excluded from scheduling)
-    let completed_task_ids: HashSet<String> = HashSet::new();
+    let completed_task_ids: FxHashSet<String> = FxHashSet::default();
 
     // Calculate critical path for each potential target
     for task_id in unscheduled {
@@ -281,8 +281,8 @@ fn calculate_all_targets(
 /// Get eligible tasks on the critical path for a target.
 fn get_eligible_tasks(
     target: &TargetInfo,
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     current_time: NaiveDate,
 ) -> Vec<String> {
     let mut eligible = Vec::new();
@@ -353,7 +353,7 @@ fn try_schedule_task(
     task_id: &str,
     task: &Task,
     current_time: NaiveDate,
-    resource_schedules: &mut HashMap<String, ResourceSchedule>,
+    resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
     resource_config: Option<&ResourceConfig>,
 ) -> Option<ScheduledTask> {
     // Handle zero-duration tasks (milestones)
@@ -449,10 +449,10 @@ fn try_schedule_task(
 
 /// Find the next event time to advance to.
 fn find_next_event_time(
-    unscheduled: &HashSet<String>,
-    tasks: &HashMap<String, Task>,
-    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-    resource_schedules: &HashMap<String, ResourceSchedule>,
+    unscheduled: &FxHashSet<String>,
+    tasks: &FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+    resource_schedules: &FxHashMap<String, ResourceSchedule>,
     current_time: NaiveDate,
 ) -> Option<NaiveDate> {
     let mut next_time: Option<NaiveDate> = None;
@@ -502,6 +502,7 @@ fn find_next_event_time(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
 
     fn d(year: i32, month: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(year, month, day).unwrap()
@@ -524,17 +525,17 @@ mod tests {
 
     #[test]
     fn test_simple_simulation() {
-        let mut tasks: HashMap<String, Task> = HashMap::new();
+        let mut tasks: FxHashMap<String, Task> = FxHashMap::default();
         tasks.insert(
             "task1".to_string(),
             make_task("task1", 5.0, 50, Some("alice")),
         );
 
-        let scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
-        let mut unscheduled: HashSet<String> = HashSet::new();
+        let scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
+        let mut unscheduled: FxHashSet<String> = FxHashSet::default();
         unscheduled.insert("task1".to_string());
 
-        let mut resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
         resource_schedules.insert(
             "alice".to_string(),
             ResourceSchedule::new(None, "alice".to_string()),
@@ -554,8 +555,8 @@ mod tests {
             &unscheduled,
             d(2025, 1, 1),
             &config,
-            &HashMap::new(),
-            &HashMap::new(),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
             50,
         );
 
@@ -569,8 +570,8 @@ mod tests {
             d(2025, 1, 1),
             &config,
             Some(&resource_config),
-            &HashMap::new(),
-            &HashMap::new(),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
             50,
             cache,
         );
@@ -581,7 +582,7 @@ mod tests {
 
     #[test]
     fn test_simulation_with_skip() {
-        let mut tasks: HashMap<String, Task> = HashMap::new();
+        let mut tasks: FxHashMap<String, Task> = FxHashMap::default();
         tasks.insert(
             "task1".to_string(),
             make_task("task1", 5.0, 50, Some("alice")),
@@ -591,12 +592,12 @@ mod tests {
             make_task("task2", 3.0, 80, Some("alice")),
         );
 
-        let scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
-        let mut unscheduled: HashSet<String> = HashSet::new();
+        let scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
+        let mut unscheduled: FxHashSet<String> = FxHashSet::default();
         unscheduled.insert("task1".to_string());
         unscheduled.insert("task2".to_string());
 
-        let mut resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
         resource_schedules.insert(
             "alice".to_string(),
             ResourceSchedule::new(None, "alice".to_string()),
@@ -616,8 +617,8 @@ mod tests {
             &unscheduled,
             d(2025, 1, 1),
             &config,
-            &HashMap::new(),
-            &HashMap::new(),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
             50,
         );
 
@@ -632,8 +633,8 @@ mod tests {
             d(2025, 1, 1),
             &config,
             Some(&resource_config),
-            &HashMap::new(),
-            &HashMap::new(),
+            &FxHashMap::default(),
+            &FxHashMap::default(),
             50,
             cache,
         );

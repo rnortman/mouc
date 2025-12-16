@@ -11,3 +11,4 @@ crate-type = ["cdylib"]
 pyo3 = { version = "0.22", features = ["extension-module", "chrono"] }
 chrono = "0.4"
 thiserror = "1.0"
+rustc-hash = "2"

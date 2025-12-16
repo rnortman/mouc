@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 use pyo3::prelude::*;
-use std::collections::HashSet;
+use rustc_hash::FxHashSet;
 
 /// Configuration for the critical path scheduler.
 #[pyclass]
@@ -132,7 +132,7 @@ pub struct TargetInfo {
     pub target_id: String,
 
     /// Set of task IDs on the critical path to this target.
-    pub critical_path_tasks: HashSet<String>,
+    pub critical_path_tasks: FxHashSet<String>,
 
     /// Total work remaining (sum of all dependency durations, not just critical path).
     pub total_work: f64,
@@ -157,7 +157,7 @@ impl TargetInfo {
     pub fn new(target_id: String, priority: i32, deadline: Option<NaiveDate>) -> Self {
         Self {
             target_id,
-            critical_path_tasks: HashSet::new(),
+            critical_path_tasks: FxHashSet::default(),
             total_work: 0.0,
             critical_path_length: 0.0,
             priority,

@@ -99,12 +99,12 @@ pub fn compute_urgency_with_context(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use rustc_hash::FxHashSet;
 
     fn make_target(id: &str, priority: i32, total_work: f64, cp_length: f64) -> TargetInfo {
         TargetInfo {
             target_id: id.to_string(),
-            critical_path_tasks: HashSet::new(),
+            critical_path_tasks: FxHashSet::default(),
             total_work,
             critical_path_length: cp_length,
             priority,

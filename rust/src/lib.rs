@@ -49,12 +49,17 @@ fn run_backward_pass(
     completed_task_ids: HashSet<String>,
     default_priority: i32,
 ) -> PyResult<PreProcessResult> {
-    let config = BackwardPassConfig { default_priority };
+    use rustc_hash::FxHashSet;
 
-    match backward_pass(&tasks, &completed_task_ids, &config) {
+    let config = BackwardPassConfig { default_priority };
+    // Convert std HashSet to FxHashSet for internal use
+    let completed: FxHashSet<String> = completed_task_ids.into_iter().collect();
+
+    match backward_pass(&tasks, &completed, &config) {
         Ok(result) => Ok(PreProcessResult {
-            computed_deadlines: result.computed_deadlines,
-            computed_priorities: result.computed_priorities,
+            // Convert FxHashMap to HashMap for Python interface
+            computed_deadlines: result.computed_deadlines.into_iter().collect(),
+            computed_priorities: result.computed_priorities.into_iter().collect(),
         }),
         Err(e) => Err(pyo3::exceptions::PyValueError::new_err(e.to_string())),
     }
@@ -123,8 +128,10 @@ fn py_sort_tasks(
     atc_avg_duration: Option<f64>,
     atc_default_urgency: Option<f64>,
 ) -> PyResult<Vec<String>> {
-    // Convert PyTaskSortInfo to TaskSortInfo
-    let infos: HashMap<String, TaskSortInfo> = task_infos
+    use rustc_hash::FxHashMap;
+
+    // Convert PyTaskSortInfo to TaskSortInfo (using FxHashMap for internal use)
+    let infos: FxHashMap<String, TaskSortInfo> = task_infos
         .into_iter()
         .map(|(k, v)| {
             (
@@ -281,21 +288,39 @@ impl PyParallelScheduler {
         global_dns_periods: Option<Vec<(NaiveDate, NaiveDate)>>,
         preprocess_result: Option<PreProcessResult>,
     ) -> PyResult<Self> {
+        use rustc_hash::{FxHashMap, FxHashSet};
+
         let rust_resource_config = resource_config.map(|rc| ResourceConfig {
             resource_order: rc.resource_order,
             dns_periods: rc.dns_periods,
             spec_expansion: rc.spec_expansion,
         });
 
+        // Convert std HashMap to FxHashMap for internal use
         let (deadlines, priorities) = match preprocess_result {
-            Some(pr) => (Some(pr.computed_deadlines), Some(pr.computed_priorities)),
+            Some(pr) => (
+                Some(
+                    pr.computed_deadlines
+                        .into_iter()
+                        .collect::<FxHashMap<_, _>>(),
+                ),
+                Some(
+                    pr.computed_priorities
+                        .into_iter()
+                        .collect::<FxHashMap<_, _>>(),
+                ),
+            ),
             None => (None, None),
         };
+
+        // Convert std HashSet to FxHashSet for internal use
+        let completed: FxHashSet<String> =
+            completed_task_ids.unwrap_or_default().into_iter().collect();
 
         match ParallelScheduler::new(
             tasks,
             current_date,
-            completed_task_ids.unwrap_or_default(),
+            completed,
             config.unwrap_or_default(),
             rollout_config,
             rust_resource_config,
@@ -368,6 +393,8 @@ impl PyCriticalPathScheduler {
         resource_config: Option<PyResourceConfig>,
         global_dns_periods: Option<Vec<(NaiveDate, NaiveDate)>>,
     ) -> PyResult<Self> {
+        use rustc_hash::FxHashSet;
+
         let rust_resource_config = resource_config.map(|rc| ResourceConfig {
             resource_order: rc.resource_order,
             dns_periods: rc.dns_periods,
@@ -378,10 +405,14 @@ impl PyCriticalPathScheduler {
         let effective_default_priority =
             default_priority.unwrap_or_else(|| SchedulingConfig::default().default_priority);
 
+        // Convert std HashSet to FxHashSet for internal use
+        let completed: FxHashSet<String> =
+            completed_task_ids.unwrap_or_default().into_iter().collect();
+
         let scheduler = CriticalPathScheduler::new(
             tasks,
             current_date,
-            completed_task_ids.unwrap_or_default(),
+            completed,
             effective_default_priority,
             config.unwrap_or_default(),
             rust_resource_config,

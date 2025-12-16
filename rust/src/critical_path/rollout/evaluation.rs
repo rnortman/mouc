@@ -1,6 +1,6 @@
 //! Evaluation/scoring of schedules for rollout comparison.
 
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use chrono::NaiveDate;
 
@@ -15,11 +15,11 @@ use crate::models::{ScheduledTask, Task};
 #[allow(clippy::too_many_arguments)]
 pub fn score_schedule(
     scheduled_tasks: &[ScheduledTask],
-    unscheduled: &HashSet<String>,
-    tasks: &HashMap<String, Task>,
-    computed_deadlines: &HashMap<String, NaiveDate>,
-    computed_priorities: &HashMap<String, i32>,
-    scheduled_dates: &HashMap<String, (NaiveDate, NaiveDate)>,
+    unscheduled: &FxHashSet<String>,
+    tasks: &FxHashMap<String, Task>,
+    computed_deadlines: &FxHashMap<String, NaiveDate>,
+    computed_priorities: &FxHashMap<String, i32>,
+    scheduled_dates: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     start_date: NaiveDate,
     horizon: NaiveDate,
     default_priority: i32,
@@ -88,8 +88,8 @@ pub fn score_schedule(
 /// Get the priority for a task, falling back to defaults.
 fn get_priority(
     task_id: &str,
-    tasks: &HashMap<String, Task>,
-    computed_priorities: &HashMap<String, i32>,
+    tasks: &FxHashMap<String, Task>,
+    computed_priorities: &FxHashMap<String, i32>,
     default_priority: i32,
 ) -> i32 {
     // First check computed priorities (from backward pass)
@@ -110,7 +110,7 @@ fn get_priority(
 /// Check if a task is eligible to be scheduled.
 fn is_task_eligible(
     task: &Task,
-    scheduled_dates: &HashMap<String, (NaiveDate, NaiveDate)>,
+    scheduled_dates: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     _current_time: NaiveDate,
     horizon: NaiveDate,
 ) -> bool {
@@ -161,11 +161,11 @@ mod tests {
     #[test]
     fn test_score_empty_schedule() {
         let scheduled_tasks: Vec<ScheduledTask> = vec![];
-        let unscheduled: HashSet<String> = HashSet::new();
-        let tasks: HashMap<String, Task> = HashMap::new();
-        let computed_deadlines: HashMap<String, NaiveDate> = HashMap::new();
-        let computed_priorities: HashMap<String, i32> = HashMap::new();
-        let scheduled_dates: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
+        let unscheduled: FxHashSet<String> = FxHashSet::default();
+        let tasks: FxHashMap<String, Task> = FxHashMap::default();
+        let computed_deadlines: FxHashMap<String, NaiveDate> = FxHashMap::default();
+        let computed_priorities: FxHashMap<String, i32> = FxHashMap::default();
+        let scheduled_dates: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
 
         let score = score_schedule(
             &scheduled_tasks,
@@ -188,13 +188,13 @@ mod tests {
         let task1 = make_scheduled_task("task1", d(2025, 1, 1), d(2025, 1, 10));
         let task2 = make_scheduled_task("task2", d(2025, 1, 1), d(2025, 1, 20));
 
-        let unscheduled: HashSet<String> = HashSet::new();
-        let tasks: HashMap<String, Task> = HashMap::new();
-        let computed_deadlines: HashMap<String, NaiveDate> = HashMap::new();
-        let mut computed_priorities: HashMap<String, i32> = HashMap::new();
+        let unscheduled: FxHashSet<String> = FxHashSet::default();
+        let tasks: FxHashMap<String, Task> = FxHashMap::default();
+        let computed_deadlines: FxHashMap<String, NaiveDate> = FxHashMap::default();
+        let mut computed_priorities: FxHashMap<String, i32> = FxHashMap::default();
         computed_priorities.insert("task1".to_string(), 100);
         computed_priorities.insert("task2".to_string(), 100);
-        let scheduled_dates: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
+        let scheduled_dates: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
 
         let score1 = score_schedule(
             &[task1],
@@ -227,13 +227,13 @@ mod tests {
     fn test_score_tardiness_penalty() {
         let task = make_scheduled_task("task1", d(2025, 1, 1), d(2025, 1, 20));
 
-        let unscheduled: HashSet<String> = HashSet::new();
-        let tasks: HashMap<String, Task> = HashMap::new();
-        let mut computed_deadlines: HashMap<String, NaiveDate> = HashMap::new();
+        let unscheduled: FxHashSet<String> = FxHashSet::default();
+        let tasks: FxHashMap<String, Task> = FxHashMap::default();
+        let mut computed_deadlines: FxHashMap<String, NaiveDate> = FxHashMap::default();
         computed_deadlines.insert("task1".to_string(), d(2025, 1, 15)); // Deadline before completion
-        let mut computed_priorities: HashMap<String, i32> = HashMap::new();
+        let mut computed_priorities: FxHashMap<String, i32> = FxHashMap::default();
         computed_priorities.insert("task1".to_string(), 100);
-        let scheduled_dates: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
+        let scheduled_dates: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
 
         let score = score_schedule(
             &[task],

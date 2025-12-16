@@ -1,7 +1,8 @@
 //! Core parallel scheduler implementation.
 
 use chrono::{Days, NaiveDate};
-use std::collections::{HashMap, HashSet};
+use rustc_hash::{FxHashMap, FxHashSet};
+use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::backward_pass::{backward_pass, BackwardPassConfig};
@@ -128,9 +129,9 @@ impl ResourceConfig {
 /// Unified scheduler implementing Parallel SGS with optional bounded rollout.
 pub struct ParallelScheduler {
     // Input data
-    tasks: HashMap<String, Task>,
+    tasks: FxHashMap<String, Task>,
     current_date: NaiveDate,
-    completed_task_ids: HashSet<String>,
+    completed_task_ids: FxHashSet<String>,
     config: SchedulingConfig,
     rollout_config: Option<RolloutConfig>,
 
@@ -139,8 +140,8 @@ pub struct ParallelScheduler {
     global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
 
     // Computed during backward pass
-    computed_deadlines: HashMap<String, NaiveDate>,
-    computed_priorities: HashMap<String, i32>,
+    computed_deadlines: FxHashMap<String, NaiveDate>,
+    computed_priorities: FxHashMap<String, i32>,
 
     // Rollout tracking
     rollout_decisions: Vec<RolloutDecision>,
@@ -155,13 +156,13 @@ impl ParallelScheduler {
     pub fn new(
         tasks: Vec<Task>,
         current_date: NaiveDate,
-        completed_task_ids: HashSet<String>,
+        completed_task_ids: FxHashSet<String>,
         config: SchedulingConfig,
         rollout_config: Option<RolloutConfig>,
         resource_config: Option<ResourceConfig>,
         global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
-        precomputed_deadlines: Option<HashMap<String, NaiveDate>>,
-        precomputed_priorities: Option<HashMap<String, i32>>,
+        precomputed_deadlines: Option<FxHashMap<String, NaiveDate>>,
+        precomputed_priorities: Option<FxHashMap<String, i32>>,
     ) -> Result<Self, SchedulerError> {
         // Validate strategy upfront
         let valid_strategies = ["priority_first", "cr_first", "weighted", "atc"];
@@ -169,10 +170,11 @@ impl ParallelScheduler {
             return Err(SchedulerError::UnknownStrategy(config.strategy.clone()));
         }
 
-        let tasks_map: HashMap<String, Task> =
+        let tasks_map: FxHashMap<String, Task> =
             tasks.iter().map(|t| (t.id.clone(), t.clone())).collect();
 
         // Use precomputed values or run backward pass
+        let completed_set: FxHashSet<String> = completed_task_ids.iter().cloned().collect();
         let (computed_deadlines, computed_priorities) =
             match (precomputed_deadlines, precomputed_priorities) {
                 (Some(d), Some(p)) => (d, p),
@@ -180,7 +182,7 @@ impl ParallelScheduler {
                     let bp_config = BackwardPassConfig {
                         default_priority: config.default_priority,
                     };
-                    let bp_result = backward_pass(&tasks, &completed_task_ids, &bp_config)
+                    let bp_result = backward_pass(&tasks, &completed_set, &bp_config)
                         .map_err(|_| SchedulerError::CircularDependency)?;
                     (bp_result.computed_deadlines, bp_result.computed_priorities)
                 }
@@ -191,7 +193,7 @@ impl ParallelScheduler {
         Ok(Self {
             tasks: tasks_map,
             current_date,
-            completed_task_ids,
+            completed_task_ids: completed_set,
             config,
             rollout_config,
             resource_config,
@@ -241,12 +243,20 @@ impl ParallelScheduler {
 
     /// Get computed deadlines.
     pub fn get_computed_deadlines(&self) -> HashMap<String, NaiveDate> {
-        self.computed_deadlines.clone()
+        // Convert FxHashMap to std HashMap for Python interface
+        self.computed_deadlines
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
     }
 
     /// Get computed priorities.
     pub fn get_computed_priorities(&self) -> HashMap<String, i32> {
-        self.computed_priorities.clone()
+        // Convert FxHashMap to std HashMap for Python interface
+        self.computed_priorities
+            .iter()
+            .map(|(k, v)| (k.clone(), *v))
+            .collect()
     }
 
     /// Get rollout decisions made during scheduling.
@@ -342,8 +352,8 @@ impl ParallelScheduler {
         fixed_tasks: &[ScheduledTask],
     ) -> Result<Vec<ScheduledTask>, SchedulerError> {
         // Initialize state
-        let mut scheduled: HashMap<String, (NaiveDate, NaiveDate)> = HashMap::new();
-        let mut unscheduled: HashSet<String> = self.tasks.keys().cloned().collect();
+        let mut scheduled: FxHashMap<String, (NaiveDate, NaiveDate)> = FxHashMap::default();
+        let mut unscheduled: FxHashSet<String> = self.tasks.keys().cloned().collect();
         let mut result: Vec<ScheduledTask> = Vec::new();
 
         // Pre-populate scheduled dict with fixed tasks
@@ -355,7 +365,7 @@ impl ParallelScheduler {
         }
 
         // Initialize resource schedules
-        let mut all_resources: HashSet<String> = HashSet::new();
+        let mut all_resources: FxHashSet<String> = FxHashSet::default();
         for task in self.tasks.values() {
             for (resource_name, _) in &task.resources {
                 all_resources.insert(resource_name.clone());
@@ -372,7 +382,7 @@ impl ParallelScheduler {
             }
         }
 
-        let mut resource_schedules: HashMap<String, ResourceSchedule> = HashMap::new();
+        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
         for resource in &all_resources {
             let unavailable_periods = match &self.resource_config {
                 Some(rc) => rc.get_dns_periods(resource, &self.global_dns_periods),
@@ -594,8 +604,8 @@ impl ParallelScheduler {
     /// Find tasks eligible at current time.
     fn find_eligible_tasks(
         &self,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
     ) -> Vec<String> {
         let mut eligible = Vec::new();
@@ -672,7 +682,7 @@ impl ParallelScheduler {
         }
 
         // Build task info map
-        let mut task_infos: HashMap<String, TaskSortInfo> = HashMap::new();
+        let mut task_infos: FxHashMap<String, TaskSortInfo> = FxHashMap::default();
         for task_id in eligible {
             if let Some(task) = self.tasks.get(task_id) {
                 let deadline = self.computed_deadlines.get(task_id).copied();
@@ -704,7 +714,7 @@ impl ParallelScheduler {
     }
 
     /// Compute default CR for tasks without deadlines.
-    fn compute_default_cr(&self, unscheduled: &HashSet<String>, current_time: NaiveDate) -> f64 {
+    fn compute_default_cr(&self, unscheduled: &FxHashSet<String>, current_time: NaiveDate) -> f64 {
         let mut max_cr = 0.0;
 
         for task_id in unscheduled {
@@ -730,7 +740,7 @@ impl ParallelScheduler {
     /// Compute ATC parameters if using ATC strategy.
     fn compute_atc_params(
         &self,
-        unscheduled: &HashSet<String>,
+        unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
     ) -> Option<AtcParams> {
         if self.config.strategy != "atc" {
@@ -746,7 +756,7 @@ impl ParallelScheduler {
         })
     }
 
-    fn compute_avg_duration(&self, unscheduled: &HashSet<String>) -> f64 {
+    fn compute_avg_duration(&self, unscheduled: &FxHashSet<String>) -> f64 {
         if unscheduled.is_empty() {
             return 1.0;
         }
@@ -760,7 +770,7 @@ impl ParallelScheduler {
 
     fn compute_default_urgency(
         &self,
-        unscheduled: &HashSet<String>,
+        unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
         avg_duration: f64,
     ) -> f64 {
@@ -803,9 +813,9 @@ impl ParallelScheduler {
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut HashMap<String, ResourceSchedule>,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
     ) -> Option<(String, NaiveDate)> {
         let resource_config = self.resource_config.as_ref()?;
         let spec = task.resource_spec.as_ref()?;
@@ -869,9 +879,9 @@ impl ParallelScheduler {
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut HashMap<String, ResourceSchedule>,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
     ) -> Option<NaiveDate> {
         if task.resources.is_empty() {
             return None;
@@ -927,9 +937,9 @@ impl ParallelScheduler {
     /// Find the next event time to advance to.
     fn find_next_event_time(
         &self,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
-        resource_schedules: &HashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
+        resource_schedules: &FxHashMap<String, ResourceSchedule>,
         current_time: NaiveDate,
     ) -> Option<NaiveDate> {
         let mut next_events: Vec<NaiveDate> = Vec::new();
@@ -982,9 +992,9 @@ impl ParallelScheduler {
         task_id: &str,
         completion_date: NaiveDate,
         current_time: NaiveDate,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
-        resource_schedules: &HashMap<String, ResourceSchedule>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
+        resource_schedules: &FxHashMap<String, ResourceSchedule>,
     ) -> Option<bool> {
         let rollout_config = self.rollout_config.as_ref()?;
 
@@ -1143,8 +1153,8 @@ impl ParallelScheduler {
         task_id: &str,
         current_time: NaiveDate,
         horizon: NaiveDate,
-        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &HashSet<String>,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &FxHashSet<String>,
     ) -> Vec<(String, i32, f64, NaiveDate)> {
         let rollout_config = match &self.rollout_config {
             Some(rc) => rc,
@@ -1424,7 +1434,7 @@ impl ParallelScheduler {
     /// Evaluate a partial schedule. Lower score is better.
     fn evaluate_partial_schedule(&self, state: &SchedulerState, horizon: NaiveDate) -> f64 {
         let mut score = 0.0;
-        let scheduled_ids: HashSet<String> =
+        let scheduled_ids: FxHashSet<String> =
             state.result.iter().map(|st| st.task_id.clone()).collect();
 
         for scheduled_task in &state.result {
@@ -1554,7 +1564,7 @@ mod tests {
         let mut scheduler = ParallelScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             SchedulingConfig::default(),
             None,
             None,
@@ -1616,7 +1626,7 @@ mod tests {
         let mut scheduler = ParallelScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             SchedulingConfig::default(),
             None,
             None,
@@ -1652,7 +1662,7 @@ mod tests {
         let mut scheduler = ParallelScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             SchedulingConfig::default(),
             None,
             None,
@@ -1689,7 +1699,7 @@ mod tests {
         let mut scheduler = ParallelScheduler::new(
             tasks,
             d(2025, 1, 1),
-            HashSet::new(),
+            FxHashSet::default(),
             SchedulingConfig::default(),
             None,
             None,

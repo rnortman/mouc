@@ -4,6 +4,8 @@ use chrono::NaiveDate;
 use pyo3::prelude::*;
 use std::collections::HashMap;
 
+// Note: We use std HashMap here for PyO3 interface compatibility
+
 /// A dependency on another entity with optional lag time.
 #[pyclass]
 #[derive(Clone, Debug)]
