@@ -23,6 +23,18 @@ pub struct CriticalPathConfig {
     /// Verbosity level: 0=silent, 1=changes, 2=checks, 3=debug.
     #[pyo3(get, set)]
     pub verbosity: u8,
+
+    /// Whether rollout simulation is enabled.
+    #[pyo3(get, set)]
+    pub rollout_enabled: bool,
+
+    /// Minimum score ratio for competing target to trigger rollout (1.0 = any higher).
+    #[pyo3(get, set)]
+    pub rollout_score_ratio_threshold: f64,
+
+    /// Maximum rollout simulation horizon in days (None = unlimited).
+    #[pyo3(get, set)]
+    pub rollout_max_horizon_days: Option<i32>,
 }
 
 #[pymethods]
@@ -32,21 +44,36 @@ impl CriticalPathConfig {
         k=2.0,
         no_deadline_urgency_multiplier=0.5,
         urgency_floor=0.1,
-        verbosity=0
+        verbosity=0,
+        rollout_enabled=true,
+        rollout_score_ratio_threshold=1.0,
+        rollout_max_horizon_days=None
     ))]
-    fn new(k: f64, no_deadline_urgency_multiplier: f64, urgency_floor: f64, verbosity: u8) -> Self {
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        k: f64,
+        no_deadline_urgency_multiplier: f64,
+        urgency_floor: f64,
+        verbosity: u8,
+        rollout_enabled: bool,
+        rollout_score_ratio_threshold: f64,
+        rollout_max_horizon_days: Option<i32>,
+    ) -> Self {
         Self {
             k,
             no_deadline_urgency_multiplier,
             urgency_floor,
             verbosity,
+            rollout_enabled,
+            rollout_score_ratio_threshold,
+            rollout_max_horizon_days,
         }
     }
 
     fn __repr__(&self) -> String {
         format!(
-            "CriticalPathConfig(k={}, no_deadline_urgency_multiplier={}, urgency_floor={})",
-            self.k, self.no_deadline_urgency_multiplier, self.urgency_floor
+            "CriticalPathConfig(k={}, no_deadline_urgency_multiplier={}, urgency_floor={}, rollout_enabled={})",
+            self.k, self.no_deadline_urgency_multiplier, self.urgency_floor, self.rollout_enabled
         )
     }
 }
@@ -58,6 +85,20 @@ impl Default for CriticalPathConfig {
             no_deadline_urgency_multiplier: 0.5,
             urgency_floor: 0.1,
             verbosity: 0,
+            rollout_enabled: true,
+            rollout_score_ratio_threshold: 1.0,
+            rollout_max_horizon_days: None,
+        }
+    }
+}
+
+impl CriticalPathConfig {
+    /// Extract rollout configuration as a separate struct.
+    pub fn rollout_config(&self) -> super::rollout::RolloutConfig {
+        super::rollout::RolloutConfig {
+            enabled: self.rollout_enabled,
+            score_ratio_threshold: self.rollout_score_ratio_threshold,
+            max_horizon_days: self.rollout_max_horizon_days,
         }
     }
 }

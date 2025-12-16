@@ -9,6 +9,7 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
 use super::calculation::{calculate_critical_path, CriticalPathError};
+use super::rollout::{find_competing_targets, run_forward_simulation};
 use super::scoring::{compute_urgency_with_context, score_task};
 use super::types::{CriticalPathConfig, TargetInfo};
 
@@ -264,7 +265,7 @@ impl CriticalPathScheduler {
             // Try to schedule from each target in order
             let mut scheduled_any = false;
 
-            for target in ranked_targets {
+            for target in &ranked_targets {
                 log_checks!(
                     verbosity,
                     "  Trying target {} (score={:.2} = pri {} / work {:.1} * urg {:.3}, deadline={:?})",
@@ -278,7 +279,7 @@ impl CriticalPathScheduler {
 
                 // Get eligible tasks on this target's critical path
                 let eligible = self.get_eligible_critical_path_tasks(
-                    &target,
+                    target,
                     &scheduled,
                     &unscheduled,
                     current_time,
@@ -303,6 +304,27 @@ impl CriticalPathScheduler {
                     priority,
                     target.target_id
                 );
+
+                // Check rollout: should we skip this task for a better upcoming task?
+                if self.config.rollout_enabled {
+                    if let Some(skip_reason) = self.check_rollout_skip(
+                        &best_task_id,
+                        target,
+                        &ranked_targets,
+                        &scheduled,
+                        &unscheduled,
+                        &resource_schedules,
+                        current_time,
+                    ) {
+                        log_checks!(
+                            verbosity,
+                            "    Skipping {} for rollout: {}",
+                            best_task_id,
+                            skip_reason
+                        );
+                        continue;
+                    }
+                }
 
                 // Try to schedule it
                 if let Some(scheduled_task) =
@@ -725,6 +747,161 @@ impl CriticalPathScheduler {
         }
 
         next_events.into_iter().min()
+    }
+
+    /// Check if we should skip scheduling this task due to rollout analysis.
+    ///
+    /// Returns Some(reason) if we should skip, None if we should proceed.
+    #[allow(clippy::too_many_arguments)]
+    fn check_rollout_skip(
+        &self,
+        task_id: &str,
+        current_target: &TargetInfo,
+        all_targets: &[TargetInfo],
+        scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+        unscheduled: &HashSet<String>,
+        resource_schedules: &HashMap<String, ResourceSchedule>,
+        current_time: NaiveDate,
+    ) -> Option<String> {
+        let task = self.tasks.get(task_id)?;
+
+        // Skip rollout for zero-duration tasks (milestones)
+        if task.duration_days == 0.0 {
+            return None;
+        }
+
+        // Get the resource this task would use
+        let resource = self.get_task_resource(task, resource_schedules, current_time)?;
+
+        // Estimate completion time for this task
+        let completion = current_time + chrono::Duration::days(task.duration_days.ceil() as i64);
+
+        // Find competing targets with higher-scored tasks that need this resource
+        let competing = find_competing_targets(
+            current_target.score,
+            completion,
+            &resource,
+            self.config.rollout_score_ratio_threshold,
+            all_targets,
+            &self.tasks,
+            scheduled,
+            self.resource_config.as_ref(),
+            resource_schedules,
+            current_time,
+        );
+
+        if competing.is_empty() {
+            return None;
+        }
+
+        // Found competing targets - run simulation to decide
+        let horizon = competing
+            .iter()
+            .map(|c| c.estimated_completion)
+            .max()
+            .unwrap_or(completion);
+
+        // Cap horizon if configured
+        let horizon = if let Some(max_days) = self.config.rollout_max_horizon_days {
+            let max_horizon = current_time + chrono::Duration::days(max_days as i64);
+            horizon.min(max_horizon)
+        } else {
+            horizon
+        };
+
+        // Build computed deadlines/priorities from tasks
+        let computed_deadlines: HashMap<String, NaiveDate> = self
+            .tasks
+            .iter()
+            .filter_map(|(id, t)| t.end_before.map(|d| (id.clone(), d)))
+            .collect();
+        let computed_priorities: HashMap<String, i32> = self
+            .tasks
+            .iter()
+            .filter_map(|(id, t)| t.priority.map(|p| (id.clone(), p)))
+            .collect();
+
+        // Scenario A: Schedule this task now
+        let mut scheduled_a = scheduled.clone();
+        scheduled_a.insert(task_id.to_string(), (current_time, completion));
+        let mut unscheduled_a = unscheduled.clone();
+        unscheduled_a.remove(task_id);
+        let mut resource_schedules_a = resource_schedules.clone();
+        if let Some(schedule) = resource_schedules_a.get_mut(&resource) {
+            schedule.add_busy_period(current_time, completion);
+        }
+
+        let result_a = run_forward_simulation(
+            &self.tasks,
+            scheduled_a,
+            unscheduled_a,
+            resource_schedules_a,
+            horizon,
+            None,
+            current_time,
+            &self.config,
+            self.resource_config.as_ref(),
+            &computed_deadlines,
+            &computed_priorities,
+            self.default_priority,
+        );
+
+        // Scenario B: Skip this task (leave resource idle)
+        let result_b = run_forward_simulation(
+            &self.tasks,
+            scheduled.clone(),
+            unscheduled.clone(),
+            resource_schedules.clone(),
+            horizon,
+            Some(task_id),
+            current_time,
+            &self.config,
+            self.resource_config.as_ref(),
+            &computed_deadlines,
+            &computed_priorities,
+            self.default_priority,
+        );
+
+        // Compare: lower score is better
+        if result_b.score < result_a.score {
+            let best_competing = &competing[0];
+            Some(format!(
+                "better to wait for {} (target score {:.2} vs {:.2})",
+                best_competing.critical_task_id, best_competing.target_score, current_target.score
+            ))
+        } else {
+            None
+        }
+    }
+
+    /// Get the resource a task would be assigned to.
+    fn get_task_resource(
+        &self,
+        task: &Task,
+        resource_schedules: &HashMap<String, ResourceSchedule>,
+        current_time: NaiveDate,
+    ) -> Option<String> {
+        // Check explicit resources first
+        if !task.resources.is_empty() {
+            return task.resources.first().map(|(r, _)| r.clone());
+        }
+
+        // Check resource spec (auto-assignment)
+        if let Some(spec) = &task.resource_spec {
+            if let Some(config) = &self.resource_config {
+                let candidates = config.expand_resource_spec(spec);
+                for resource_name in candidates {
+                    if let Some(schedule) = resource_schedules.get(&resource_name) {
+                        let available_at = schedule.next_available_time(current_time);
+                        if available_at == current_time {
+                            return Some(resource_name);
+                        }
+                    }
+                }
+            }
+        }
+
+        None
     }
 }
 

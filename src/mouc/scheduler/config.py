@@ -96,6 +96,14 @@ class CriticalPathConfig(BaseModel):
     # Minimum urgency floor for all targets
     urgency_floor: float = 0.1
 
+    # Rollout configuration
+    # Whether rollout simulation is enabled
+    rollout_enabled: bool = True
+    # Competing target must have score >= this * current to trigger rollout (1.0 = any higher)
+    rollout_score_ratio_threshold: float = 1.0
+    # Maximum rollout simulation horizon in days (None = unlimited)
+    rollout_max_horizon_days: int | None = None
+
 
 class SchedulingConfig(BaseModel):
     """Configuration for task prioritization and algorithm selection."""

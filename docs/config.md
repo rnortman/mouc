@@ -387,6 +387,9 @@ Valid values:
 - **`k`** (default: `2.0`): Urgency decay parameter controlling how quickly urgency ramps up as deadlines approach. Lower values (1.5) mean urgency kicks in earlier; higher values (3.0) only get urgent near deadlines.
 - **`no_deadline_urgency_multiplier`** (default: `0.5`): Multiplier for computing urgency of tasks without deadlines. Applied to the minimum urgency of deadline tasks.
 - **`urgency_floor`** (default: `0.1`): Minimum urgency for any task, preventing zero-urgency tasks from never being scheduled.
+- **`rollout_enabled`** (default: `true`): Enable rollout simulation for resource assignment. When a higher-scored target has work that will need the same resource soon, simulate both "schedule now" and "skip" scenarios to pick the better option.
+- **`rollout_score_ratio_threshold`** (default: `1.0`): Minimum score ratio for competing targets to trigger rollout. A value of 1.0 means any higher-scored target triggers rollout; higher values require a larger score gap.
+- **`rollout_max_horizon_days`** (default: `null`): Maximum simulation horizon in days. `null` means simulate until competing task completes.
 
 Note: The critical path scheduler uses the global `default_priority` from `SchedulingConfig`, not a separate setting.
 

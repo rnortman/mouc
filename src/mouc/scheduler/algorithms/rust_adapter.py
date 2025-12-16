@@ -198,6 +198,9 @@ class RustSchedulerAdapter:
             no_deadline_urgency_multiplier=config.critical_path.no_deadline_urgency_multiplier,
             urgency_floor=config.critical_path.urgency_floor,
             verbosity=_get_verbosity(),
+            rollout_enabled=config.critical_path.rollout_enabled,
+            rollout_score_ratio_threshold=config.critical_path.rollout_score_ratio_threshold,
+            rollout_max_horizon_days=config.critical_path.rollout_max_horizon_days,
         )
 
     def schedule(self) -> AlgorithmResult:

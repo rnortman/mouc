@@ -190,6 +190,9 @@ class CriticalPathConfig:
     no_deadline_urgency_multiplier: float
     urgency_floor: float
     verbosity: int
+    rollout_enabled: bool
+    rollout_score_ratio_threshold: float
+    rollout_max_horizon_days: int | None
 
     def __init__(
         self,
@@ -197,6 +200,9 @@ class CriticalPathConfig:
         no_deadline_urgency_multiplier: float = 0.5,
         urgency_floor: float = 0.1,
         verbosity: int = 0,
+        rollout_enabled: bool = True,
+        rollout_score_ratio_threshold: float = 1.0,
+        rollout_max_horizon_days: int | None = None,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

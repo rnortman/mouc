@@ -6,11 +6,13 @@
 //! targets.
 
 mod calculation;
+pub mod rollout;
 mod scheduler;
 mod scoring;
 mod types;
 
 pub use calculation::{calculate_critical_path, CriticalPathResult};
+pub use rollout::RolloutConfig;
 pub use scheduler::{CriticalPathScheduler, CriticalPathSchedulerError};
 pub use scoring::{score_target, score_task};
 pub use types::{CriticalPathConfig, TargetInfo, TaskTiming};

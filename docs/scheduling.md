@@ -772,10 +772,50 @@ Use Parallel SGS or Bounded Rollout when:
 - All tasks have similar priorities
 - You need the Python implementation (critical_path is Rust-only)
 
+### Rollout for Resource Assignment
+
+The critical path scheduler includes rollout simulation for resource assignment decisions. When about to assign a resource to a task, the scheduler checks if a higher-scored target has a critical path task that will need the same resource soon.
+
+**How it works:**
+
+1. **Detection**: Before committing to a resource assignment, check if any target with a higher score has a critical path task that:
+   - Needs the same resource (via resource_spec expansion)
+   - Becomes eligible before the current task would complete
+
+2. **Simulation**: If competing targets exist, simulate two scenarios:
+   - **Scenario A**: Schedule the current task now, run greedy until horizon
+   - **Scenario B**: Skip the task (leave resource idle), run greedy until horizon
+
+3. **Evaluation**: Compare scenarios using a hybrid score (lower is better):
+   - Priority-weighted completion times for scheduled tasks
+   - Heavy tardiness penalty (10x) for deadline violations
+   - Delay penalty for unscheduled eligible tasks
+
+4. **Decision**: If skipping produces a better score, leave the resource idle.
+
+**Example:**
+```
+Target T1 (score=4): low_task (priority 40, 10 days) on alice
+Target T2 (score=20): high_task (priority 100, 5 days) blocked by blocker (2 days)
+```
+
+Without rollout, greedy schedules low_task immediately, blocking alice until day 11. With rollout, the scheduler recognizes that high_task (better target score) will need alice on day 3, simulates both scenarios, and leaves alice idle to prioritize the higher-scored work.
+
+**Configuration:**
+
+```yaml
+scheduler:
+  algorithm:
+    type: critical_path
+  critical_path:
+    rollout_enabled: true           # Enable rollout simulation (default)
+    rollout_score_ratio_threshold: 1.0  # Competing target must have score >= ratio * current
+    rollout_max_horizon_days: null  # Cap simulation depth (null = unlimited)
+```
+
 ### Limitations
 
 - **Rust only**: No Python implementation available
-- **No rollout support yet**: Architecture allows for future rollout integration
 - **Recomputes each iteration**: More expensive than simple greedy (but still fast)
 
 ## CP-SAT Optimal Scheduler
