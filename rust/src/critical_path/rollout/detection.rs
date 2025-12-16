@@ -84,6 +84,11 @@ fn find_eligible_cp_task_for_resource(
 
         let task = tasks.get(task_id)?;
 
+        // Skip milestones - they don't actually use the resource
+        if task.duration_days == 0.0 {
+            continue;
+        }
+
         // Check if this task needs the contested resource
         if !task_needs_resource(task, resource, resource_config) {
             continue;

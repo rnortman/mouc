@@ -9,7 +9,7 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
 use super::calculation::{calculate_critical_path, CriticalPathError};
-use super::rollout::{find_competing_targets, run_forward_simulation};
+use super::rollout::{find_competing_targets, run_forward_simulation, CriticalPathCache};
 use super::scoring::{compute_urgency_with_context, score_task};
 use super::types::{CriticalPathConfig, TargetInfo};
 
@@ -765,7 +765,7 @@ impl CriticalPathScheduler {
     ) -> Option<String> {
         let task = self.tasks.get(task_id)?;
 
-        // Skip rollout for zero-duration tasks (milestones)
+        // Skip rollout for zero-duration tasks (milestones complete instantly)
         if task.duration_days == 0.0 {
             return None;
         }
@@ -821,6 +821,9 @@ impl CriticalPathScheduler {
             .filter_map(|(id, t)| t.priority.map(|p| (id.clone(), p)))
             .collect();
 
+        // Build cache from pre-computed targets (avoid recomputing critical paths in simulation)
+        let cache = CriticalPathCache::from_targets(all_targets);
+
         // Scenario A: Schedule this task now
         let mut scheduled_a = scheduled.clone();
         scheduled_a.insert(task_id.to_string(), (current_time, completion));
@@ -830,6 +833,10 @@ impl CriticalPathScheduler {
         if let Some(schedule) = resource_schedules_a.get_mut(&resource) {
             schedule.add_busy_period(current_time, completion);
         }
+
+        // Clone cache for scenario A and invalidate the scheduled task
+        let mut cache_a = cache.clone();
+        let _ = cache_a.invalidate_for_scheduled_task(task_id);
 
         let result_a = run_forward_simulation(
             &self.tasks,
@@ -844,9 +851,13 @@ impl CriticalPathScheduler {
             &computed_deadlines,
             &computed_priorities,
             self.default_priority,
+            cache_a,
         );
 
         // Scenario B: Skip this task (leave resource idle)
+        // Use original cache (task not scheduled yet)
+        let cache_b = cache;
+
         let result_b = run_forward_simulation(
             &self.tasks,
             scheduled.clone(),
@@ -860,6 +871,7 @@ impl CriticalPathScheduler {
             &computed_deadlines,
             &computed_priorities,
             self.default_priority,
+            cache_b,
         );
 
         // Compare: lower score is better

@@ -810,7 +810,7 @@ scheduler:
   critical_path:
     rollout_enabled: true           # Enable rollout simulation (default)
     rollout_score_ratio_threshold: 1.0  # Competing target must have score >= ratio * current
-    rollout_max_horizon_days: null  # Cap simulation depth (null = unlimited)
+    rollout_max_horizon_days: 30    # Cap simulation depth (default: 30, null = unlimited)
 ```
 
 ### Limitations

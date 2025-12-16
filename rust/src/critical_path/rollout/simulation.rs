@@ -5,7 +5,7 @@ use std::collections::{HashMap, HashSet};
 use chrono::NaiveDate;
 
 use super::evaluation::score_schedule;
-use super::SimulationResult;
+use super::{CriticalPathCache, SimulationResult};
 use crate::critical_path::calculation::calculate_critical_path;
 use crate::critical_path::scoring::{score_target, score_task};
 use crate::critical_path::types::{CriticalPathConfig, TargetInfo};
@@ -15,8 +15,12 @@ use crate::scheduler::{ResourceConfig, ResourceSchedule};
 /// Run a forward simulation from the current state until the horizon.
 ///
 /// This simulates greedy critical-path scheduling to estimate the outcome
-/// of a particular decision. The simulation does NOT recurse into rollout
-/// decisions itself.
+/// of a particular decision. The simulation uses a cached set of target
+/// rankings instead of recomputing critical paths each iteration.
+///
+/// When a task is scheduled, the cache is invalidated for affected targets.
+/// Those targets are simply removed from consideration rather than recomputed,
+/// which is a reasonable approximation for comparing two scenarios.
 #[allow(clippy::too_many_arguments)]
 pub fn run_forward_simulation(
     tasks: &HashMap<String, Task>,
@@ -26,11 +30,12 @@ pub fn run_forward_simulation(
     horizon: NaiveDate,
     skip_task_id: Option<&str>,
     current_time: NaiveDate,
-    config: &CriticalPathConfig,
+    _config: &CriticalPathConfig,
     resource_config: Option<&ResourceConfig>,
     computed_deadlines: &HashMap<String, NaiveDate>,
     computed_priorities: &HashMap<String, i32>,
     default_priority: i32,
+    mut cache: CriticalPathCache,
 ) -> SimulationResult {
     let mut scheduled = initial_scheduled;
     let mut unscheduled = initial_unscheduled;
@@ -49,17 +54,8 @@ pub fn run_forward_simulation(
     while !unscheduled.is_empty() && sim_time <= horizon && iterations < max_iterations {
         iterations += 1;
 
-        // Calculate target info for all unscheduled tasks
-        let targets = calculate_all_targets(
-            tasks,
-            &scheduled,
-            &unscheduled,
-            sim_time,
-            config,
-            computed_deadlines,
-            computed_priorities,
-            default_priority,
-        );
+        // Get ranked targets from cache (no recomputation!)
+        let targets = cache.get_ranked_targets();
 
         if targets.is_empty() {
             break;
@@ -67,8 +63,9 @@ pub fn run_forward_simulation(
 
         // Try to schedule something
         let mut scheduled_something = false;
+        let mut scheduled_task_id: Option<String> = None;
 
-        for target in &targets {
+        for target in targets {
             // Get eligible tasks on the critical path
             let eligible = get_eligible_tasks(target, tasks, &scheduled, sim_time);
 
@@ -103,6 +100,7 @@ pub fn run_forward_simulation(
                     unscheduled.remove(&task_id);
                     result_tasks.push(scheduled_task);
                     scheduled_something = true;
+                    scheduled_task_id = Some(task_id);
                     break;
                 }
             }
@@ -110,6 +108,11 @@ pub fn run_forward_simulation(
             if scheduled_something {
                 break;
             }
+        }
+
+        // Invalidate cache for the scheduled task (simulation doesn't recompute)
+        if let Some(task_id) = scheduled_task_id.take() {
+            let _ = cache.invalidate_for_scheduled_task(&task_id);
         }
 
         // If nothing was scheduled, advance time
@@ -169,6 +172,33 @@ pub fn run_forward_simulation(
         scheduled_tasks: all_scheduled_tasks,
         score,
     }
+}
+
+/// Build a cache from all unscheduled tasks.
+///
+/// This is used to initialize the cache before running simulation.
+#[allow(clippy::too_many_arguments)]
+pub fn build_initial_cache(
+    tasks: &HashMap<String, Task>,
+    scheduled: &HashMap<String, (NaiveDate, NaiveDate)>,
+    unscheduled: &HashSet<String>,
+    current_time: NaiveDate,
+    config: &CriticalPathConfig,
+    computed_deadlines: &HashMap<String, NaiveDate>,
+    computed_priorities: &HashMap<String, i32>,
+    default_priority: i32,
+) -> CriticalPathCache {
+    let targets = calculate_all_targets(
+        tasks,
+        scheduled,
+        unscheduled,
+        current_time,
+        config,
+        computed_deadlines,
+        computed_priorities,
+        default_priority,
+    );
+    CriticalPathCache::from_targets(&targets)
 }
 
 /// Calculate target info for all unscheduled tasks.
@@ -517,6 +547,18 @@ mod tests {
         };
         let config = CriticalPathConfig::default();
 
+        // Build initial cache
+        let cache = build_initial_cache(
+            &tasks,
+            &scheduled,
+            &unscheduled,
+            d(2025, 1, 1),
+            &config,
+            &HashMap::new(),
+            &HashMap::new(),
+            50,
+        );
+
         let result = run_forward_simulation(
             &tasks,
             scheduled,
@@ -530,6 +572,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             50,
+            cache,
         );
 
         assert_eq!(result.scheduled_tasks.len(), 1);
@@ -566,6 +609,18 @@ mod tests {
         };
         let config = CriticalPathConfig::default();
 
+        // Build initial cache
+        let cache = build_initial_cache(
+            &tasks,
+            &scheduled,
+            &unscheduled,
+            d(2025, 1, 1),
+            &config,
+            &HashMap::new(),
+            &HashMap::new(),
+            50,
+        );
+
         // Skip task1 - task2 should be scheduled first (higher priority)
         let result = run_forward_simulation(
             &tasks,
@@ -580,6 +635,7 @@ mod tests {
             &HashMap::new(),
             &HashMap::new(),
             50,
+            cache,
         );
 
         // Both tasks should eventually be scheduled (skip only applies at initial time)

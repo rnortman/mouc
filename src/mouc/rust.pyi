@@ -202,7 +202,7 @@ class CriticalPathConfig:
         verbosity: int = 0,
         rollout_enabled: bool = True,
         rollout_score_ratio_threshold: float = 1.0,
-        rollout_max_horizon_days: int | None = None,
+        rollout_max_horizon_days: int | None = 30,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

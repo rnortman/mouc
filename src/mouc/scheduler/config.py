@@ -102,7 +102,7 @@ class CriticalPathConfig(BaseModel):
     # Competing target must have score >= this * current to trigger rollout (1.0 = any higher)
     rollout_score_ratio_threshold: float = 1.0
     # Maximum rollout simulation horizon in days (None = unlimited)
-    rollout_max_horizon_days: int | None = None
+    rollout_max_horizon_days: int | None = 30
 
 
 class SchedulingConfig(BaseModel):

@@ -47,7 +47,7 @@ impl CriticalPathConfig {
         verbosity=0,
         rollout_enabled=true,
         rollout_score_ratio_threshold=1.0,
-        rollout_max_horizon_days=None
+        rollout_max_horizon_days=30
     ))]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -87,7 +87,7 @@ impl Default for CriticalPathConfig {
             verbosity: 0,
             rollout_enabled: true,
             rollout_score_ratio_threshold: 1.0,
-            rollout_max_horizon_days: None,
+            rollout_max_horizon_days: Some(30),
         }
     }
 }

@@ -11,10 +11,13 @@ mod simulation;
 
 pub use detection::find_competing_targets;
 pub use evaluation::score_schedule;
-pub use simulation::run_forward_simulation;
+pub use simulation::{build_initial_cache, run_forward_simulation};
+
+use std::collections::{HashMap, HashSet};
 
 use chrono::NaiveDate;
 
+use crate::critical_path::types::TargetInfo;
 use crate::models::ScheduledTask;
 
 /// A competing target that may warrant delaying the current task.
@@ -74,6 +77,132 @@ impl Default for RolloutConfig {
             score_ratio_threshold: 1.0,
             max_horizon_days: None,
         }
+    }
+}
+
+/// Cache for critical path calculations with invalidation support.
+///
+/// When a task is scheduled, only targets that had that task on their
+/// critical path need to be recomputed. This dramatically reduces the
+/// cost of forward simulation.
+#[derive(Clone, Debug)]
+pub struct CriticalPathCache {
+    /// Cached target info by target_id.
+    targets: HashMap<String, TargetInfo>,
+    /// Reverse index: task_id -> set of target_ids that have this task on their CP.
+    task_to_targets: HashMap<String, HashSet<String>>,
+}
+
+impl CriticalPathCache {
+    /// Create a new empty cache.
+    pub fn new() -> Self {
+        Self {
+            targets: HashMap::new(),
+            task_to_targets: HashMap::new(),
+        }
+    }
+
+    /// Build a cache from a list of pre-computed targets.
+    pub fn from_targets(targets: &[TargetInfo]) -> Self {
+        let mut cache = Self::new();
+        for target in targets {
+            cache.insert(target.clone());
+        }
+        cache
+    }
+
+    /// Insert a target into the cache, updating the reverse index.
+    pub fn insert(&mut self, target: TargetInfo) {
+        // Update reverse index
+        for task_id in &target.critical_path_tasks {
+            self.task_to_targets
+                .entry(task_id.clone())
+                .or_default()
+                .insert(target.target_id.clone());
+        }
+        self.targets.insert(target.target_id.clone(), target);
+    }
+
+    /// Invalidate cache entries affected by scheduling a task.
+    ///
+    /// Removes the task itself as a target, and removes any targets
+    /// that had this task on their critical path.
+    ///
+    /// Returns the set of target IDs that were invalidated (excluding the
+    /// scheduled task itself), so the caller can recompute them if needed.
+    pub fn invalidate_for_scheduled_task(&mut self, task_id: &str) -> HashSet<String> {
+        let mut invalidated = HashSet::new();
+
+        // Remove the task itself as a target
+        if let Some(target) = self.targets.remove(task_id) {
+            // Clean up reverse index entries for this target
+            for cp_task in &target.critical_path_tasks {
+                if let Some(targets) = self.task_to_targets.get_mut(cp_task) {
+                    targets.remove(task_id);
+                }
+            }
+        }
+
+        // Find and remove targets that had this task on their critical path
+        if let Some(affected_targets) = self.task_to_targets.remove(task_id) {
+            for target_id in affected_targets {
+                if let Some(target) = self.targets.remove(&target_id) {
+                    invalidated.insert(target_id.clone());
+                    // Clean up other reverse index entries for this target
+                    for cp_task in &target.critical_path_tasks {
+                        if cp_task != task_id {
+                            if let Some(targets) = self.task_to_targets.get_mut(cp_task) {
+                                targets.remove(&target_id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        invalidated
+    }
+
+    /// Get a cached target by ID.
+    pub fn get(&self, target_id: &str) -> Option<&TargetInfo> {
+        self.targets.get(target_id)
+    }
+
+    /// Check if a target is cached.
+    pub fn contains(&self, target_id: &str) -> bool {
+        self.targets.contains_key(target_id)
+    }
+
+    /// Get all cached targets, sorted by score descending.
+    pub fn get_ranked_targets(&self) -> Vec<&TargetInfo> {
+        let mut targets: Vec<_> = self.targets.values().collect();
+        targets.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        targets
+    }
+
+    /// Get the set of target IDs that are still cached.
+    pub fn target_ids(&self) -> HashSet<String> {
+        self.targets.keys().cloned().collect()
+    }
+
+    /// Number of cached targets.
+    pub fn len(&self) -> usize {
+        self.targets.len()
+    }
+
+    /// Check if cache is empty.
+    pub fn is_empty(&self) -> bool {
+        self.targets.is_empty()
+    }
+}
+
+impl Default for CriticalPathCache {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
