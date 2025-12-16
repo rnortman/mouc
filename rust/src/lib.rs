@@ -353,6 +353,7 @@ impl PyCriticalPathScheduler {
         tasks,
         current_date,
         completed_task_ids=None,
+        default_priority=None,
         config=None,
         resource_config=None,
         global_dns_periods=None
@@ -362,6 +363,7 @@ impl PyCriticalPathScheduler {
         tasks: Vec<Task>,
         current_date: NaiveDate,
         completed_task_ids: Option<HashSet<String>>,
+        default_priority: Option<i32>,
         config: Option<CriticalPathConfig>,
         resource_config: Option<PyResourceConfig>,
         global_dns_periods: Option<Vec<(NaiveDate, NaiveDate)>>,
@@ -372,10 +374,15 @@ impl PyCriticalPathScheduler {
             spec_expansion: rc.spec_expansion,
         });
 
+        // Use provided default_priority or fall back to global SchedulingConfig default
+        let effective_default_priority =
+            default_priority.unwrap_or_else(|| SchedulingConfig::default().default_priority);
+
         let scheduler = CriticalPathScheduler::new(
             tasks,
             current_date,
             completed_task_ids.unwrap_or_default(),
+            effective_default_priority,
             config.unwrap_or_default(),
             rust_resource_config,
             global_dns_periods.unwrap_or_default(),

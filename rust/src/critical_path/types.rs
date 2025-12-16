@@ -8,10 +8,6 @@ use std::collections::HashSet;
 #[pyclass]
 #[derive(Clone, Debug)]
 pub struct CriticalPathConfig {
-    /// Default priority for tasks without explicit priority (0-100).
-    #[pyo3(get, set)]
-    pub default_priority: i32,
-
     /// Urgency decay parameter K (higher = more tolerant of slack).
     #[pyo3(get, set)]
     pub k: f64,
@@ -33,21 +29,13 @@ pub struct CriticalPathConfig {
 impl CriticalPathConfig {
     #[new]
     #[pyo3(signature = (
-        default_priority=50,
         k=2.0,
         no_deadline_urgency_multiplier=0.5,
         urgency_floor=0.1,
         verbosity=0
     ))]
-    fn new(
-        default_priority: i32,
-        k: f64,
-        no_deadline_urgency_multiplier: f64,
-        urgency_floor: f64,
-        verbosity: u8,
-    ) -> Self {
+    fn new(k: f64, no_deadline_urgency_multiplier: f64, urgency_floor: f64, verbosity: u8) -> Self {
         Self {
-            default_priority,
             k,
             no_deadline_urgency_multiplier,
             urgency_floor,
@@ -57,8 +45,8 @@ impl CriticalPathConfig {
 
     fn __repr__(&self) -> String {
         format!(
-            "CriticalPathConfig(default_priority={}, k={}, no_deadline_urgency_multiplier={}, urgency_floor={})",
-            self.default_priority, self.k, self.no_deadline_urgency_multiplier, self.urgency_floor
+            "CriticalPathConfig(k={}, no_deadline_urgency_multiplier={}, urgency_floor={})",
+            self.k, self.no_deadline_urgency_multiplier, self.urgency_floor
         )
     }
 }
@@ -66,7 +54,6 @@ impl CriticalPathConfig {
 impl Default for CriticalPathConfig {
     fn default() -> Self {
         Self {
-            default_priority: 50,
             k: 2.0,
             no_deadline_urgency_multiplier: 0.5,
             urgency_floor: 0.1,
@@ -143,7 +130,6 @@ mod tests {
     #[test]
     fn test_config_defaults() {
         let config = CriticalPathConfig::default();
-        assert_eq!(config.default_priority, 50);
         assert!((config.k - 2.0).abs() < 1e-9);
         assert!((config.no_deadline_urgency_multiplier - 0.5).abs() < 1e-9);
         assert!((config.urgency_floor - 0.1).abs() < 1e-9);

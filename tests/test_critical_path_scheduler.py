@@ -623,8 +623,8 @@ class TestCriticalPathPythonAdapter:
         config = SchedulingConfig(
             algorithm=AlgorithmConfig(type=AlgorithmType.CRITICAL_PATH),
             implementation=ImplementationType.RUST,
+            default_priority=75,  # Custom default (global setting)
             critical_path=CriticalPathConfig(
-                default_priority=75,  # Custom default
                 k=3.0,
                 urgency_floor=0.2,
             ),
@@ -899,7 +899,7 @@ class TestCriticalPathConfig:
     """Tests for critical path configuration options."""
 
     def test_default_priority_used(self) -> None:
-        """Tasks without priority use default_priority from config."""
+        """Tasks without priority use default_priority from scheduler."""
         tasks = [
             rust.Task(
                 id="no_priority",
@@ -909,11 +909,10 @@ class TestCriticalPathConfig:
                 # No priority specified
             ),
         ]
-        config = rust.CriticalPathConfig(default_priority=75)
         scheduler = rust.CriticalPathScheduler(
             tasks=tasks,
             current_date=date(2025, 1, 1),
-            config=config,
+            default_priority=75,
         )
         result = scheduler.schedule()
 

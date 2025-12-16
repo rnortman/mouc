@@ -186,7 +186,6 @@ class ParallelScheduler:
     def __repr__(self) -> str: ...
 
 class CriticalPathConfig:
-    default_priority: int
     k: float
     no_deadline_urgency_multiplier: float
     urgency_floor: float
@@ -194,7 +193,6 @@ class CriticalPathConfig:
 
     def __init__(
         self,
-        default_priority: int = 50,
         k: float = 2.0,
         no_deadline_urgency_multiplier: float = 0.5,
         urgency_floor: float = 0.1,
@@ -208,6 +206,7 @@ class CriticalPathScheduler:
         tasks: list[Task],
         current_date: date,
         completed_task_ids: set[str] | None = None,
+        default_priority: int | None = None,
         config: CriticalPathConfig | None = None,
         resource_config: ResourceConfig | None = None,
         global_dns_periods: list[tuple[date, date]] | None = None,

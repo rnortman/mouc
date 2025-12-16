@@ -36,6 +36,7 @@ pub struct CriticalPathScheduler {
     tasks: HashMap<String, Task>,
     current_date: NaiveDate,
     completed_task_ids: HashSet<String>,
+    default_priority: i32,
     config: CriticalPathConfig,
     resource_config: Option<ResourceConfig>,
     global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
@@ -48,6 +49,7 @@ impl CriticalPathScheduler {
         tasks: Vec<Task>,
         current_date: NaiveDate,
         completed_task_ids: HashSet<String>,
+        default_priority: i32,
         config: CriticalPathConfig,
         resource_config: Option<ResourceConfig>,
         global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
@@ -59,6 +61,7 @@ impl CriticalPathScheduler {
             tasks: tasks_map,
             current_date,
             completed_task_ids,
+            default_priority,
             config,
             resource_config,
             global_dns_periods,
@@ -280,7 +283,7 @@ impl CriticalPathScheduler {
                 let task = self.tasks.get(&best_task_id);
                 let priority = task
                     .and_then(|t| t.priority)
-                    .unwrap_or(self.config.default_priority);
+                    .unwrap_or(self.default_priority);
 
                 log_checks!(
                     verbosity,
@@ -388,7 +391,7 @@ impl CriticalPathScheduler {
                 None => continue,
             };
 
-            let priority = task.priority.unwrap_or(self.config.default_priority);
+            let priority = task.priority.unwrap_or(self.default_priority);
             let deadline = task.end_before;
 
             let cp_result = calculate_critical_path(
@@ -519,7 +522,7 @@ impl CriticalPathScheduler {
                 None => continue,
             };
 
-            let priority = task.priority.unwrap_or(self.config.default_priority);
+            let priority = task.priority.unwrap_or(self.default_priority);
             let score = score_task(priority, task.duration_days);
 
             if score > best_score {
@@ -765,6 +768,7 @@ mod tests {
             tasks,
             d(2025, 1, 1),
             HashSet::new(),
+            50,
             CriticalPathConfig::default(),
             None,
             vec![],
@@ -800,6 +804,7 @@ mod tests {
             tasks,
             d(2025, 1, 1),
             HashSet::new(),
+            50,
             CriticalPathConfig::default(),
             None,
             vec![],
@@ -827,6 +832,7 @@ mod tests {
             tasks,
             d(2025, 1, 1),
             HashSet::new(),
+            50,
             CriticalPathConfig::default(),
             None,
             vec![],
@@ -862,6 +868,7 @@ mod tests {
             tasks,
             d(2025, 1, 1),
             HashSet::new(),
+            50,
             CriticalPathConfig::default(),
             None,
             vec![],
@@ -903,6 +910,7 @@ mod tests {
             tasks,
             d(2025, 1, 1),
             HashSet::new(),
+            50,
             CriticalPathConfig::default(),
             None,
             vec![],

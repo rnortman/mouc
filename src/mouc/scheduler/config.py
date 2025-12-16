@@ -84,10 +84,11 @@ class CriticalPathConfig(BaseModel):
 
     The critical path scheduler eliminates priority contamination by focusing
     only on tasks that are actually on the critical path to attractive targets.
+
+    Note: default_priority is intentionally NOT included here - it comes from
+    the parent SchedulingConfig to avoid duplication.
     """
 
-    # Default priority for tasks without explicit priority (0-100)
-    default_priority: int = 50
     # Urgency decay parameter K (higher = more tolerant of slack)
     k: float = 2.0
     # Multiplier for urgency of non-deadline targets

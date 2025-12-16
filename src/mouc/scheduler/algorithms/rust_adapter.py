@@ -85,6 +85,7 @@ class RustSchedulerAdapter:
                 tasks=rust_tasks,
                 current_date=current_date,
                 completed_task_ids=self._completed_task_ids,
+                default_priority=self._config.default_priority,
                 config=rust_cp_config,
                 resource_config=rust_resource_config,
                 global_dns_periods=rust_global_dns,
@@ -193,7 +194,6 @@ class RustSchedulerAdapter:
     def _convert_critical_path_config(self, config: SchedulingConfig) -> rust.CriticalPathConfig:
         """Convert Python CriticalPathConfig to Rust CriticalPathConfig."""
         return rust.CriticalPathConfig(
-            default_priority=config.critical_path.default_priority,
             k=config.critical_path.k,
             no_deadline_urgency_multiplier=config.critical_path.no_deadline_urgency_multiplier,
             urgency_floor=config.critical_path.urgency_floor,

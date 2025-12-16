@@ -384,10 +384,11 @@ Valid values:
 
 **Critical Path Configuration** (only used when `algorithm.type` is `"critical_path"`):
 
-- **`default_priority`** (default: `50`): Default priority (0-100) for tasks without explicit priority metadata
 - **`k`** (default: `2.0`): Urgency decay parameter controlling how quickly urgency ramps up as deadlines approach. Lower values (1.5) mean urgency kicks in earlier; higher values (3.0) only get urgent near deadlines.
 - **`no_deadline_urgency_multiplier`** (default: `0.5`): Multiplier for computing urgency of tasks without deadlines. Applied to the minimum urgency of deadline tasks.
 - **`urgency_floor`** (default: `0.1`): Minimum urgency for any task, preventing zero-urgency tasks from never being scheduled.
+
+Note: The critical path scheduler uses the global `default_priority` from `SchedulingConfig`, not a separate setting.
 
 **Rollout Configuration** (only used when `algorithm.type` is `"bounded_rollout"`):
 
@@ -439,8 +440,8 @@ scheduler:
   algorithm:
     type: critical_path
   implementation: rust  # Required - critical_path is Rust-only
+  default_priority: 50  # Global setting used by all algorithms
   critical_path:
-    default_priority: 50
     k: 2.0
     no_deadline_urgency_multiplier: 0.5
     urgency_floor: 0.1

@@ -745,18 +745,19 @@ scheduler:
   algorithm:
     type: critical_path
   implementation: rust  # Required - critical_path is Rust-only
+  default_priority: 50             # Global setting used by all algorithms
   critical_path:
-    default_priority: 50           # Default priority for tasks without metadata
     k: 2.0                         # Urgency decay parameter
     no_deadline_urgency_multiplier: 0.5  # Multiplier for no-deadline tasks
     urgency_floor: 0.1             # Minimum urgency (prevents zero)
 ```
 
 **Parameters:**
-- `default_priority` (default: 50): Priority for tasks without explicit priority
 - `k` (default: 2.0): Controls urgency ramp-up. Lower = more aggressive (1.5), higher = relaxed (3.0)
 - `no_deadline_urgency_multiplier` (default: 0.5): No-deadline tasks get `min_urgency × multiplier`
 - `urgency_floor` (default: 0.1): Minimum urgency to prevent tasks from never scheduling
+
+Note: The critical path scheduler uses the global `default_priority` from `SchedulingConfig`.
 
 ### When to Use Critical Path Scheduling
 
