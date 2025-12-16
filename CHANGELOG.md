@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Phased scheduling: `schedule --output-lock`, `--lock-file`, `--style-tags`, `--style-file` for multi-pass scheduling
+- `gantt --lock-file` to render charts from pre-computed schedules (skips scheduling)
 - `schedule --output-csv` and `compare` commands for scenario analysis
 - Critical path scheduler (`--algorithm critical_path --rust`) - eliminates priority contamination by focusing on critical path tasks
 - Critical path rollout: simulates resource assignment decisions to avoid blocking higher-priority work

@@ -1232,7 +1232,26 @@ entities:
 
 When both `--lock-file` and `--style-tags` are used, locked tasks are always included even if filtered out by tags—they still block resources.
 
+### Rendering from Lock Files
+
+The `mouc gantt` command also supports `--lock-file` to render a Gantt chart directly from a lock file **without running the scheduler**:
+
+```bash
+# Create a lock file from scheduling
+mouc schedule feature_map.yaml --output-lock schedule.lock.yaml
+
+# Render gantt chart from the lock file (no scheduling)
+mouc gantt feature_map.yaml --lock-file schedule.lock.yaml
+```
+
+This is useful when:
+- You want to visualize a previously computed schedule
+- You want consistent charts without re-running potentially non-deterministic scheduling
+- You've manually edited a lock file to explore "what-if" scenarios
+
 ### CLI Options
+
+**For `mouc schedule`:**
 
 | Option | Description |
 |--------|-------------|
@@ -1241,3 +1260,9 @@ When both `--lock-file` and `--style-tags` are used, locked tasks are always inc
 | `--style-module` | Python module with filter functions |
 | `--lock-file` | Load fixed dates/resources from lock file |
 | `--output-lock` | Export scheduled dates/resources to lock file |
+
+**For `mouc gantt`:**
+
+| Option | Description |
+|--------|-------------|
+| `--lock-file` | Render chart from lock file (skips scheduling) |

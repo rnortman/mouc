@@ -18,7 +18,7 @@ from . import context, styling
 from .backends import DocxBackend, MarkdownBackend
 from .document import DocumentGenerator
 from .exceptions import MoucError
-from .gantt import GanttScheduler
+from .gantt import GanttScheduler, ScheduledTask, ScheduleResult
 from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
 from .loader import load_feature_map
@@ -28,6 +28,7 @@ from .scheduler import (
     AlgorithmConfig,
     AlgorithmType,
     ImplementationType,
+    ScheduleAnnotations,
     SchedulingConfig,
     SchedulingResult,
     SchedulingService,
@@ -474,6 +475,12 @@ def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple optio
         bool,
         typer.Option("--rust", help="Use Rust scheduler implementation (faster)"),
     ] = False,
+    lock_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--lock-file", help="Use pre-computed schedule from lock file (skips scheduling)"
+        ),
+    ] = None,
     output: Annotated[Path | None, typer.Option("--output", "-o", help="Output file path")] = None,
 ) -> None:
     """Generate Gantt chart in Mermaid format."""
@@ -545,7 +552,7 @@ def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple optio
     # Collect style tags from CLI and config
     active_style_tags = _collect_style_tags(style_tags, file)
 
-    # Schedule tasks
+    # Create GanttScheduler (needed for Mermaid generation regardless of scheduling mode)
     scheduler = GanttScheduler(
         feature_map,
         start_date=parsed_start_date,
@@ -555,7 +562,36 @@ def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple optio
         gantt_config=gantt_config,
         style_tags=active_style_tags,
     )
-    result = scheduler.schedule()
+
+    if lock_file:
+        # Load pre-computed schedule from lock file (skip scheduling)
+        schedule_lock = read_lock_file(lock_file)
+        tasks: list[ScheduledTask] = []
+        annotations: dict[str, ScheduleAnnotations] = {}
+        for task_id, lock in schedule_lock.locks.items():
+            tasks.append(
+                ScheduledTask(
+                    entity_id=task_id,
+                    start_date=lock.start_date,
+                    end_date=lock.end_date,
+                    duration_days=(lock.end_date - lock.start_date).days,
+                    resources=[r[0] for r in lock.resources],
+                )
+            )
+            annotations[task_id] = ScheduleAnnotations(
+                estimated_start=lock.start_date,
+                estimated_end=lock.end_date,
+                computed_deadline=None,
+                computed_priority=None,
+                deadline_violated=False,
+                resource_assignments=lock.resources,
+                resources_were_computed=False,
+                was_fixed=True,
+            )
+        result = ScheduleResult(tasks=tasks)
+        scheduler._scheduling_annotations = annotations  # pyright: ignore[reportPrivateUsage]
+    else:
+        result = scheduler.schedule()
 
     # Create anchor function for markdown links if needed
     anchor_fn = None
