@@ -13,6 +13,8 @@ if TYPE_CHECKING:
     from mouc.models import FeatureMap
     from mouc.resources import DNSPeriod, ResourceConfig
 
+    from .lock import ScheduleLock
+
 
 class SchedulingService:
     """High-level service for scheduling entities and creating annotations.
@@ -25,13 +27,14 @@ class SchedulingService:
     To provide a complete scheduling solution with annotations.
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913 - needs multiple optional config params
         self,
         feature_map: "FeatureMap",
         current_date: date | None = None,
         resource_config: "ResourceConfig | None" = None,
         config: SchedulingConfig | None = None,
         global_dns_periods: "list[DNSPeriod] | None" = None,
+        schedule_lock: "ScheduleLock | None" = None,
     ):
         """Initialize scheduling service.
 
@@ -41,12 +44,14 @@ class SchedulingService:
             resource_config: Optional resource configuration
             config: Optional scheduling configuration for prioritization strategy
             global_dns_periods: Optional global DNS periods that apply to all resources
+            schedule_lock: Optional lock file with fixed dates/resources from previous run
         """
         self.feature_map = feature_map
         self.current_date = current_date or date.today()  # noqa: DTZ011
         self.resource_config = resource_config
         self.config = config or SchedulingConfig()
         self.global_dns_periods = global_dns_periods or []
+        self.schedule_lock = schedule_lock
         self.validator = SchedulerInputValidator(resource_config, self.config)
 
     def _resolve_preprocessor_type(self) -> PreProcessorType:
@@ -59,7 +64,7 @@ class SchedulingService:
             return PreProcessorType.BACKWARD_PASS
         return preprocessor_type
 
-    def schedule(self) -> SchedulingResult:
+    def schedule(self) -> SchedulingResult:  # noqa: PLR0912 - complex scheduling logic
         """Schedule all entities and create annotations.
 
         Returns:
@@ -69,6 +74,16 @@ class SchedulingService:
         tasks, done_without_dates, resources_computed_map = self.validator.extract_tasks(
             self.feature_map
         )
+
+        # Apply schedule locks to fix dates and resources
+        if self.schedule_lock:
+            for task in tasks:
+                if task.id in self.schedule_lock.locks:
+                    lock = self.schedule_lock.locks[task.id]
+                    task.start_on = lock.start_date
+                    task.end_on = lock.end_date
+                    task.resources = lock.resources
+                    task.resource_spec = None  # Disable auto-assignment for locked tasks
 
         # Run pre-processor if configured
         preprocess_result = None

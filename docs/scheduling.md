@@ -1160,3 +1160,84 @@ The comparison CSV includes:
 - `delta_<scenario>` - days difference vs baseline (positive = later, negative = earlier)
 
 Missing tasks show blank values. Import to a spreadsheet for analysis.
+
+## Phased Scheduling
+
+Run scheduling in multiple passes where results from earlier phases become fixed constraints for later phases. This is useful when you want to lock down high-priority work before scheduling the rest.
+
+### Workflow
+
+```bash
+# Phase 1: Schedule only phase1-tagged tasks, export lock file
+mouc schedule feature_map.yaml --style-tags phase1 --style-file styling.py --output-lock phase1.lock.yaml
+
+# Phase 2: Schedule all tasks with phase1 results locked
+mouc schedule feature_map.yaml --lock-file phase1.lock.yaml
+```
+
+### Lock Files
+
+The `--output-lock` option exports scheduled dates and resource assignments to a YAML file:
+
+```yaml
+version: 1
+locks:
+  task_a:
+    start_date: '2025-01-01'
+    end_date: '2025-01-06'
+    resources:
+    - alice:1.0
+  task_b:
+    start_date: '2025-01-01'
+    end_date: '2025-01-04'
+    resources:
+    - bob:1.0
+```
+
+The `--lock-file` option loads these locks before scheduling. Locked tasks:
+- Use their locked start/end dates (shown as "fixed dates, not scheduled")
+- Use their locked resource assignments
+- Block resources during their scheduled time, constraining other tasks
+
+### Filtering with Style Tags
+
+Use `--style-tags` with a `--style-file` to filter which tasks are scheduled:
+
+```python
+# styling.py
+from mouc.styling import filter_entity
+
+@filter_entity(tags=["phase1"])
+def filter_phase1_only(entities, context):
+    """Keep only entities tagged with 'phase1'."""
+    return [e for e in entities if "phase1" in e.tags]
+```
+
+```yaml
+# feature_map.yaml
+entities:
+  critical_infra:
+    tags: [phase1]
+    meta:
+      effort: 5d
+      resources: [alice]
+
+  feature_work:
+    tags: [phase2]
+    requires: [critical_infra]
+    meta:
+      effort: 10d
+      resources: [alice]
+```
+
+When both `--lock-file` and `--style-tags` are used, locked tasks are always included even if filtered out by tags—they still block resources.
+
+### CLI Options
+
+| Option | Description |
+|--------|-------------|
+| `--style-tags` | Comma-separated tags to filter entities |
+| `--style-file` | Python file with filter functions |
+| `--style-module` | Python module with filter functions |
+| `--lock-file` | Load fixed dates/resources from lock file |
+| `--output-lock` | Export scheduled dates/resources to lock file |

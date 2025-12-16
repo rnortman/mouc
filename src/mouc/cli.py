@@ -7,6 +7,7 @@ import importlib
 import importlib.util
 import sys
 from contextlib import suppress
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 from typing import Annotated
@@ -31,6 +32,7 @@ from .scheduler import (
     SchedulingResult,
     SchedulingService,
 )
+from .scheduler.lock import read_lock_file, write_lock_file
 from .unified_config import GanttConfig, load_unified_config
 
 app = typer.Typer(
@@ -650,7 +652,7 @@ def _export_schedule_csv(
 
 
 @app.command()
-def schedule(  # noqa: PLR0913 - CLI command needs multiple options
+def schedule(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     file: Annotated[Path, typer.Argument(help="Path to the feature map YAML file")] = Path(
         "feature_map.yaml"
     ),
@@ -688,13 +690,62 @@ def schedule(  # noqa: PLR0913 - CLI command needs multiple options
             help="Export schedule results to CSV file for scenario comparison",
         ),
     ] = None,
+    style_tags: Annotated[
+        str | None,
+        typer.Option(
+            "--style-tags",
+            help="Comma-separated tags to filter entities (merged with config)",
+        ),
+    ] = None,
+    style_module: Annotated[
+        str | None,
+        typer.Option("--style-module", help="Python module path for styling/filter functions"),
+    ] = None,
+    style_file: Annotated[
+        Path | None,
+        typer.Option("--style-file", help="Python file path for styling/filter functions"),
+    ] = None,
+    lock_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--lock-file",
+            help="Load fixed dates/resources from a previous scheduling run",
+        ),
+    ] = None,
+    output_lock: Annotated[
+        Path | None,
+        typer.Option(
+            "--output-lock",
+            help="Export scheduled dates/resources to lock file for phased scheduling",
+        ),
+    ] = None,
 ) -> None:
     """Run scheduling algorithm and display or persist results."""
     # Parse current date if provided
     parsed_current_date = _parse_date_option(current_date, "current-date")
 
+    # Validate and load styling module/file if specified (before filtering)
+    if style_module and style_file:
+        typer.echo("Error: Cannot specify both --style-module and --style-file", err=True)
+        raise typer.Exit(1)
+    if style_module or style_file:
+        _load_styling(style_module, style_file)
+
     # Load the feature map
     feature_map = load_feature_map(file)
+
+    # Load schedule lock file if specified
+    schedule_lock = None
+    if lock_file:
+        if not lock_file.exists():
+            typer.echo(f"Error: Lock file not found: {lock_file}", err=True)
+            raise typer.Exit(1)
+        try:
+            schedule_lock = read_lock_file(lock_file)
+            typer.echo(f"Loaded {len(schedule_lock.locks)} task locks from {lock_file}")
+        except ValueError as e:
+            typer.echo(f"Error reading lock file: {e}", err=True)
+            raise typer.Exit(1) from None
 
     # Load resource and scheduler config if available
     config_path = get_config_path() or Path("mouc_config.yaml")
@@ -728,6 +779,22 @@ def schedule(  # noqa: PLR0913 - CLI command needs multiple options
             scheduler_config = SchedulingConfig()
         scheduler_config.implementation = ImplementationType.RUST
 
+    # Filter entities if style-tags specified (locked entities are always included)
+    active_style_tags = _collect_style_tags(style_tags, file)
+    if active_style_tags:
+        styling_context = styling.create_styling_context(
+            feature_map, output_format="schedule", style_tags=active_style_tags
+        )
+        filtered_entities = styling.apply_entity_filters(feature_map.entities, styling_context)
+        # Add back any locked entities that were filtered out
+        if schedule_lock:
+            filtered_ids = {e.id for e in filtered_entities}
+            for entity in feature_map.entities:
+                if entity.id in schedule_lock.locks and entity.id not in filtered_ids:
+                    filtered_entities.append(entity)
+        # Create filtered feature map for scheduling
+        feature_map = replace(feature_map, entities=filtered_entities)
+
     # Run scheduling service
     service = SchedulingService(
         feature_map,
@@ -735,6 +802,7 @@ def schedule(  # noqa: PLR0913 - CLI command needs multiple options
         resource_config,
         scheduler_config,
         global_dns_periods,
+        schedule_lock=schedule_lock,
     )
     result = service.schedule()
 
@@ -751,6 +819,11 @@ def schedule(  # noqa: PLR0913 - CLI command needs multiple options
         _annotate_feature_map(feature_map, result, file)
     else:
         _display_schedule_results(feature_map, result)
+
+    # Export lock file if requested
+    if output_lock:
+        write_lock_file(output_lock, result)
+        typer.echo(f"Lock file written to {output_lock}")
 
     # Display warnings
     if result.warnings:
