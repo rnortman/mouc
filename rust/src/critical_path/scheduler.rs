@@ -265,6 +265,17 @@ impl CriticalPathScheduler {
             let mut scheduled_any = false;
 
             for target in ranked_targets {
+                log_checks!(
+                    verbosity,
+                    "  Trying target {} (score={:.2} = pri {} / work {:.1} * urg {:.3}, deadline={:?})",
+                    target.target_id,
+                    target.score,
+                    target.priority,
+                    target.total_work,
+                    target.urgency,
+                    target.deadline
+                );
+
                 // Get eligible tasks on this target's critical path
                 let eligible = self.get_eligible_critical_path_tasks(
                     &target,
@@ -431,18 +442,17 @@ impl CriticalPathScheduler {
             .map(|t| {
                 let mut info = t.clone();
                 // Use context-aware urgency to handle non-deadline targets properly
-                info.score = {
-                    let urgency = compute_urgency_with_context(
-                        t,
-                        target_infos,
-                        &self.config,
-                        current_time,
-                        avg_work,
-                    );
-                    let priority = t.priority as f64;
-                    let work = t.total_work.max(0.1);
-                    (priority / work) * urgency
-                };
+                let urgency = compute_urgency_with_context(
+                    t,
+                    target_infos,
+                    &self.config,
+                    current_time,
+                    avg_work,
+                );
+                let priority = t.priority as f64;
+                let work = t.total_work.max(0.1);
+                info.urgency = urgency;
+                info.score = (priority / work) * urgency;
                 info
             })
             .collect();

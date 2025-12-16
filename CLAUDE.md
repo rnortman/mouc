@@ -38,6 +38,7 @@ Always run the following before considering an iteration done:
 ```bash
 # Rust (if modified)
 cargo fmt && cargo clippy -- -D warnings && cargo test
+uv run maturin develop --release  # Rebuild Python extension after Rust changes
 
 # Python
 uv run ruff format && uv run ruff check --fix && uv run pyright && uv run pytest

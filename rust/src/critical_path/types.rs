@@ -105,6 +105,9 @@ pub struct TargetInfo {
     /// Deadline of this target, if any.
     pub deadline: Option<NaiveDate>,
 
+    /// Computed urgency factor.
+    pub urgency: f64,
+
     /// Computed attractiveness score.
     pub score: f64,
 }
@@ -118,6 +121,7 @@ impl TargetInfo {
             critical_path_length: 0.0,
             priority,
             deadline,
+            urgency: 0.0,
             score: 0.0,
         }
     }

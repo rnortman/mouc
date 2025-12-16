@@ -109,6 +109,7 @@ mod tests {
             critical_path_length: cp_length,
             priority,
             deadline: None,
+            urgency: 0.0,
             score: 0.0,
         }
     }

@@ -53,8 +53,11 @@ pub fn calculate_critical_path(
     scheduled: &HashMap<String, f64>, // task_id -> scheduled end time (days from start)
     completed_task_ids: &HashSet<String>,
 ) -> Result<CriticalPathResult, CriticalPathError> {
+    // Scheduled task IDs - treat as complete for subgraph traversal
+    let scheduled_ids: HashSet<String> = scheduled.keys().cloned().collect();
+
     // Find all tasks in the subgraph leading to this target
-    let subgraph = find_dependency_subgraph(target_id, tasks, completed_task_ids);
+    let subgraph = find_dependency_subgraph(target_id, tasks, completed_task_ids, &scheduled_ids);
 
     if subgraph.is_empty() {
         // Target has no unscheduled dependencies - it's its own critical path
@@ -212,10 +215,14 @@ pub fn calculate_critical_path(
 }
 
 /// Find all tasks in the dependency subgraph leading to a target.
+///
+/// Excludes completed and scheduled tasks - scheduled tasks are treated as
+/// effectively complete for the purpose of determining what work remains.
 fn find_dependency_subgraph(
     target_id: &str,
     tasks: &HashMap<String, Task>,
     completed_task_ids: &HashSet<String>,
+    scheduled_task_ids: &HashSet<String>,
 ) -> HashSet<String> {
     let mut subgraph = HashSet::new();
     let mut queue = VecDeque::new();
@@ -223,7 +230,10 @@ fn find_dependency_subgraph(
     // Start from target, traverse dependencies backward
     if let Some(target) = tasks.get(target_id) {
         for dep in &target.dependencies {
-            if !completed_task_ids.contains(&dep.entity_id) && tasks.contains_key(&dep.entity_id) {
+            if !completed_task_ids.contains(&dep.entity_id)
+                && !scheduled_task_ids.contains(&dep.entity_id)
+                && tasks.contains_key(&dep.entity_id)
+            {
                 queue.push_back(dep.entity_id.clone());
             }
         }
@@ -238,6 +248,7 @@ fn find_dependency_subgraph(
         if let Some(task) = tasks.get(&task_id) {
             for dep in &task.dependencies {
                 if !completed_task_ids.contains(&dep.entity_id)
+                    && !scheduled_task_ids.contains(&dep.entity_id)
                     && tasks.contains_key(&dep.entity_id)
                     && !subgraph.contains(&dep.entity_id)
                 {

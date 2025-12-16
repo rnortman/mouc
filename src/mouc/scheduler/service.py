@@ -135,7 +135,7 @@ class SchedulingService:
             if computed_deadline and scheduled.end_date > computed_deadline:
                 deadline_violated = True
 
-            resource_assignments = list(task.resources)
+            resource_assignments = [(r, 1.0) for r in scheduled.resources]
 
             annotations[entity_id] = ScheduleAnnotations(
                 estimated_start=scheduled.start_date,
