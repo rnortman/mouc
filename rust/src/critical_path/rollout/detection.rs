@@ -21,7 +21,7 @@ pub fn find_competing_targets(
     current_completion: NaiveDate,
     resource: &str,
     score_ratio_threshold: f64,
-    all_targets: &[TargetInfo],
+    all_targets: &[&TargetInfo],
     tasks: &FxHashMap<String, Task>,
     scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
     resource_config: Option<&ResourceConfig>,
@@ -32,7 +32,7 @@ pub fn find_competing_targets(
 
     let score_threshold = current_target_score * score_ratio_threshold;
 
-    for target in all_targets {
+    for &target in all_targets {
         // Skip if target score is not high enough
         if target.score <= score_threshold {
             continue;
@@ -240,13 +240,14 @@ mod tests {
         let resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
 
         let targets = vec![make_target("t1", 5.0, vec!["task1"])];
+        let target_refs: Vec<&TargetInfo> = targets.iter().collect();
 
         let result = find_competing_targets(
             10.0, // Current score is higher
             d(2025, 1, 31),
             "alice",
             1.0,
-            &targets,
+            &target_refs,
             &tasks,
             &scheduled,
             None,
@@ -278,13 +279,14 @@ mod tests {
         };
 
         let targets = vec![make_target("t1", 20.0, vec!["task1"])];
+        let target_refs: Vec<&TargetInfo> = targets.iter().collect();
 
         let result = find_competing_targets(
             10.0, // Current score is lower
             d(2025, 1, 31),
             "alice",
             1.0,
-            &targets,
+            &target_refs,
             &tasks,
             &scheduled,
             Some(&resource_config),

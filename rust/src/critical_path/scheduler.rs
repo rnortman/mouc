@@ -8,9 +8,10 @@ use crate::models::{AlgorithmResult, ScheduledTask, Task};
 use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
-use super::calculation::{calculate_critical_path_interned, CriticalPathError, InternedContext};
+use super::cache::CriticalPathCache;
+use super::calculation::{CriticalPathError, InternedContext};
 use super::rollout::{score_schedule, ResourceReservation};
-use super::scoring::{compute_urgency_with_context, score_task};
+use super::scoring::score_task;
 use super::state::CriticalPathSchedulerState;
 use super::types::{CriticalPathConfig, TargetInfo};
 
@@ -290,8 +291,21 @@ impl CriticalPathScheduler {
         let ctx = InternedContext::new(&self.tasks);
         let completed_vec = ctx.to_bool_vec(&self.completed_task_ids);
 
+        // Mutable scheduled_vec - updated as tasks are scheduled
+        let mut scheduled_vec = ctx.to_scheduled_vec(&state.scheduled, state.current_time);
+
+        // Build initial cache - computes all critical paths once
+        let mut cache = CriticalPathCache::new(
+            &state.unscheduled,
+            &self.tasks,
+            &ctx,
+            &scheduled_vec,
+            &completed_vec,
+            self.default_priority,
+        )?;
+
         for _iteration in 0..max_iterations {
-            if state.unscheduled.is_empty() {
+            if cache.is_empty() {
                 break;
             }
 
@@ -304,17 +318,8 @@ impl CriticalPathScheduler {
 
             log_changes!(verbosity, "Time: {}", state.current_time);
 
-            // Calculate critical paths for all unscheduled tasks (each is a potential target)
-            let target_infos = self.calculate_all_target_infos(
-                &state.scheduled,
-                &state.unscheduled,
-                state.current_time,
-                &ctx,
-                &completed_vec,
-            )?;
-
-            // Rank targets by attractiveness
-            let ranked_targets = self.rank_targets(&target_infos, state.current_time);
+            // Get ranked targets from cache (already scored)
+            let ranked_targets = cache.get_ranked_targets(&self.config, state.current_time);
 
             log_debug!(
                 verbosity,
@@ -416,6 +421,24 @@ impl CriticalPathScheduler {
                         (scheduled_task.start_date, scheduled_task.end_date),
                     );
                     state.unscheduled.remove(&best_task_id);
+
+                    // Update scheduled_vec for the cache
+                    if let Some(task_int) = ctx.interner.get(&best_task_id) {
+                        // Days since current_time when this task ends
+                        let end_offset =
+                            (scheduled_task.end_date - state.current_time).num_days() as f64;
+                        scheduled_vec[task_int as usize] = end_offset;
+                    }
+
+                    // Incrementally update the cache
+                    cache.on_task_scheduled(
+                        &best_task_id,
+                        &self.tasks,
+                        &ctx,
+                        &scheduled_vec,
+                        &completed_vec,
+                        self.default_priority,
+                    )?;
 
                     if scheduled_task.duration_days == 0.0 {
                         log_changes!(
@@ -542,87 +565,6 @@ impl CriticalPathScheduler {
             horizon,
             self.default_priority,
         )
-    }
-
-    /// Calculate target info (including critical path) for all unscheduled tasks.
-    fn calculate_all_target_infos(
-        &self,
-        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
-        unscheduled: &FxHashSet<String>,
-        current_time: NaiveDate,
-        ctx: &InternedContext,
-        completed_vec: &[bool],
-    ) -> Result<Vec<TargetInfo>, CriticalPathSchedulerError> {
-        // Convert scheduled to array-based lookup (f64::MAX = not scheduled)
-        let scheduled_vec = ctx.to_scheduled_vec(scheduled, current_time);
-
-        let mut target_infos = Vec::with_capacity(unscheduled.len());
-
-        for task_id in unscheduled {
-            let task = match self.tasks.get(task_id) {
-                Some(t) => t,
-                None => continue,
-            };
-
-            let priority = task.priority.unwrap_or(self.default_priority);
-            let deadline = task.end_before;
-
-            let cp_result =
-                calculate_critical_path_interned(task_id, ctx, &scheduled_vec, completed_vec)?;
-
-            let mut info = TargetInfo::new(task_id.clone(), priority, deadline);
-            info.critical_path_tasks = cp_result.critical_path_tasks;
-            info.total_work = cp_result.total_work;
-            info.critical_path_length = cp_result.critical_path_length;
-
-            target_infos.push(info);
-        }
-
-        Ok(target_infos)
-    }
-
-    /// Rank targets by attractiveness score (higher = more attractive).
-    fn rank_targets(
-        &self,
-        target_infos: &[TargetInfo],
-        current_time: NaiveDate,
-    ) -> Vec<TargetInfo> {
-        // Calculate average work for urgency computation
-        let avg_work = if target_infos.is_empty() {
-            1.0
-        } else {
-            target_infos.iter().map(|t| t.total_work).sum::<f64>() / target_infos.len() as f64
-        };
-
-        // Score all targets
-        let mut scored: Vec<TargetInfo> = target_infos
-            .iter()
-            .map(|t| {
-                let mut info = t.clone();
-                // Use context-aware urgency to handle non-deadline targets properly
-                let urgency = compute_urgency_with_context(
-                    t,
-                    target_infos,
-                    &self.config,
-                    current_time,
-                    avg_work,
-                );
-                let priority = t.priority as f64;
-                let work = t.total_work.max(0.1);
-                info.urgency = urgency;
-                info.score = (priority / work) * urgency;
-                info
-            })
-            .collect();
-
-        // Sort by score descending (highest first)
-        scored.sort_by(|a, b| {
-            b.score
-                .partial_cmp(&a.score)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
-
-        scored
     }
 
     /// Get tasks on the target's critical path that are eligible to be scheduled.
@@ -925,7 +867,7 @@ impl CriticalPathScheduler {
         &self,
         task_id: &str,
         current_target: &TargetInfo,
-        all_targets: &[TargetInfo],
+        all_targets: &[&TargetInfo],
         scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
         unscheduled: &FxHashSet<String>,
         resource_schedules: &FxHashMap<String, ResourceSchedule>,

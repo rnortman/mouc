@@ -73,6 +73,7 @@ pub fn score_task(priority: i32, duration: f64) -> f64 {
 ///
 /// For non-deadline targets, this computes:
 ///   min(urgency of deadline targets) * multiplier, floored
+#[allow(dead_code)] // Used in tests
 pub fn compute_urgency_with_context(
     target: &TargetInfo,
     all_targets: &[TargetInfo],

@@ -5,6 +5,7 @@
 //! focusing only on tasks that are actually on the critical path to attractive
 //! targets.
 
+mod cache;
 mod calculation;
 pub mod rollout;
 mod scheduler;
