@@ -8,7 +8,7 @@ use crate::models::{AlgorithmResult, ScheduledTask, Task};
 use crate::scheduler::{ResourceConfig, ResourceSchedule};
 use crate::{log_changes, log_checks, log_debug};
 
-use super::calculation::{calculate_critical_path, CriticalPathError};
+use super::calculation::{calculate_critical_path_interned, CriticalPathError, InternedContext};
 use super::rollout::{score_schedule, ResourceReservation};
 use super::scoring::{compute_urgency_with_context, score_task};
 use super::state::CriticalPathSchedulerState;
@@ -286,6 +286,10 @@ impl CriticalPathScheduler {
             0 // Silence logging during simulation
         };
 
+        // Pre-compute interned context once - converts all string operations to fast array indexing
+        let ctx = InternedContext::new(&self.tasks);
+        let completed_vec = ctx.to_bool_vec(&self.completed_task_ids);
+
         for _iteration in 0..max_iterations {
             if state.unscheduled.is_empty() {
                 break;
@@ -305,6 +309,8 @@ impl CriticalPathScheduler {
                 &state.scheduled,
                 &state.unscheduled,
                 state.current_time,
+                &ctx,
+                &completed_vec,
             )?;
 
             // Rank targets by attractiveness
@@ -544,15 +550,11 @@ impl CriticalPathScheduler {
         scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
         unscheduled: &FxHashSet<String>,
         current_time: NaiveDate,
+        ctx: &InternedContext,
+        completed_vec: &[bool],
     ) -> Result<Vec<TargetInfo>, CriticalPathSchedulerError> {
-        // Convert scheduled to days from current_time for critical path calculation
-        let scheduled_days: FxHashMap<String, f64> = scheduled
-            .iter()
-            .map(|(id, (_, end))| {
-                let days = (*end - current_time).num_days() as f64;
-                (id.clone(), days.max(0.0))
-            })
-            .collect();
+        // Convert scheduled to array-based lookup (f64::MAX = not scheduled)
+        let scheduled_vec = ctx.to_scheduled_vec(scheduled, current_time);
 
         let mut target_infos = Vec::with_capacity(unscheduled.len());
 
@@ -565,12 +567,8 @@ impl CriticalPathScheduler {
             let priority = task.priority.unwrap_or(self.default_priority);
             let deadline = task.end_before;
 
-            let cp_result = calculate_critical_path(
-                task_id,
-                &self.tasks,
-                &scheduled_days,
-                &self.completed_task_ids,
-            )?;
+            let cp_result =
+                calculate_critical_path_interned(task_id, ctx, &scheduled_vec, completed_vec)?;
 
             let mut info = TargetInfo::new(task_id.clone(), priority, deadline);
             info.critical_path_tasks = cp_result.critical_path_tasks;

@@ -12,7 +12,10 @@ mod scoring;
 mod state;
 mod types;
 
-pub use calculation::{calculate_critical_path, CriticalPathResult};
+pub use calculation::{
+    build_dependents_map, calculate_critical_path, calculate_critical_path_interned,
+    calculate_critical_path_with_dependents, CriticalPathResult, DependentsMap, InternedContext,
+};
 pub use rollout::{ResourceReservation, RolloutConfig};
 pub use scheduler::{CriticalPathScheduler, CriticalPathSchedulerError};
 pub use scoring::{score_target, score_task};

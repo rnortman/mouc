@@ -3,9 +3,129 @@
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
+use crate::interner::{TaskIdInt, TaskIdInterner};
 use crate::models::Task;
 
 use super::types::TaskTiming;
+
+/// Pre-computed reverse dependency map: task_id -> Vec<(dependent_id, lag)>
+/// This allows O(1) lookup of all tasks that depend on a given task.
+pub type DependentsMap<'a> = FxHashMap<&'a str, Vec<(&'a str, f64)>>;
+
+/// Build a global dependents map from all tasks.
+/// This should be computed once and reused across multiple critical path calculations.
+pub fn build_dependents_map(tasks: &FxHashMap<String, Task>) -> DependentsMap<'_> {
+    // Pre-size: most tasks have at least one dependency
+    let mut dependents: DependentsMap =
+        FxHashMap::with_capacity_and_hasher(tasks.len(), Default::default());
+    for (task_id, task) in tasks {
+        for dep in &task.dependencies {
+            dependents
+                .entry(&dep.entity_id)
+                .or_default()
+                .push((task_id.as_str(), dep.lag_days));
+        }
+    }
+    dependents
+}
+
+/// Pre-computed interned context for fast critical path calculations.
+/// Build this once and reuse for multiple target calculations.
+/// All lookups use direct array indexing for O(1) access.
+pub struct InternedContext {
+    pub interner: TaskIdInterner,
+    /// Task durations indexed by interned ID
+    pub durations: Vec<f64>,
+    /// Task dependencies as (dep_id, lag) pairs, indexed by interned ID
+    pub deps: Vec<Vec<(TaskIdInt, f64)>>,
+    /// Reverse dependencies (dependents) as (dependent_id, lag) pairs, indexed by interned ID
+    pub dependents_vec: Vec<Vec<(TaskIdInt, f64)>>,
+}
+
+impl InternedContext {
+    /// Build interned context from tasks.
+    pub fn new(tasks: &FxHashMap<String, Task>) -> Self {
+        let mut interner = TaskIdInterner::with_capacity(tasks.len());
+
+        // First pass: intern all task IDs
+        for task_id in tasks.keys() {
+            interner.intern(task_id);
+        }
+        // Also intern dependency targets
+        for task in tasks.values() {
+            for dep in &task.dependencies {
+                interner.intern(&dep.entity_id);
+            }
+        }
+
+        let n = interner.len();
+
+        // Build durations vector (indexed by interned ID)
+        let mut durations = vec![0.0; n];
+        for (task_id, task) in tasks {
+            if let Some(id) = interner.get(task_id) {
+                durations[id as usize] = task.duration_days;
+            }
+        }
+
+        // Build dependencies vector (indexed by interned ID)
+        let mut deps: Vec<Vec<(TaskIdInt, f64)>> = vec![Vec::new(); n];
+        for (task_id, task) in tasks {
+            if let Some(task_int) = interner.get(task_id) {
+                for dep in &task.dependencies {
+                    if let Some(dep_int) = interner.get(&dep.entity_id) {
+                        deps[task_int as usize].push((dep_int, dep.lag_days));
+                    }
+                }
+            }
+        }
+
+        // Build dependents vector (reverse of deps)
+        let mut dependents_vec: Vec<Vec<(TaskIdInt, f64)>> = vec![Vec::new(); n];
+        for (task_id, task) in tasks {
+            let task_int = interner.get(task_id).unwrap();
+            for dep in &task.dependencies {
+                if let Some(dep_int) = interner.get(&dep.entity_id) {
+                    dependents_vec[dep_int as usize].push((task_int, dep.lag_days));
+                }
+            }
+        }
+
+        Self {
+            interner,
+            durations,
+            deps,
+            dependents_vec,
+        }
+    }
+
+    /// Create a boolean vector for a set of string IDs.
+    pub fn to_bool_vec(&self, strings: &FxHashSet<String>) -> Vec<bool> {
+        let mut result = vec![false; self.interner.len()];
+        for s in strings {
+            if let Some(id) = self.interner.get(s) {
+                result[id as usize] = true;
+            }
+        }
+        result
+    }
+
+    /// Create a scheduled times vector (f64::MAX for unscheduled).
+    pub fn to_scheduled_vec(
+        &self,
+        scheduled: &FxHashMap<String, (chrono::NaiveDate, chrono::NaiveDate)>,
+        current_time: chrono::NaiveDate,
+    ) -> Vec<f64> {
+        let mut result = vec![f64::MAX; self.interner.len()];
+        for (id, (_, end)) in scheduled {
+            if let Some(int_id) = self.interner.get(id) {
+                let days = (*end - current_time).num_days() as f64;
+                result[int_id as usize] = days.max(0.0);
+            }
+        }
+        result
+    }
+}
 
 /// Error types for critical path calculation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,8 +174,29 @@ pub fn calculate_critical_path(
     scheduled: &FxHashMap<String, f64>, // task_id -> scheduled end time (days from start)
     completed_task_ids: &FxHashSet<String>,
 ) -> Result<CriticalPathResult, CriticalPathError> {
+    let dependents = build_dependents_map(tasks);
+    calculate_critical_path_with_dependents(
+        target_id,
+        tasks,
+        scheduled,
+        completed_task_ids,
+        &dependents,
+    )
+}
+
+/// Calculate the critical path for a target task, using a pre-computed dependents map.
+///
+/// This is more efficient when calculating critical paths for multiple targets,
+/// as the dependents map only needs to be built once.
+pub fn calculate_critical_path_with_dependents<'a>(
+    target_id: &'a str,
+    tasks: &'a FxHashMap<String, Task>,
+    scheduled: &FxHashMap<String, f64>,
+    completed_task_ids: &FxHashSet<String>,
+    global_dependents: &DependentsMap<'a>,
+) -> Result<CriticalPathResult, CriticalPathError> {
     // Scheduled task IDs - treat as complete for subgraph traversal
-    let scheduled_ids: FxHashSet<String> = scheduled.keys().cloned().collect();
+    let scheduled_ids: FxHashSet<&str> = scheduled.keys().map(|s| s.as_str()).collect();
 
     // Find all tasks in the subgraph leading to this target
     let subgraph = find_dependency_subgraph(target_id, tasks, completed_task_ids, &scheduled_ids);
@@ -89,14 +230,17 @@ pub fn calculate_critical_path(
     }
 
     // Topological sort of subgraph (dependencies before dependents)
-    let topo_order = topological_sort_subgraph(&subgraph, target_id, tasks)?;
+    // We pass the global dependents map and filter inside
+    let topo_order = topological_sort_subgraph(&subgraph, target_id, tasks, global_dependents)?;
 
     // Forward pass: compute earliest start/finish times
-    let mut task_timings: FxHashMap<String, TaskTiming> = FxHashMap::default();
+    // Pre-size to avoid rehashing
+    let mut task_timings: FxHashMap<&str, TaskTiming> =
+        FxHashMap::with_capacity_and_hasher(subgraph.len() + 1, Default::default());
     let mut total_work = 0.0;
 
     for task_id in &topo_order {
-        let task = match tasks.get(task_id) {
+        let task = match tasks.get(*task_id) {
             Some(t) => t,
             None => continue,
         };
@@ -117,7 +261,7 @@ pub fn calculate_critical_path(
                 if dep_finish > earliest_start {
                     earliest_start = dep_finish;
                 }
-            } else if let Some(dep_timing) = task_timings.get(&dep.entity_id) {
+            } else if let Some(dep_timing) = task_timings.get(dep.entity_id.as_str()) {
                 let dep_finish = dep_timing.earliest_finish + dep.lag_days;
                 if dep_finish > earliest_start {
                     earliest_start = dep_finish;
@@ -128,7 +272,7 @@ pub fn calculate_critical_path(
         let earliest_finish = earliest_start + duration;
 
         task_timings.insert(
-            task_id.clone(),
+            task_id,
             TaskTiming {
                 earliest_start,
                 earliest_finish,
@@ -155,7 +299,7 @@ pub fn calculate_critical_path(
 
     // Process in reverse topological order (skip target, already done)
     for task_id in topo_order.iter().rev().skip(1) {
-        let task = match tasks.get(task_id) {
+        let task = match tasks.get(*task_id) {
             Some(t) => t,
             None => continue,
         };
@@ -163,18 +307,17 @@ pub fn calculate_critical_path(
         // Find minimum latest_start of all tasks that depend on this one
         let mut latest_finish = f64::MAX;
 
-        for (other_id, other_task) in tasks.iter() {
-            if !subgraph.contains(other_id) && other_id != target_id {
-                continue;
-            }
-
-            for dep in &other_task.dependencies {
-                if dep.entity_id == *task_id {
-                    if let Some(other_timing) = task_timings.get(other_id) {
-                        let required_finish = other_timing.latest_start - dep.lag_days;
-                        if required_finish < latest_finish {
-                            latest_finish = required_finish;
-                        }
+        // Use pre-computed global dependents map, filtering to subgraph + target
+        if let Some(deps) = global_dependents.get(task_id) {
+            for (dependent_id, lag) in deps {
+                // Only consider dependents in our subgraph or the target
+                if !subgraph.contains(dependent_id) && *dependent_id != target_id {
+                    continue;
+                }
+                if let Some(dep_timing) = task_timings.get(dependent_id) {
+                    let required_finish = dep_timing.latest_start - lag;
+                    if required_finish < latest_finish {
+                        latest_finish = required_finish;
                     }
                 }
             }
@@ -204,7 +347,13 @@ pub fn calculate_critical_path(
     let critical_path_tasks: FxHashSet<String> = task_timings
         .iter()
         .filter(|(_, timing)| timing.is_critical())
-        .map(|(id, _)| id.clone())
+        .map(|(id, _)| (*id).to_string())
+        .collect();
+
+    // Convert task_timings to owned strings for return
+    let task_timings: FxHashMap<String, TaskTiming> = task_timings
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v))
         .collect();
 
     Ok(CriticalPathResult {
@@ -215,45 +364,317 @@ pub fn calculate_critical_path(
     })
 }
 
+/// Calculate critical path using interned integer IDs and array indexing for maximum performance.
+/// All internal operations use integer IDs with direct array access; strings are only used at boundaries.
+pub fn calculate_critical_path_interned(
+    target_id: &str,
+    ctx: &InternedContext,
+    scheduled_vec: &[f64], // indexed by TaskIdInt, f64::MAX means not scheduled
+    completed_vec: &[bool], // indexed by TaskIdInt
+) -> Result<CriticalPathResult, CriticalPathError> {
+    let target_int = match ctx.interner.get(target_id) {
+        Some(id) => id,
+        None => {
+            return Ok(CriticalPathResult {
+                task_timings: FxHashMap::default(),
+                critical_path_tasks: FxHashSet::default(),
+                critical_path_length: 0.0,
+                total_work: 0.0,
+            });
+        }
+    };
+
+    let n = ctx.interner.len();
+
+    // Find subgraph using array-based lookup
+    let (subgraph_vec, subgraph_ids) =
+        find_dependency_subgraph_vec(target_int, ctx, completed_vec, scheduled_vec);
+
+    if subgraph_ids.is_empty() {
+        let duration = ctx.durations[target_int as usize];
+        let mut task_timings = FxHashMap::default();
+        task_timings.insert(
+            target_id.to_string(),
+            TaskTiming {
+                earliest_start: 0.0,
+                earliest_finish: duration,
+                latest_start: 0.0,
+                latest_finish: duration,
+                slack: 0.0,
+            },
+        );
+        let mut critical_path_tasks = FxHashSet::default();
+        critical_path_tasks.insert(target_id.to_string());
+        return Ok(CriticalPathResult {
+            task_timings,
+            critical_path_tasks,
+            critical_path_length: duration,
+            total_work: duration,
+        });
+    }
+
+    // Topological sort with array-based structures
+    let topo_order = topological_sort_vec(&subgraph_vec, &subgraph_ids, target_int, ctx)?;
+
+    // Forward pass with array indexing
+    // Use Vec<Option<TaskTiming>> for O(1) access
+    let mut timings: Vec<Option<TaskTiming>> = vec![None; n];
+    let mut total_work = 0.0;
+
+    for &task_int in &topo_order {
+        let idx = task_int as usize;
+        let duration = ctx.durations[idx];
+        total_work += duration;
+
+        let mut earliest_start = 0.0;
+        for &(dep_int, lag) in &ctx.deps[idx] {
+            let dep_idx = dep_int as usize;
+            if completed_vec[dep_idx] {
+                continue;
+            }
+            let sched_time = scheduled_vec[dep_idx];
+            if sched_time < f64::MAX {
+                let dep_finish = sched_time + lag;
+                if dep_finish > earliest_start {
+                    earliest_start = dep_finish;
+                }
+            } else if let Some(ref dep_timing) = timings[dep_idx] {
+                let dep_finish = dep_timing.earliest_finish + lag;
+                if dep_finish > earliest_start {
+                    earliest_start = dep_finish;
+                }
+            }
+        }
+
+        timings[idx] = Some(TaskTiming {
+            earliest_start,
+            earliest_finish: earliest_start + duration,
+            latest_start: 0.0,
+            latest_finish: 0.0,
+            slack: 0.0,
+        });
+    }
+
+    let target_idx = target_int as usize;
+    let critical_path_length = timings[target_idx]
+        .as_ref()
+        .map(|t| t.earliest_finish)
+        .unwrap_or(0.0);
+
+    // Backward pass
+    if let Some(ref mut timing) = timings[target_idx] {
+        timing.latest_finish = critical_path_length;
+        timing.latest_start = timing.latest_finish - ctx.durations[target_idx];
+    }
+
+    for &task_int in topo_order.iter().rev().skip(1) {
+        let idx = task_int as usize;
+        let mut latest_finish = f64::MAX;
+
+        // Use dependents_vec for O(1) lookup
+        for &(dependent_int, lag) in &ctx.dependents_vec[idx] {
+            let dep_idx = dependent_int as usize;
+            if !subgraph_vec[dep_idx] && dependent_int != target_int {
+                continue;
+            }
+            if let Some(ref dep_timing) = timings[dep_idx] {
+                let required_finish = dep_timing.latest_start - lag;
+                if required_finish < latest_finish {
+                    latest_finish = required_finish;
+                }
+            }
+        }
+
+        if latest_finish == f64::MAX {
+            latest_finish = critical_path_length;
+        }
+
+        let duration = ctx.durations[idx];
+        if let Some(ref mut timing) = timings[idx] {
+            timing.latest_finish = latest_finish;
+            timing.latest_start = latest_finish - duration;
+            timing.slack = timing.latest_start - timing.earliest_start;
+        }
+    }
+
+    if let Some(ref mut timing) = timings[target_idx] {
+        timing.slack = timing.latest_start - timing.earliest_start;
+    }
+
+    // Convert back to strings for return - only for tasks in topo_order
+    let mut critical_path_tasks: FxHashSet<String> = FxHashSet::default();
+    let mut task_timings: FxHashMap<String, TaskTiming> = FxHashMap::default();
+
+    for &task_int in &topo_order {
+        let idx = task_int as usize;
+        if let Some(timing) = timings[idx].take() {
+            if let Some(name) = ctx.interner.resolve(task_int) {
+                if timing.is_critical() {
+                    critical_path_tasks.insert(name.to_string());
+                }
+                task_timings.insert(name.to_string(), timing);
+            }
+        }
+    }
+
+    Ok(CriticalPathResult {
+        task_timings,
+        critical_path_tasks,
+        critical_path_length,
+        total_work,
+    })
+}
+
+/// Find dependency subgraph using array-based lookups.
+/// Returns (subgraph_vec, subgraph_ids) where subgraph_vec[i] is true if task i is in subgraph.
+fn find_dependency_subgraph_vec(
+    target_int: TaskIdInt,
+    ctx: &InternedContext,
+    completed_vec: &[bool],
+    scheduled_vec: &[f64],
+) -> (Vec<bool>, Vec<TaskIdInt>) {
+    let n = ctx.interner.len();
+    let mut subgraph_vec = vec![false; n];
+    let mut subgraph_ids = Vec::new();
+    let mut queue: VecDeque<TaskIdInt> = VecDeque::new();
+
+    // Start from target's dependencies
+    for &(dep_int, _) in &ctx.deps[target_int as usize] {
+        let dep_idx = dep_int as usize;
+        if dep_idx < n && !completed_vec[dep_idx] && scheduled_vec[dep_idx] == f64::MAX {
+            queue.push_back(dep_int);
+        }
+    }
+
+    while let Some(task_int) = queue.pop_front() {
+        let idx = task_int as usize;
+        if subgraph_vec[idx] {
+            continue;
+        }
+        subgraph_vec[idx] = true;
+        subgraph_ids.push(task_int);
+
+        for &(dep_int, _) in &ctx.deps[idx] {
+            let dep_idx = dep_int as usize;
+            if dep_idx < n
+                && !completed_vec[dep_idx]
+                && scheduled_vec[dep_idx] == f64::MAX
+                && !subgraph_vec[dep_idx]
+            {
+                queue.push_back(dep_int);
+            }
+        }
+    }
+
+    (subgraph_vec, subgraph_ids)
+}
+
+/// Topological sort using array-based lookups.
+fn topological_sort_vec(
+    subgraph_vec: &[bool],
+    subgraph_ids: &[TaskIdInt],
+    target_int: TaskIdInt,
+    ctx: &InternedContext,
+) -> Result<Vec<TaskIdInt>, CriticalPathError> {
+    let n = ctx.interner.len();
+    let node_count = subgraph_ids.len() + 1;
+
+    // Build node set including target
+    let mut node_vec = subgraph_vec.to_vec();
+    node_vec[target_int as usize] = true;
+
+    // Calculate in-degrees using array
+    let mut in_degree = vec![0usize; n];
+    for &task_int in subgraph_ids {
+        let idx = task_int as usize;
+        for &(dep_int, _) in &ctx.deps[idx] {
+            if node_vec[dep_int as usize] {
+                in_degree[idx] += 1;
+            }
+        }
+    }
+    // Also for target
+    let target_idx = target_int as usize;
+    for &(dep_int, _) in &ctx.deps[target_idx] {
+        if node_vec[dep_int as usize] {
+            in_degree[target_idx] += 1;
+        }
+    }
+
+    // Initialize queue with zero in-degree nodes
+    let mut queue: VecDeque<TaskIdInt> = VecDeque::new();
+    for &task_int in subgraph_ids {
+        if in_degree[task_int as usize] == 0 {
+            queue.push_back(task_int);
+        }
+    }
+    if in_degree[target_idx] == 0 {
+        queue.push_back(target_int);
+    }
+
+    let mut result: Vec<TaskIdInt> = Vec::with_capacity(node_count);
+
+    while let Some(task_int) = queue.pop_front() {
+        result.push(task_int);
+
+        // Update dependents
+        for &(dependent_int, _) in &ctx.dependents_vec[task_int as usize] {
+            let dep_idx = dependent_int as usize;
+            if node_vec[dep_idx] {
+                in_degree[dep_idx] -= 1;
+                if in_degree[dep_idx] == 0 {
+                    queue.push_back(dependent_int);
+                }
+            }
+        }
+    }
+
+    if result.len() != node_count {
+        return Err(CriticalPathError::CircularDependency);
+    }
+
+    Ok(result)
+}
+
 /// Find all tasks in the dependency subgraph leading to a target.
 ///
 /// Excludes completed and scheduled tasks - scheduled tasks are treated as
 /// effectively complete for the purpose of determining what work remains.
-fn find_dependency_subgraph(
+fn find_dependency_subgraph<'a>(
     target_id: &str,
-    tasks: &FxHashMap<String, Task>,
+    tasks: &'a FxHashMap<String, Task>,
     completed_task_ids: &FxHashSet<String>,
-    scheduled_task_ids: &FxHashSet<String>,
-) -> FxHashSet<String> {
-    let mut subgraph = FxHashSet::default();
-    let mut queue = VecDeque::new();
+    scheduled_task_ids: &FxHashSet<&str>,
+) -> FxHashSet<&'a str> {
+    let mut subgraph: FxHashSet<&str> = FxHashSet::default();
+    let mut queue: VecDeque<&str> = VecDeque::new();
 
     // Start from target, traverse dependencies backward
     if let Some(target) = tasks.get(target_id) {
         for dep in &target.dependencies {
             if !completed_task_ids.contains(&dep.entity_id)
-                && !scheduled_task_ids.contains(&dep.entity_id)
+                && !scheduled_task_ids.contains(dep.entity_id.as_str())
                 && tasks.contains_key(&dep.entity_id)
             {
-                queue.push_back(dep.entity_id.clone());
+                queue.push_back(&dep.entity_id);
             }
         }
     }
 
     while let Some(task_id) = queue.pop_front() {
-        if subgraph.contains(&task_id) {
+        if subgraph.contains(task_id) {
             continue;
         }
-        subgraph.insert(task_id.clone());
+        subgraph.insert(task_id);
 
-        if let Some(task) = tasks.get(&task_id) {
+        if let Some(task) = tasks.get(task_id) {
             for dep in &task.dependencies {
                 if !completed_task_ids.contains(&dep.entity_id)
-                    && !scheduled_task_ids.contains(&dep.entity_id)
+                    && !scheduled_task_ids.contains(dep.entity_id.as_str())
                     && tasks.contains_key(&dep.entity_id)
-                    && !subgraph.contains(&dep.entity_id)
+                    && !subgraph.contains(dep.entity_id.as_str())
                 {
-                    queue.push_back(dep.entity_id.clone());
+                    queue.push_back(&dep.entity_id);
                 }
             }
         }
@@ -263,17 +684,26 @@ fn find_dependency_subgraph(
 }
 
 /// Topological sort of subgraph (dependencies before dependents).
-fn topological_sort_subgraph(
-    subgraph: &FxHashSet<String>,
-    target_id: &str,
+fn topological_sort_subgraph<'a>(
+    subgraph: &FxHashSet<&'a str>,
+    target_id: &'a str,
     tasks: &FxHashMap<String, Task>,
-) -> Result<Vec<String>, CriticalPathError> {
+    global_dependents: &DependentsMap<'a>,
+) -> Result<Vec<&'a str>, CriticalPathError> {
+    let node_count = subgraph.len() + 1;
+
     // Include target in the set to sort
-    let mut nodes: FxHashSet<&str> = subgraph.iter().map(|s| s.as_str()).collect();
+    let mut nodes: FxHashSet<&'a str> =
+        FxHashSet::with_capacity_and_hasher(node_count, Default::default());
+    nodes.extend(subgraph.iter().copied());
     nodes.insert(target_id);
 
-    // Calculate in-degrees (within subgraph)
-    let mut in_degree: FxHashMap<&str, usize> = nodes.iter().map(|&id| (id, 0)).collect();
+    // Calculate in-degrees (within subgraph) - pre-sized to avoid rehashing
+    let mut in_degree: FxHashMap<&'a str, usize> =
+        FxHashMap::with_capacity_and_hasher(node_count, Default::default());
+    for &id in &nodes {
+        in_degree.insert(id, 0);
+    }
 
     for &task_id in &nodes {
         if let Some(task) = tasks.get(task_id) {
@@ -288,28 +718,28 @@ fn topological_sort_subgraph(
     }
 
     // Initialize queue with tasks that have no dependencies in subgraph
-    let mut queue: VecDeque<&str> = in_degree
+    let mut queue: VecDeque<&'a str> = in_degree
         .iter()
         .filter(|(_, &degree)| degree == 0)
         .map(|(&id, _)| id)
         .collect();
 
-    let mut result: Vec<String> = Vec::with_capacity(nodes.len());
+    let mut result: Vec<&'a str> = Vec::with_capacity(nodes.len());
 
     while let Some(task_id) = queue.pop_front() {
-        result.push(task_id.to_string());
+        result.push(task_id);
 
-        // Find tasks that depend on this one
-        for &other_id in &nodes {
-            if let Some(task) = tasks.get(other_id) {
-                for dep in &task.dependencies {
-                    if dep.entity_id == task_id {
-                        if let Some(degree) = in_degree.get_mut(other_id) {
-                            *degree -= 1;
-                            if *degree == 0 {
-                                queue.push_back(other_id);
-                            }
-                        }
+        // Use global dependents map, filtering to nodes in our subgraph
+        if let Some(deps) = global_dependents.get(task_id) {
+            for &(dependent_id, _) in deps {
+                // Only consider dependents that are in our node set
+                if !nodes.contains(dependent_id) {
+                    continue;
+                }
+                if let Some(degree) = in_degree.get_mut(dependent_id) {
+                    *degree -= 1;
+                    if *degree == 0 {
+                        queue.push_back(dependent_id);
                     }
                 }
             }
