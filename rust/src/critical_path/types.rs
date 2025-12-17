@@ -268,6 +268,12 @@ pub struct CriticalPathConfig {
     /// Exponent for power transform (only used when work_transform=Power).
     #[pyo3(get, set)]
     pub work_exponent: f64,
+
+    /// Whether to prefer "fungible" resources (those not exclusively required by other tasks)
+    /// when auto-assigning. When true, the scheduler avoids assigning a resource to a generic
+    /// task if that resource is specifically needed by another pending task.
+    #[pyo3(get, set)]
+    pub prefer_fungible_resources: bool,
 }
 
 #[pymethods]
@@ -282,7 +288,8 @@ impl CriticalPathConfig {
         rollout_score_ratio_threshold=1.0,
         rollout_max_horizon_days=30,
         work_transform="power",
-        work_exponent=1.0
+        work_exponent=1.0,
+        prefer_fungible_resources=true
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -295,6 +302,7 @@ impl CriticalPathConfig {
         rollout_max_horizon_days: Option<i32>,
         work_transform: &str,
         work_exponent: f64,
+        prefer_fungible_resources: bool,
     ) -> PyResult<Self> {
         let work_transform = WorkTransform::from_str(work_transform)
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
@@ -308,6 +316,7 @@ impl CriticalPathConfig {
             rollout_max_horizon_days,
             work_transform,
             work_exponent,
+            prefer_fungible_resources,
         })
     }
 
@@ -348,6 +357,7 @@ impl Default for CriticalPathConfig {
             rollout_max_horizon_days: Some(30),
             work_transform: WorkTransform::Power,
             work_exponent: 1.0,
+            prefer_fungible_resources: true,
         }
     }
 }

@@ -49,6 +49,9 @@ pub struct CriticalPathScheduler {
     resource_index: super::types::ResourceIndex,
     /// Precomputed resource requirements for each task.
     task_resource_reqs: FxHashMap<String, super::types::TaskResourceReq>,
+    /// For each resource ID, tasks that explicitly require it (requires_all=true).
+    /// Used for prefer_fungible_resources optimization.
+    resource_exclusive_tasks: Vec<Vec<TaskId>>,
 }
 
 impl CriticalPathScheduler {
@@ -77,6 +80,7 @@ impl CriticalPathScheduler {
             // These are properly initialized in schedule_critical_path
             resource_index: ResourceIndex::new(std::iter::empty()),
             task_resource_reqs: FxHashMap::default(),
+            resource_exclusive_tasks: Vec::new(),
         }
     }
 
@@ -268,6 +272,9 @@ impl CriticalPathScheduler {
         }
         ctx.set_resource_reqs(resource_reqs);
 
+        // Build resource_exclusive_tasks map (for prefer_fungible_resources optimization)
+        self.resource_exclusive_tasks = self.build_resource_exclusive_tasks(&ctx);
+
         // Create Vec-based state
         let initial_time = self.current_date;
         let scheduled_vec = ctx.to_scheduled_times_vec(&scheduled, initial_time);
@@ -329,6 +336,42 @@ impl CriticalPathScheduler {
         }
 
         reqs
+    }
+
+    /// Build map of resource_id -> tasks that explicitly require it.
+    ///
+    /// This is used by the prefer_fungible_resources optimization to avoid
+    /// assigning "scarce" resources to generic tasks when other resources are available.
+    fn build_resource_exclusive_tasks(&self, ctx: &TaskData) -> Vec<Vec<TaskId>> {
+        let num_resources = self.resource_index.len();
+        let mut result: Vec<Vec<TaskId>> = vec![Vec::new(); num_resources];
+
+        for (task_id, task) in &self.tasks {
+            // Skip milestones - they don't use resources
+            if task.duration_days == 0.0 {
+                continue;
+            }
+
+            // Only care about tasks with explicit resources (not auto-assignment)
+            if task.resources.is_empty() {
+                continue;
+            }
+
+            // Get the task's integer ID
+            let task_int = match ctx.index.get_id(task_id) {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Add this task to each resource it explicitly requires
+            for (resource_name, _) in &task.resources {
+                if let Some(res_id) = self.resource_index.get_id(resource_name) {
+                    result[res_id as usize].push(task_int);
+                }
+            }
+        }
+
+        result
     }
 
     /// Run scheduling from a given state with pre-computed task data.
@@ -515,12 +558,17 @@ impl CriticalPathScheduler {
                     }
 
                     // Try to schedule it (passing reservations for resource checking)
+                    // Note: We pass unscheduled_vec separately to avoid borrow conflicts
                     if let Some(scheduled_task) = self.try_schedule_task(
                         &best_task_id,
                         state.current_time,
                         &mut state.resource_schedules,
                         &state.reservations,
                         available_mask,
+                        ctx,
+                        &state.scheduled_vec,
+                        &state.unscheduled_vec,
+                        state.initial_time,
                     ) {
                         // Update Vec-based state
                         let task_idx = best_task_int as usize;
@@ -885,6 +933,7 @@ impl CriticalPathScheduler {
     ///
     /// Reservations protect resources for higher-priority tasks. A task can only
     /// use a reserved resource if it's the task the reservation was made for.
+    #[allow(clippy::too_many_arguments)]
     fn try_schedule_task(
         &self,
         task_id: &str,
@@ -892,6 +941,10 @@ impl CriticalPathScheduler {
         resource_schedules: &mut [ResourceSchedule],
         reservations: &FxHashMap<u32, ResourceReservation>,
         available_mask: ResourceMask,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        initial_time: NaiveDate,
     ) -> Option<ScheduledTask> {
         let task = self.tasks.get(task_id)?;
 
@@ -915,6 +968,10 @@ impl CriticalPathScheduler {
                 resource_schedules,
                 reservations,
                 available_mask,
+                ctx,
+                scheduled_vec,
+                unscheduled_vec,
+                initial_time,
             );
         }
 
@@ -930,6 +987,11 @@ impl CriticalPathScheduler {
     }
 
     /// Try to schedule with auto-assignment, optionally respecting reservations.
+    ///
+    /// When `prefer_fungible_resources` is enabled, among equally-good candidates
+    /// (same completion time), prefer resources that aren't exclusively required
+    /// by other pending tasks.
+    #[allow(clippy::too_many_arguments)]
     fn try_schedule_auto_assignment(
         &self,
         task_id: &str,
@@ -938,14 +1000,27 @@ impl CriticalPathScheduler {
         resource_schedules: &mut [ResourceSchedule],
         reservations: &FxHashMap<u32, ResourceReservation>,
         available_mask: ResourceMask,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        initial_time: NaiveDate,
     ) -> Option<ScheduledTask> {
         let resource_config = self.resource_config.as_ref()?;
         let spec = task.resource_spec.as_ref()?;
 
         let candidates = resource_config.expand_resource_spec(spec);
-        let mut best_resource_id: Option<u32> = None;
-        let mut best_resource_name: Option<String> = None;
-        let mut best_completion: Option<NaiveDate> = None;
+        let verbosity = self.config.verbosity;
+
+        log_debug!(
+            verbosity,
+            "    Auto-assignment for {}: spec='{}', prefer_fungible={}",
+            task_id,
+            spec,
+            self.config.prefer_fungible_resources
+        );
+
+        // Collect all valid candidates with their completion times
+        let mut valid_candidates: Vec<(u32, String, NaiveDate)> = Vec::new();
 
         for resource_name in candidates {
             let resource_id = match self.resource_index.get_id(&resource_name) {
@@ -967,16 +1042,91 @@ impl CriticalPathScheduler {
 
             let schedule = &mut resource_schedules[resource_id as usize];
             let completion = schedule.calculate_completion_time(current_time, task.duration_days);
-            if best_completion.is_none() || completion < best_completion.unwrap() {
-                best_resource_id = Some(resource_id);
-                best_resource_name = Some(resource_name);
-                best_completion = Some(completion);
-            }
+            valid_candidates.push((resource_id, resource_name, completion));
         }
 
-        let best_resource_id = best_resource_id?;
-        let best_resource_name = best_resource_name?;
-        let best_completion = best_completion?;
+        if valid_candidates.is_empty() {
+            return None;
+        }
+
+        // Find the best completion time
+        let best_completion = valid_candidates.iter().map(|(_, _, c)| *c).min().unwrap();
+
+        // Filter to candidates with the best completion time (ties)
+        let tied_candidates: Vec<_> = valid_candidates
+            .into_iter()
+            .filter(|(_, _, c)| *c == best_completion)
+            .collect();
+
+        let num_tied = tied_candidates.len();
+        log_debug!(
+            verbosity,
+            "    {} tied candidates for completion {}",
+            num_tied,
+            best_completion
+        );
+
+        // Select the best resource
+        let (best_resource_id, best_resource_name) =
+            if num_tied == 1 || !self.config.prefer_fungible_resources {
+                // Only one option, or fungibility optimization disabled - take first
+                let (id, name, _) = tied_candidates.into_iter().next().unwrap();
+                log_debug!(
+                    verbosity,
+                    "    Single candidate or fungibility disabled, picking {}",
+                    name
+                );
+                (id, name)
+            } else {
+                // Multiple tied candidates - prefer the most fungible one
+                // (fewest exclusive tasks that would be blocked)
+                log_debug!(
+                    verbosity,
+                    "    Checking fungibility for {} candidates:",
+                    num_tied
+                );
+                for (res_id, res_name, _) in &tied_candidates {
+                    let (blocking, blocking_details) = self.get_exclusive_blocking_details(
+                        *res_id,
+                        best_completion,
+                        ctx,
+                        scheduled_vec,
+                        unscheduled_vec,
+                        initial_time,
+                        current_time,
+                    );
+                    let exclusive_count = self.resource_exclusive_tasks[*res_id as usize].len();
+                    log_debug!(
+                        verbosity,
+                        "      {}: {} exclusive tasks total, {} blocking before {}",
+                        res_name,
+                        exclusive_count,
+                        blocking,
+                        best_completion
+                    );
+                    for detail in blocking_details {
+                        log_debug!(verbosity, "        - {}", detail);
+                    }
+                }
+                self.select_most_fungible_resource(
+                    tied_candidates,
+                    best_completion,
+                    ctx,
+                    scheduled_vec,
+                    unscheduled_vec,
+                    initial_time,
+                    current_time,
+                )
+            };
+
+        // Log at checks level (2) so it shows in normal debug output
+        log_checks!(
+            verbosity,
+            "    Auto-assigned {} -> {} (from {} tied candidates)",
+            task_id,
+            best_resource_name,
+            num_tied
+        );
 
         // Schedule the task
         resource_schedules[best_resource_id as usize]
@@ -989,6 +1139,188 @@ impl CriticalPathScheduler {
             duration_days: task.duration_days,
             resources: vec![best_resource_name],
         })
+    }
+
+    /// Select the most fungible resource from tied candidates.
+    ///
+    /// Prefers resources with fewer exclusive tasks that would become eligible
+    /// before the current task completes.
+    #[allow(clippy::too_many_arguments)]
+    fn select_most_fungible_resource(
+        &self,
+        tied_candidates: Vec<(u32, String, NaiveDate)>,
+        task_completion: NaiveDate,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> (u32, String) {
+        let mut best_resource_id = tied_candidates[0].0;
+        let mut best_resource_name = tied_candidates[0].1.clone();
+        let mut best_blocking_count = usize::MAX;
+
+        for (resource_id, resource_name, _) in tied_candidates {
+            let blocking_count = self.count_exclusive_blocking_tasks(
+                resource_id,
+                task_completion,
+                ctx,
+                scheduled_vec,
+                unscheduled_vec,
+                initial_time,
+                current_time,
+            );
+
+            if blocking_count < best_blocking_count {
+                best_blocking_count = blocking_count;
+                best_resource_id = resource_id;
+                best_resource_name = resource_name;
+            }
+        }
+
+        (best_resource_id, best_resource_name)
+    }
+
+    /// Count exclusive tasks for a resource that would become eligible before task_end.
+    ///
+    /// Returns the number of tasks that:
+    /// 1. Explicitly require this resource (not auto-assignment)
+    /// 2. Are still unscheduled
+    /// 3. Would become eligible before task_end
+    #[allow(clippy::too_many_arguments)]
+    fn count_exclusive_blocking_tasks(
+        &self,
+        resource_id: u32,
+        task_end: NaiveDate,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> usize {
+        let exclusive_tasks = &self.resource_exclusive_tasks[resource_id as usize];
+        let mut count = 0;
+
+        for &task_int in exclusive_tasks {
+            let idx = task_int as usize;
+
+            // Skip if already scheduled
+            if !unscheduled_vec[idx] {
+                continue;
+            }
+
+            // Check if this task would become eligible before task_end
+            if let Some(eligible_date) = self.calculate_eligible_date(
+                task_int,
+                ctx,
+                scheduled_vec,
+                initial_time,
+                current_time,
+            ) {
+                if eligible_date < task_end {
+                    count += 1;
+                }
+            }
+        }
+
+        count
+    }
+
+    /// Get detailed info about exclusive blocking tasks for debugging.
+    ///
+    /// Returns (count, details) where details is a list of strings describing each blocking task.
+    #[allow(clippy::too_many_arguments)]
+    fn get_exclusive_blocking_details(
+        &self,
+        resource_id: u32,
+        task_end: NaiveDate,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> (usize, Vec<String>) {
+        let exclusive_tasks = &self.resource_exclusive_tasks[resource_id as usize];
+        let mut count = 0;
+        let mut details = Vec::new();
+
+        for &task_int in exclusive_tasks {
+            let idx = task_int as usize;
+
+            // Skip if already scheduled
+            if !unscheduled_vec[idx] {
+                continue;
+            }
+
+            // Get task name
+            let task_name = ctx
+                .index
+                .get_name(task_int)
+                .unwrap_or("unknown")
+                .to_string();
+
+            // Check if this task would become eligible before task_end
+            if let Some(eligible_date) = self.calculate_eligible_date(
+                task_int,
+                ctx,
+                scheduled_vec,
+                initial_time,
+                current_time,
+            ) {
+                if eligible_date < task_end {
+                    count += 1;
+                    let priority = ctx.priorities[idx];
+                    details.push(format!(
+                        "{} (pri={}, eligible={})",
+                        task_name, priority, eligible_date
+                    ));
+                }
+            }
+        }
+
+        (count, details)
+    }
+
+    /// Calculate when a task becomes eligible based on dependencies and constraints.
+    fn calculate_eligible_date(
+        &self,
+        task_int: TaskId,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> Option<NaiveDate> {
+        let idx = task_int as usize;
+        let mut eligible = current_time;
+
+        // Check all dependencies
+        for &(dep_int, lag) in &ctx.deps[idx] {
+            let dep_idx = dep_int as usize;
+
+            // Check if dependency is scheduled
+            let (_, dep_end_offset) = scheduled_vec[dep_idx];
+            if dep_end_offset < f64::MAX {
+                // Dependency is scheduled - task eligible after it completes + lag
+                let dep_end = initial_time + chrono::Duration::days(dep_end_offset as i64);
+                let lag_days = lag.ceil() as i64;
+                let dep_eligible = dep_end + chrono::Duration::days(1 + lag_days);
+                if dep_eligible > eligible {
+                    eligible = dep_eligible;
+                }
+            } else {
+                // Dependency not scheduled - can't determine eligibility
+                return None;
+            }
+        }
+
+        // Check start_after constraint
+        if let Some(start_after) = ctx.start_afters[idx] {
+            if start_after > eligible {
+                eligible = start_after;
+            }
+        }
+
+        Some(eligible)
     }
 
     /// Try to schedule with explicit resources, optionally respecting reservations.
@@ -1412,5 +1744,140 @@ mod tests {
         let milestone = &result.scheduled_tasks[0];
         assert_eq!(milestone.start_date, d(2025, 1, 1));
         assert_eq!(milestone.end_date, d(2025, 1, 1));
+    }
+
+    fn make_auto_assign_task(
+        id: &str,
+        duration: f64,
+        deps: Vec<(&str, f64)>,
+        priority: Option<i32>,
+        resource_spec: &str,
+    ) -> Task {
+        Task {
+            id: id.to_string(),
+            duration_days: duration,
+            resources: vec![],
+            dependencies: deps
+                .into_iter()
+                .map(|(dep_id, lag)| Dependency {
+                    entity_id: dep_id.to_string(),
+                    lag_days: lag,
+                })
+                .collect(),
+            start_after: None,
+            end_before: None,
+            start_on: None,
+            end_on: None,
+            resource_spec: Some(resource_spec.to_string()),
+            priority,
+        }
+    }
+
+    #[test]
+    fn test_prefer_fungible_resources_enabled() {
+        // Scenario:
+        // - Two resources: alice (listed first), bob
+        // - Task A: auto-assignment (can use any resource), 5 days
+        // - Task B: explicitly requires alice, 3 days
+        // Both eligible at start. With prefer_fungible_resources=true,
+        // Task A should use bob (leaving alice free for Task B).
+
+        let resource_config = ResourceConfig {
+            resource_order: vec!["alice".to_string(), "bob".to_string()],
+            dns_periods: std::collections::HashMap::new(),
+            spec_expansion: std::collections::HashMap::new(),
+        };
+
+        let tasks = vec![
+            // Task A: auto-assign, can use any resource
+            make_auto_assign_task("task_a", 5.0, vec![], Some(50), "*"),
+            // Task B: explicitly requires alice
+            make_task("task_b", 3.0, vec![], Some(50), vec!["alice"]),
+        ];
+
+        let mut config = CriticalPathConfig::default();
+        config.prefer_fungible_resources = true;
+
+        let mut scheduler = CriticalPathScheduler::new(
+            tasks,
+            d(2025, 1, 1),
+            FxHashSet::default(),
+            50,
+            config,
+            Some(resource_config),
+            vec![],
+        );
+
+        let result = scheduler.schedule().unwrap();
+        assert_eq!(result.scheduled_tasks.len(), 2);
+
+        let task_a = result
+            .scheduled_tasks
+            .iter()
+            .find(|t| t.task_id == "task_a")
+            .unwrap();
+        let task_b = result
+            .scheduled_tasks
+            .iter()
+            .find(|t| t.task_id == "task_b")
+            .unwrap();
+
+        // Task A should be assigned to bob (the fungible resource)
+        assert_eq!(task_a.resources, vec!["bob".to_string()]);
+        // Task B should be assigned to alice (its explicit resource)
+        assert_eq!(task_b.resources, vec!["alice".to_string()]);
+        // Both should start on day 1 (parallel)
+        assert_eq!(task_a.start_date, d(2025, 1, 1));
+        assert_eq!(task_b.start_date, d(2025, 1, 1));
+    }
+
+    #[test]
+    fn test_prefer_fungible_resources_disabled() {
+        // Same scenario but with prefer_fungible_resources=false.
+        // Task A should use alice (first in resource_order),
+        // which will block Task B.
+
+        let resource_config = ResourceConfig {
+            resource_order: vec!["alice".to_string(), "bob".to_string()],
+            dns_periods: std::collections::HashMap::new(),
+            spec_expansion: std::collections::HashMap::new(),
+        };
+
+        let tasks = vec![
+            make_auto_assign_task("task_a", 5.0, vec![], Some(50), "*"),
+            make_task("task_b", 3.0, vec![], Some(50), vec!["alice"]),
+        ];
+
+        let mut config = CriticalPathConfig::default();
+        config.prefer_fungible_resources = false;
+
+        let mut scheduler = CriticalPathScheduler::new(
+            tasks,
+            d(2025, 1, 1),
+            FxHashSet::default(),
+            50,
+            config,
+            Some(resource_config),
+            vec![],
+        );
+
+        let result = scheduler.schedule().unwrap();
+        assert_eq!(result.scheduled_tasks.len(), 2);
+
+        let task_a = result
+            .scheduled_tasks
+            .iter()
+            .find(|t| t.task_id == "task_a")
+            .unwrap();
+        let task_b = result
+            .scheduled_tasks
+            .iter()
+            .find(|t| t.task_id == "task_b")
+            .unwrap();
+
+        // Task A should be assigned to alice (first in order, no fungibility preference)
+        assert_eq!(task_a.resources, vec!["alice".to_string()]);
+        // Task B still needs alice, so it has to wait
+        assert!(task_b.start_date > task_a.start_date);
     }
 }

@@ -289,6 +289,7 @@ mod tests {
             Some(30),
             "power",
             1.0,
+            true, // prefer_fungible_resources
         )
         .unwrap();
 
@@ -310,6 +311,7 @@ mod tests {
             Some(60),
             "power",
             1.0,
+            true, // prefer_fungible_resources
         )
         .unwrap();
 
@@ -334,7 +336,8 @@ mod tests {
     #[test]
     fn test_transform_work_power_sqrt() {
         let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.5).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.5, true)
+                .unwrap();
         // sqrt transform
         assert!((transform_work(4.0, &config) - 2.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 10.0).abs() < 1e-9);
@@ -343,7 +346,8 @@ mod tests {
     #[test]
     fn test_transform_work_power_zero() {
         let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.0).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.0, true)
+                .unwrap();
         // exponent=0 means no work term (returns 1.0)
         assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 1.0).abs() < 1e-9);
@@ -352,7 +356,8 @@ mod tests {
     #[test]
     fn test_transform_work_log() {
         let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0, true)
+                .unwrap();
         // ln(e) = 1, ln(e^2) = 2
         let e = std::f64::consts::E;
         assert!((transform_work(e, &config) - 1.0).abs() < 1e-9);
@@ -362,7 +367,8 @@ mod tests {
     #[test]
     fn test_transform_work_log10() {
         let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0, true)
+                .unwrap();
         // log10(10) = 1, log10(100) = 2
         assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 2.0).abs() < 1e-9);
@@ -371,12 +377,14 @@ mod tests {
     #[test]
     fn test_transform_work_floors_small_values() {
         let config_log =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0, true)
+                .unwrap();
         // Very small work values should be floored to avoid negative/tiny log values
         assert!(transform_work(0.01, &config_log) >= 0.1);
 
         let config_log10 =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0).unwrap();
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0, true)
+                .unwrap();
         assert!(transform_work(0.01, &config_log10) >= 0.1);
     }
 }

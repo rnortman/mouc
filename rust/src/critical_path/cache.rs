@@ -474,6 +474,7 @@ mod tests {
             Some(60),
             "power",
             1.0,
+            true, // prefer_fungible_resources
         )
         .unwrap();
         let current_time = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
