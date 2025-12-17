@@ -193,6 +193,8 @@ class CriticalPathConfig:
     rollout_enabled: bool
     rollout_score_ratio_threshold: float
     rollout_max_horizon_days: int | None
+    work_transform_str: str  # "power", "log", or "log10"
+    work_exponent: float
 
     def __init__(
         self,
@@ -203,6 +205,8 @@ class CriticalPathConfig:
         rollout_enabled: bool = True,
         rollout_score_ratio_threshold: float = 1.0,
         rollout_max_horizon_days: int | None = 30,
+        work_transform: str = "power",
+        work_exponent: float = 1.0,
     ) -> None: ...
     def __repr__(self) -> str: ...
 

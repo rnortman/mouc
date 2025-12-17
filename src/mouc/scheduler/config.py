@@ -96,6 +96,13 @@ class CriticalPathConfig(BaseModel):
     # Minimum urgency floor for all targets
     urgency_floor: float = 0.1
 
+    # Work term transformation in score formula: score = (priority / f(work)) * urgency
+    # Options: "power" (work^exponent), "log" (ln(work)), "log10" (log10(work))
+    work_transform: str = "power"
+    # Exponent for power transform (only used when work_transform="power")
+    # 1.0 = linear (default), 0.5 = sqrt, 0.0 = no work term
+    work_exponent: float = 1.0
+
     # Rollout configuration
     # Whether rollout simulation is enabled
     rollout_enabled: bool = True

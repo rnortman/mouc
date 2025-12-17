@@ -13,7 +13,7 @@ use super::calculation::{CriticalPathError, InternedContext};
 use super::rollout::{score_schedule, ResourceReservation};
 use super::scoring::score_task;
 use super::state::CriticalPathSchedulerState;
-use super::types::{CriticalPathConfig, TargetInfo};
+use super::types::{CriticalPathConfig, ResourceIndex, ResourceMask, TargetInfo, TaskResourceReq};
 
 /// Errors that can occur during critical path scheduling.
 #[derive(Error, Debug)]
@@ -43,6 +43,10 @@ pub struct CriticalPathScheduler {
     config: CriticalPathConfig,
     resource_config: Option<ResourceConfig>,
     global_dns_periods: Vec<(NaiveDate, NaiveDate)>,
+    /// Resource name to integer ID mapping (built during scheduling).
+    resource_index: super::types::ResourceIndex,
+    /// Precomputed resource requirements for each task.
+    task_resource_reqs: FxHashMap<String, super::types::TaskResourceReq>,
 }
 
 impl CriticalPathScheduler {
@@ -68,6 +72,9 @@ impl CriticalPathScheduler {
             config,
             resource_config,
             global_dns_periods,
+            // These are properly initialized in schedule_critical_path
+            resource_index: ResourceIndex::new(std::iter::empty()),
+            task_resource_reqs: FxHashMap::default(),
         }
     }
 
@@ -175,7 +182,7 @@ impl CriticalPathScheduler {
 
     /// Main critical path scheduling loop.
     fn schedule_critical_path(
-        &self,
+        &mut self,
         fixed_tasks: &[ScheduledTask],
     ) -> Result<Vec<ScheduledTask>, CriticalPathSchedulerError> {
         // Initialize state
@@ -195,7 +202,7 @@ impl CriticalPathScheduler {
             );
         }
 
-        // Initialize resource schedules
+        // Collect all resource names
         let mut all_resources: FxHashSet<String> = FxHashSet::default();
         for task in self.tasks.values() {
             for (resource_name, _) in &task.resources {
@@ -213,26 +220,38 @@ impl CriticalPathScheduler {
             }
         }
 
-        let mut resource_schedules: FxHashMap<String, ResourceSchedule> = FxHashMap::default();
-        for resource in &all_resources {
+        // Build ResourceIndex (assigns consecutive integer IDs to resources)
+        let resource_names: Vec<String> = all_resources.into_iter().collect();
+        self.resource_index = ResourceIndex::new(resource_names.iter().cloned());
+
+        // Build resource schedules as Vec indexed by resource ID
+        let mut resource_schedules: Vec<ResourceSchedule> =
+            Vec::with_capacity(self.resource_index.len());
+        for (id, name) in self.resource_index.iter() {
             let unavailable_periods = match &self.resource_config {
-                Some(rc) => rc.get_dns_periods(resource, &self.global_dns_periods),
+                Some(rc) => rc.get_dns_periods(name, &self.global_dns_periods),
                 None => self.global_dns_periods.clone(),
             };
-            resource_schedules.insert(
-                resource.clone(),
-                ResourceSchedule::new(Some(unavailable_periods), resource.clone()),
-            );
+            // Ensure we're adding at the right index
+            debug_assert_eq!(resource_schedules.len(), id as usize);
+            resource_schedules.push(ResourceSchedule::new(
+                Some(unavailable_periods),
+                name.to_string(),
+            ));
         }
 
         // Mark fixed tasks as busy in resource schedules
         for fixed_task in fixed_tasks {
             for resource_name in &fixed_task.resources {
-                if let Some(schedule) = resource_schedules.get_mut(resource_name) {
-                    schedule.add_busy_period(fixed_task.start_date, fixed_task.end_date);
+                if let Some(id) = self.resource_index.get_id(resource_name) {
+                    resource_schedules[id as usize]
+                        .add_busy_period(fixed_task.start_date, fixed_task.end_date);
                 }
             }
         }
+
+        // Build task resource requirements (precompute masks for fast availability checks)
+        self.task_resource_reqs = self.build_task_resource_reqs();
 
         // Create initial state
         let state = CriticalPathSchedulerState::new(
@@ -245,6 +264,51 @@ impl CriticalPathScheduler {
         // Run the main scheduling loop with rollout enabled
         let final_state = self.schedule_from_state(state, None, true)?;
         Ok(final_state.result)
+    }
+
+    /// Build precomputed resource requirements for all tasks.
+    fn build_task_resource_reqs(&self) -> FxHashMap<String, TaskResourceReq> {
+        let mut reqs = FxHashMap::default();
+
+        for (task_id, task) in &self.tasks {
+            // Skip milestones - they don't need resources
+            if task.duration_days == 0.0 {
+                continue;
+            }
+
+            let mut mask = ResourceMask::new();
+            let requires_all;
+
+            if !task.resources.is_empty() {
+                // Explicit resources: ALL must be available
+                requires_all = true;
+                for (resource_name, _) in &task.resources {
+                    if let Some(id) = self.resource_index.get_id(resource_name) {
+                        mask.set(id);
+                    }
+                }
+            } else if let Some(spec) = &task.resource_spec {
+                // Auto-assignment: ANY candidate must be available
+                requires_all = false;
+                if let Some(config) = &self.resource_config {
+                    let candidates = config.expand_resource_spec(spec);
+                    for candidate in candidates {
+                        if let Some(id) = self.resource_index.get_id(&candidate) {
+                            mask.set(id);
+                        }
+                    }
+                }
+            } else {
+                // No resources specified - skip
+                continue;
+            }
+
+            if !mask.is_empty() {
+                reqs.insert(task_id.clone(), TaskResourceReq { mask, requires_all });
+            }
+        }
+
+        reqs
     }
 
     /// Run scheduling from a given state.
@@ -318,159 +382,181 @@ impl CriticalPathScheduler {
 
             log_changes!(verbosity, "Time: {}", state.current_time);
 
-            // Get ranked targets from cache (already scored)
-            let ranked_targets = cache.get_ranked_targets(&self.config, state.current_time);
+            // Compute available resources mask ONCE per iteration
+            let available_mask = state.available_mask();
 
-            log_debug!(
-                verbosity,
-                "  Ranked targets: {}",
-                ranked_targets
-                    .iter()
-                    .take(3)
-                    .map(|t| format!("{}(score={:.2})", t.target_id, t.score))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-
-            // Try to schedule from each target in order
             let mut scheduled_any = false;
 
-            for target in &ranked_targets {
-                log_checks!(
+            // Only skip if resources exist but are all busy
+            // (if no resources exist at all, we may still have milestones to schedule)
+            let has_resources = !state.resource_schedules.is_empty();
+            if !has_resources || !available_mask.is_empty() {
+                // Get ranked targets from cache (already scored)
+                let ranked_targets = cache.get_ranked_targets(&self.config, state.current_time);
+
+                log_debug!(
                     verbosity,
-                    "  Trying target {} (score={:.2} = pri {} / work {:.1} * urg {:.3}, deadline={:?})",
-                    target.target_id,
-                    target.score,
-                    target.priority,
-                    target.total_work,
-                    target.urgency,
-                    target.deadline
+                    "  Ranked targets: {}",
+                    ranked_targets
+                        .iter()
+                        .take(3)
+                        .map(|t| format!("{}(score={:.2})", t.target_id, t.score))
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 );
 
-                // Get eligible tasks on this target's critical path
-                let eligible = self.get_eligible_critical_path_tasks(
-                    target,
-                    &state.scheduled,
-                    &state.unscheduled,
-                    state.current_time,
-                );
-
-                if eligible.is_empty() {
-                    continue;
-                }
-
-                // Pick best task by WSPT
-                let best_task_id = self.pick_best_task(&eligible);
-
-                // Skip this task at initial time if requested (for rollout simulation)
-                if state.current_time == initial_time {
-                    if let Some(skip_id) = skip_task_at_initial_time {
-                        if best_task_id == skip_id {
-                            continue; // Skip this task at initial time, try next target
-                        }
-                    }
-                }
-
-                let task = self.tasks.get(&best_task_id);
-                let priority = task
-                    .and_then(|t| t.priority)
-                    .unwrap_or(self.default_priority);
-
-                log_checks!(
-                    verbosity,
-                    "  Considering task {} (priority={}, target={})",
-                    best_task_id,
-                    priority,
-                    target.target_id
-                );
-
-                // Check rollout: should we skip this task for a better upcoming task?
-                if enable_rollout && self.config.rollout_enabled {
-                    if let Some((skip_reason, reservation)) = self.check_rollout_skip(
-                        &best_task_id,
-                        target,
-                        &ranked_targets,
-                        &state.scheduled,
-                        &state.unscheduled,
-                        &state.resource_schedules,
-                        state.current_time,
-                    ) {
-                        log_checks!(
-                            verbosity,
-                            "    Skipping {} for rollout: {}",
-                            best_task_id,
-                            skip_reason
-                        );
-                        // Store the reservation
-                        state
-                            .reservations
-                            .insert(reservation.resource.clone(), reservation);
-                        continue;
-                    }
-                }
-
-                // Try to schedule it (passing reservations for resource checking)
-                if let Some(scheduled_task) = self.try_schedule_task(
-                    &best_task_id,
-                    state.current_time,
-                    &mut state.resource_schedules,
-                    &state.reservations,
-                ) {
-                    state.scheduled.insert(
-                        best_task_id.clone(),
-                        (scheduled_task.start_date, scheduled_task.end_date),
-                    );
-                    state.unscheduled.remove(&best_task_id);
-
-                    // Update scheduled_vec for the cache
-                    if let Some(task_int) = ctx.interner.get(&best_task_id) {
-                        // Days since current_time when this task ends
-                        let end_offset =
-                            (scheduled_task.end_date - state.current_time).num_days() as f64;
-                        scheduled_vec[task_int as usize] = end_offset;
-                    }
-
-                    // Incrementally update the cache
-                    cache.on_task_scheduled(
-                        &best_task_id,
-                        &self.tasks,
-                        &ctx,
-                        &scheduled_vec,
-                        &completed_vec,
-                        self.default_priority,
-                    )?;
-
-                    if scheduled_task.duration_days == 0.0 {
-                        log_changes!(
-                            verbosity,
-                            "  Scheduled milestone {} at {}",
-                            best_task_id,
-                            state.current_time
-                        );
-                    } else {
-                        log_changes!(
-                            verbosity,
-                            "  Scheduled task {} on {} from {} to {}",
-                            best_task_id,
-                            scheduled_task.resources.join(", "),
-                            scheduled_task.start_date,
-                            scheduled_task.end_date
-                        );
-                    }
-
-                    // Clear any reservation for this task (it's now scheduled)
-                    state.reservations.retain(|_, r| r.task_id != best_task_id);
-
-                    state.result.push(scheduled_task);
-                    scheduled_any = true;
-                    break; // Single-target focus per iteration
-                } else {
+                'target_loop: for target in &ranked_targets {
                     log_checks!(
                         verbosity,
-                        "    Skipping {}: Resources not available now",
-                        best_task_id
+                        "  Trying target {} (score={:.2} = pri {} / work {:.1} * urg {:.3}, deadline={:?})",
+                        target.target_id,
+                        target.score,
+                        target.priority,
+                        target.total_work,
+                        target.urgency,
+                        target.deadline
                     );
+
+                    // Get eligible tasks on this target's critical path
+                    let eligible = self.get_eligible_critical_path_tasks(
+                        target,
+                        &state.scheduled,
+                        &state.unscheduled,
+                        state.current_time,
+                    );
+
+                    if eligible.is_empty() {
+                        continue;
+                    }
+
+                    // Pick best task by WSPT
+                    let best_task_id = self.pick_best_task(&eligible);
+
+                    // Skip this task at initial time if requested (for rollout simulation)
+                    if state.current_time == initial_time {
+                        if let Some(skip_id) = skip_task_at_initial_time {
+                            if best_task_id == skip_id {
+                                continue; // Skip this task at initial time, try next target
+                            }
+                        }
+                    }
+
+                    let task = self.tasks.get(&best_task_id);
+                    let priority = task
+                        .and_then(|t| t.priority)
+                        .unwrap_or(self.default_priority);
+
+                    log_checks!(
+                        verbosity,
+                        "  Considering task {} (priority={}, target={})",
+                        best_task_id,
+                        priority,
+                        target.target_id
+                    );
+
+                    // Check if task has any available resource before considering rollout
+                    if !self.task_has_available_resource(&best_task_id, available_mask) {
+                        log_checks!(
+                            verbosity,
+                            "    Skipping {}: Resources not available now",
+                            best_task_id
+                        );
+                        continue;
+                    }
+
+                    // Check rollout: should we skip this task for a better upcoming task?
+                    if enable_rollout && self.config.rollout_enabled {
+                        if let Some((skip_reason, reservation)) = self.check_rollout_skip(
+                            &best_task_id,
+                            target,
+                            &ranked_targets,
+                            &state.scheduled,
+                            &state.unscheduled,
+                            &state.resource_schedules,
+                            state.current_time,
+                            available_mask,
+                        ) {
+                            log_checks!(
+                                verbosity,
+                                "    Skipping {} for rollout: {}",
+                                best_task_id,
+                                skip_reason
+                            );
+                            // Store the reservation (keyed by resource ID)
+                            if let Some(res_id) = self.resource_index.get_id(&reservation.resource)
+                            {
+                                state.reservations.insert(res_id, reservation);
+                            }
+                            continue;
+                        }
+                    }
+
+                    // Try to schedule it (passing reservations for resource checking)
+                    if let Some(scheduled_task) = self.try_schedule_task(
+                        &best_task_id,
+                        state.current_time,
+                        &mut state.resource_schedules,
+                        &state.reservations,
+                        available_mask,
+                    ) {
+                        state.scheduled.insert(
+                            best_task_id.clone(),
+                            (scheduled_task.start_date, scheduled_task.end_date),
+                        );
+                        state.unscheduled.remove(&best_task_id);
+
+                        // Update scheduled_vec for the cache
+                        if let Some(task_int) = ctx.interner.get(&best_task_id) {
+                            // Days since current_time when this task ends
+                            let end_offset =
+                                (scheduled_task.end_date - state.current_time).num_days() as f64;
+                            scheduled_vec[task_int as usize] = end_offset;
+                        }
+
+                        // Incrementally update the cache
+                        cache.on_task_scheduled(
+                            &best_task_id,
+                            &self.tasks,
+                            &ctx,
+                            &scheduled_vec,
+                            &completed_vec,
+                            self.default_priority,
+                        )?;
+
+                        if scheduled_task.duration_days == 0.0 {
+                            log_changes!(
+                                verbosity,
+                                "  Scheduled milestone {} at {}",
+                                best_task_id,
+                                state.current_time
+                            );
+                        } else {
+                            log_changes!(
+                                verbosity,
+                                "  Scheduled task {} on {} from {} to {}",
+                                best_task_id,
+                                scheduled_task.resources.join(", "),
+                                scheduled_task.start_date,
+                                scheduled_task.end_date
+                            );
+                        }
+
+                        // Clear any reservation for this task (it's now scheduled)
+                        state.reservations.retain(|_, r| r.task_id != best_task_id);
+
+                        state.result.push(scheduled_task);
+                        scheduled_any = true;
+                        break 'target_loop; // Single-target focus per iteration
+                    } else {
+                        log_checks!(
+                            verbosity,
+                            "    Skipping {}: Resources not available now",
+                            best_task_id
+                        );
+                    }
                 }
+            } else {
+                log_debug!(verbosity, "  No resources available, advancing time");
             }
 
             if !scheduled_any {
@@ -567,6 +653,26 @@ impl CriticalPathScheduler {
         )
     }
 
+    /// Check if a task has any available resource given the current availability mask.
+    ///
+    /// Uses precomputed task resource requirements for O(1) lookup.
+    fn task_has_available_resource(&self, task_id: &str, available_mask: ResourceMask) -> bool {
+        // Milestones don't need resources
+        if let Some(task) = self.tasks.get(task_id) {
+            if task.duration_days == 0.0 {
+                return true;
+            }
+        }
+
+        // Look up precomputed requirements
+        if let Some(req) = self.task_resource_reqs.get(task_id) {
+            req.has_available(available_mask)
+        } else {
+            // No resource requirements recorded - shouldn't happen, but be safe
+            false
+        }
+    }
+
     /// Get tasks on the target's critical path that are eligible to be scheduled.
     fn get_eligible_critical_path_tasks(
         &self,
@@ -652,8 +758,9 @@ impl CriticalPathScheduler {
         &self,
         task_id: &str,
         current_time: NaiveDate,
-        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
-        reservations: &FxHashMap<String, ResourceReservation>,
+        resource_schedules: &mut [ResourceSchedule],
+        reservations: &FxHashMap<u32, ResourceReservation>,
+        available_mask: ResourceMask,
     ) -> Option<ScheduledTask> {
         let task = self.tasks.get(task_id)?;
 
@@ -676,6 +783,7 @@ impl CriticalPathScheduler {
                 current_time,
                 resource_schedules,
                 reservations,
+                available_mask,
             );
         }
 
@@ -686,6 +794,7 @@ impl CriticalPathScheduler {
             current_time,
             resource_schedules,
             reservations,
+            available_mask,
         )
     }
 
@@ -695,52 +804,59 @@ impl CriticalPathScheduler {
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
-        reservations: &FxHashMap<String, ResourceReservation>,
+        resource_schedules: &mut [ResourceSchedule],
+        reservations: &FxHashMap<u32, ResourceReservation>,
+        available_mask: ResourceMask,
     ) -> Option<ScheduledTask> {
         let resource_config = self.resource_config.as_ref()?;
         let spec = task.resource_spec.as_ref()?;
 
         let candidates = resource_config.expand_resource_spec(spec);
-        let mut best_resource: Option<String> = None;
+        let mut best_resource_id: Option<u32> = None;
+        let mut best_resource_name: Option<String> = None;
         let mut best_completion: Option<NaiveDate> = None;
 
         for resource_name in candidates {
+            let resource_id = match self.resource_index.get_id(&resource_name) {
+                Some(id) => id,
+                None => continue,
+            };
+
+            // Skip if not available (already checked via bitmask, but verify)
+            if !available_mask.is_set(resource_id) {
+                continue;
+            }
+
             // Check if resource is reserved for a different task
-            if let Some(reservation) = reservations.get(&resource_name) {
-                // Allow if this is the reserved task
+            if let Some(reservation) = reservations.get(&resource_id) {
                 if reservation.task_id != task_id {
                     continue;
                 }
             }
 
-            if let Some(schedule) = resource_schedules.get_mut(&resource_name) {
-                let available_at = schedule.next_available_time(current_time);
-                if available_at == current_time {
-                    let completion =
-                        schedule.calculate_completion_time(available_at, task.duration_days);
-                    if best_completion.is_none() || completion < best_completion.unwrap() {
-                        best_resource = Some(resource_name);
-                        best_completion = Some(completion);
-                    }
-                }
+            let schedule = &mut resource_schedules[resource_id as usize];
+            let completion = schedule.calculate_completion_time(current_time, task.duration_days);
+            if best_completion.is_none() || completion < best_completion.unwrap() {
+                best_resource_id = Some(resource_id);
+                best_resource_name = Some(resource_name);
+                best_completion = Some(completion);
             }
         }
 
-        let best_resource = best_resource?;
+        let best_resource_id = best_resource_id?;
+        let best_resource_name = best_resource_name?;
         let best_completion = best_completion?;
 
         // Schedule the task
-        if let Some(schedule) = resource_schedules.get_mut(&best_resource) {
-            schedule.add_busy_period(current_time, best_completion);
-        }
+        resource_schedules[best_resource_id as usize]
+            .add_busy_period(current_time, best_completion);
 
         Some(ScheduledTask {
             task_id: task_id.to_string(),
             start_date: current_time,
             end_date: best_completion,
             duration_days: task.duration_days,
-            resources: vec![best_resource],
+            resources: vec![best_resource_name],
         })
     }
 
@@ -750,33 +866,37 @@ impl CriticalPathScheduler {
         task_id: &str,
         task: &Task,
         current_time: NaiveDate,
-        resource_schedules: &mut FxHashMap<String, ResourceSchedule>,
-        reservations: &FxHashMap<String, ResourceReservation>,
+        resource_schedules: &mut [ResourceSchedule],
+        reservations: &FxHashMap<u32, ResourceReservation>,
+        available_mask: ResourceMask,
     ) -> Option<ScheduledTask> {
         if task.resources.is_empty() {
             return None;
         }
 
         // Check all resources are available NOW and not reserved for other tasks
+        // (availability already checked via task_has_available_resource, but verify reservations)
         for (resource_name, _) in &task.resources {
+            let resource_id = self.resource_index.get_id(resource_name)?;
+
+            // Double-check availability via bitmask
+            if !available_mask.is_set(resource_id) {
+                return None;
+            }
+
             // Check reservation
-            if let Some(reservation) = reservations.get(resource_name) {
+            if let Some(reservation) = reservations.get(&resource_id) {
                 if reservation.task_id != task_id {
                     return None; // Resource is reserved for a different task
                 }
-            }
-
-            let schedule = resource_schedules.get(resource_name)?;
-            let next_avail = schedule.next_available_time(current_time);
-            if next_avail != current_time {
-                return None;
             }
         }
 
         // Calculate completion time
         let mut max_completion = current_time;
         for (resource_name, _) in &task.resources {
-            if let Some(schedule) = resource_schedules.get_mut(resource_name) {
+            if let Some(resource_id) = self.resource_index.get_id(resource_name) {
+                let schedule = &mut resource_schedules[resource_id as usize];
                 let completion =
                     schedule.calculate_completion_time(current_time, task.duration_days);
                 if completion > max_completion {
@@ -787,8 +907,9 @@ impl CriticalPathScheduler {
 
         // Update resource schedules
         for (resource_name, _) in &task.resources {
-            if let Some(schedule) = resource_schedules.get_mut(resource_name) {
-                schedule.add_busy_period(current_time, max_completion);
+            if let Some(resource_id) = self.resource_index.get_id(resource_name) {
+                resource_schedules[resource_id as usize]
+                    .add_busy_period(current_time, max_completion);
             }
         }
 
@@ -808,7 +929,7 @@ impl CriticalPathScheduler {
         &self,
         scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
         unscheduled: &FxHashSet<String>,
-        resource_schedules: &FxHashMap<String, ResourceSchedule>,
+        resource_schedules: &[ResourceSchedule],
         current_time: NaiveDate,
     ) -> Option<NaiveDate> {
         let mut next_events: Vec<NaiveDate> = Vec::new();
@@ -842,7 +963,7 @@ impl CriticalPathScheduler {
         }
 
         // Resource busy period ends
-        for schedule in resource_schedules.values() {
+        for schedule in resource_schedules.iter() {
             for (_, busy_end) in &schedule.busy_periods {
                 if *busy_end >= current_time {
                     if let Some(next_day) = busy_end.checked_add_days(Days::new(1)) {
@@ -870,8 +991,9 @@ impl CriticalPathScheduler {
         all_targets: &[&TargetInfo],
         scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
         unscheduled: &FxHashSet<String>,
-        resource_schedules: &FxHashMap<String, ResourceSchedule>,
+        resource_schedules: &[ResourceSchedule],
         current_time: NaiveDate,
+        available_mask: ResourceMask,
     ) -> Option<(String, ResourceReservation)> {
         use super::rollout::find_competing_targets;
 
@@ -883,10 +1005,21 @@ impl CriticalPathScheduler {
         }
 
         // Get the resource this task would use
-        let resource = self.get_task_resource(task, resource_schedules, current_time)?;
+        let resource = self.get_task_resource(task, available_mask)?;
 
         // Estimate completion time for this task
         let completion = current_time + chrono::Duration::days(task.duration_days.ceil() as i64);
+
+        // Build a temporary HashMap for rollout detection (not hot path)
+        let resource_schedules_map: FxHashMap<String, ResourceSchedule> = resource_schedules
+            .iter()
+            .enumerate()
+            .filter_map(|(id, schedule)| {
+                self.resource_index
+                    .get_name(id as u32)
+                    .map(|name| (name.to_string(), schedule.clone()))
+            })
+            .collect();
 
         // Find competing targets with higher-scored tasks that need this resource
         let competing = find_competing_targets(
@@ -898,7 +1031,7 @@ impl CriticalPathScheduler {
             &self.tasks,
             scheduled,
             self.resource_config.as_ref(),
-            resource_schedules,
+            &resource_schedules_map,
             current_time,
         );
 
@@ -925,7 +1058,7 @@ impl CriticalPathScheduler {
         let state = CriticalPathSchedulerState::new(
             scheduled.clone(),
             unscheduled.clone(),
-            resource_schedules.clone(),
+            resource_schedules.to_vec(),
             current_time,
         );
 
@@ -935,8 +1068,9 @@ impl CriticalPathScheduler {
             .scheduled
             .insert(task_id.to_string(), (current_time, completion));
         state_a.unscheduled.remove(task_id);
-        if let Some(schedule) = state_a.resource_schedules.get_mut(&resource) {
-            schedule.add_busy_period(current_time, completion);
+        if let Some(resource_id) = self.resource_index.get_id(&resource) {
+            state_a.resource_schedules[resource_id as usize]
+                .add_busy_period(current_time, completion);
         }
         // Run the scheduler (without rollout to prevent infinite recursion)
         let final_state_a = self
@@ -945,7 +1079,7 @@ impl CriticalPathScheduler {
                 CriticalPathSchedulerState::new(
                     FxHashMap::default(),
                     FxHashSet::default(),
-                    FxHashMap::default(),
+                    Vec::new(),
                     current_time,
                 )
             });
@@ -963,7 +1097,7 @@ impl CriticalPathScheduler {
                 CriticalPathSchedulerState::new(
                     FxHashMap::default(),
                     FxHashSet::default(),
-                    FxHashMap::default(),
+                    Vec::new(),
                     current_time,
                 )
             });
@@ -990,12 +1124,7 @@ impl CriticalPathScheduler {
     }
 
     /// Get the resource a task would be assigned to.
-    fn get_task_resource(
-        &self,
-        task: &Task,
-        resource_schedules: &FxHashMap<String, ResourceSchedule>,
-        current_time: NaiveDate,
-    ) -> Option<String> {
+    fn get_task_resource(&self, task: &Task, available_mask: ResourceMask) -> Option<String> {
         // Check explicit resources first
         if !task.resources.is_empty() {
             return task.resources.first().map(|(r, _)| r.clone());
@@ -1006,9 +1135,8 @@ impl CriticalPathScheduler {
             if let Some(config) = &self.resource_config {
                 let candidates = config.expand_resource_spec(spec);
                 for resource_name in candidates {
-                    if let Some(schedule) = resource_schedules.get(&resource_name) {
-                        let available_at = schedule.next_available_time(current_time);
-                        if available_at == current_time {
+                    if let Some(id) = self.resource_index.get_id(&resource_name) {
+                        if available_mask.is_set(id) {
                             return Some(resource_name);
                         }
                     }

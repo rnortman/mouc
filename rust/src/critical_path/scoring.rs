@@ -2,11 +2,39 @@
 
 use chrono::NaiveDate;
 
-use super::types::{CriticalPathConfig, TargetInfo};
+use super::types::{CriticalPathConfig, TargetInfo, WorkTransform};
+
+/// Transform the work term according to config.
+///
+/// The work term divisor can be:
+/// - `work^exponent` (Power mode, default exponent=1.0)
+/// - `ln(work)` (Log mode)
+/// - `log10(work)` (Log10 mode)
+///
+/// Special cases for Power mode:
+/// - exponent=0.0: returns 1.0 (effectively removes work term)
+/// - exponent=1.0: returns work unchanged (linear, default behavior)
+pub fn transform_work(work: f64, config: &CriticalPathConfig) -> f64 {
+    let w = work.max(0.1); // Avoid log(0) or division by zero
+    match config.work_transform {
+        WorkTransform::Power => {
+            if config.work_exponent == 0.0 {
+                1.0 // Effectively removes work term
+            } else if config.work_exponent == 1.0 {
+                w // No transformation (default)
+            } else {
+                w.powf(config.work_exponent)
+            }
+        }
+        WorkTransform::Log => w.ln().max(0.1), // Floor to avoid issues with work < e
+        WorkTransform::Log10 => w.log10().max(0.1), // Floor to avoid issues with work < 10
+    }
+}
 
 /// Score a target by its attractiveness.
 ///
-/// Formula: (priority / total_work) * urgency
+/// Formula: (priority / f(work)) * urgency
+/// where f(work) is configured by work_transform and work_exponent.
 ///
 /// Higher score = more attractive target to work on.
 pub fn score_target(
@@ -16,20 +44,59 @@ pub fn score_target(
     avg_work: f64,
 ) -> f64 {
     let priority = target.priority as f64;
-    let work = target.total_work.max(0.1); // Avoid division by zero
+    let transformed_work = transform_work(target.total_work, config);
     let urgency = compute_urgency(target, config, current_time, avg_work);
 
-    (priority / work) * urgency
+    (priority / transformed_work) * urgency
 }
 
-/// Compute urgency factor for a target.
+/// Compute urgency for a target with a deadline.
 ///
-/// For targets with deadlines:
-///   urgency = exp(-max(0, slack) / (K * avg_work))
-/// where slack = deadline - now - critical_path_length
+/// Formula: `urgency = exp(-slack / (K * avg_work))`
+/// where `slack = deadline - now - critical_path_length`
 ///
-/// For targets without deadlines:
-///   urgency = no_deadline_urgency_multiplier, floored by urgency_floor
+/// Returns 1.0 (maximum urgency) if slack <= 0 (late or on time).
+/// Otherwise returns exponential decay floored by `urgency_floor`.
+pub fn compute_deadline_urgency(
+    deadline: NaiveDate,
+    critical_path_length: f64,
+    current_time: NaiveDate,
+    config: &CriticalPathConfig,
+    avg_work: f64,
+) -> f64 {
+    let days_until = (deadline - current_time).num_days() as f64;
+    let slack = days_until - critical_path_length;
+
+    if slack <= 0.0 {
+        1.0
+    } else {
+        let denominator = config.k * avg_work.max(1.0);
+        (-slack / denominator).exp().max(config.urgency_floor)
+    }
+}
+
+/// Compute urgency for a target without a deadline.
+///
+/// Formula: `urgency = max(min_deadline_urgency * multiplier, floor)`
+///
+/// If `min_deadline_urgency` is None (no deadline targets exist), returns 1.0.
+pub fn compute_no_deadline_urgency(
+    min_deadline_urgency: Option<f64>,
+    config: &CriticalPathConfig,
+) -> f64 {
+    match min_deadline_urgency {
+        Some(min_urg) => {
+            (min_urg * config.no_deadline_urgency_multiplier).max(config.urgency_floor)
+        }
+        None => 1.0,
+    }
+}
+
+/// Compute urgency factor for a target (internal helper).
+///
+/// Note: For no-deadline targets, this returns a fixed value without context.
+/// Use `compute_no_deadline_urgency` with precomputed min_deadline_urgency
+/// for context-aware behavior.
 fn compute_urgency(
     target: &TargetInfo,
     config: &CriticalPathConfig,
@@ -37,20 +104,15 @@ fn compute_urgency(
     avg_work: f64,
 ) -> f64 {
     match target.deadline {
-        Some(deadline) => {
-            let days_until_deadline = (deadline - current_time).num_days() as f64;
-            let slack = days_until_deadline - target.critical_path_length;
-
-            if slack <= 0.0 {
-                // Already late or exactly on time - maximum urgency
-                1.0
-            } else {
-                let denominator = config.k * avg_work.max(1.0);
-                (-slack / denominator).exp().max(config.urgency_floor)
-            }
-        }
+        Some(deadline) => compute_deadline_urgency(
+            deadline,
+            target.critical_path_length,
+            current_time,
+            config,
+            avg_work,
+        ),
         None => {
-            // No deadline - use fixed urgency based on config
+            // Fallback without context - just use multiplier
             config
                 .no_deadline_urgency_multiplier
                 .max(config.urgency_floor)
@@ -67,34 +129,6 @@ pub fn score_task(priority: i32, duration: f64) -> f64 {
     let priority = priority as f64;
     let duration = duration.max(0.1); // Avoid division by zero
     priority / duration
-}
-
-/// Compute urgency with access to all targets (for deriving default urgency).
-///
-/// For non-deadline targets, this computes:
-///   min(urgency of deadline targets) * multiplier, floored
-#[allow(dead_code)] // Used in tests
-pub fn compute_urgency_with_context(
-    target: &TargetInfo,
-    all_targets: &[TargetInfo],
-    config: &CriticalPathConfig,
-    current_time: NaiveDate,
-    avg_work: f64,
-) -> f64 {
-    match target.deadline {
-        Some(_) => compute_urgency(target, config, current_time, avg_work),
-        None => {
-            // Find minimum urgency among deadline targets
-            let min_deadline_urgency = all_targets
-                .iter()
-                .filter(|t| t.deadline.is_some())
-                .map(|t| compute_urgency(t, config, current_time, avg_work))
-                .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-                .unwrap_or(1.0);
-
-            (min_deadline_urgency * config.no_deadline_urgency_multiplier).max(config.urgency_floor)
-        }
-    }
 }
 
 #[cfg(test)]
@@ -200,34 +234,147 @@ mod tests {
     }
 
     #[test]
-    fn test_urgency_with_context() {
+    fn test_compute_deadline_urgency() {
         let config = CriticalPathConfig::default();
         let current_time = d(2025, 1, 1);
 
-        let mut deadline_target = make_target("a", 50, 10.0, 10.0);
-        deadline_target.deadline = Some(d(2025, 1, 15)); // 14 days, 4 days slack
-
-        let no_deadline_target = make_target("b", 50, 5.0, 5.0);
-
-        let all_targets = vec![deadline_target.clone(), no_deadline_target.clone()];
-
-        let urgency_a = compute_urgency_with_context(
-            &deadline_target,
-            &all_targets,
-            &config,
+        // Tight deadline (1 day slack)
+        let tight = compute_deadline_urgency(
+            d(2025, 1, 12), // 11 days away
+            10.0,           // 10 days of work
             current_time,
-            10.0,
-        );
-        let urgency_b = compute_urgency_with_context(
-            &no_deadline_target,
-            &all_targets,
             &config,
-            current_time,
             10.0,
         );
 
-        // Non-deadline target gets fraction of min deadline urgency
-        assert!(urgency_a > urgency_b);
-        assert!(urgency_b >= config.urgency_floor);
+        // Loose deadline (21 days slack)
+        let loose = compute_deadline_urgency(
+            d(2025, 2, 1), // 31 days away
+            10.0,          // 10 days of work
+            current_time,
+            &config,
+            10.0,
+        );
+
+        assert!(tight > loose);
+        assert!(tight <= 1.0);
+        assert!(loose >= config.urgency_floor);
+    }
+
+    #[test]
+    fn test_compute_no_deadline_urgency() {
+        let config = CriticalPathConfig::default();
+
+        // With deadline context
+        let urg = compute_no_deadline_urgency(Some(0.8), &config);
+        assert!((urg - 0.8 * config.no_deadline_urgency_multiplier).abs() < 1e-9);
+
+        // Without deadline context (no deadline targets)
+        let urg_none = compute_no_deadline_urgency(None, &config);
+        assert!((urg_none - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_no_deadline_urgency_respects_floor() {
+        // Custom config with low multiplier
+        let config = CriticalPathConfig::new(
+            2.0,  // k
+            0.01, // no_deadline_urgency_multiplier (very low)
+            0.1,  // urgency_floor
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+        )
+        .unwrap();
+
+        // Even with very low min_deadline_urgency * multiplier, should respect floor
+        let urg = compute_no_deadline_urgency(Some(0.5), &config);
+        assert!((urg - config.urgency_floor).abs() < 1e-9); // 0.5 * 0.01 = 0.005 < 0.1, so floor
+    }
+
+    #[test]
+    fn test_no_deadline_urgency_with_small_floor() {
+        // Config like user's: urgency_floor=0.001, multiplier=0.9
+        let config = CriticalPathConfig::new(
+            1.5,   // k
+            0.9,   // no_deadline_urgency_multiplier
+            0.001, // urgency_floor (very low)
+            0,
+            true,
+            1.0,
+            Some(60),
+            "power",
+            1.0,
+        )
+        .unwrap();
+
+        // With some deadline urgency
+        let urg = compute_no_deadline_urgency(Some(0.5), &config);
+        // Should be 0.5 * 0.9 = 0.45, not 0.9 * 0.001 = 0.0009
+        assert!((urg - 0.45).abs() < 1e-9);
+
+        // Without deadline targets, should get 1.0, not some tiny value
+        let urg_none = compute_no_deadline_urgency(None, &config);
+        assert!((urg_none - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_power_default() {
+        let config = CriticalPathConfig::default();
+        // Default is power with exponent 1.0 (linear)
+        assert!((transform_work(10.0, &config) - 10.0).abs() < 1e-9);
+        assert!((transform_work(100.0, &config) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_power_sqrt() {
+        let config =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.5).unwrap();
+        // sqrt transform
+        assert!((transform_work(4.0, &config) - 2.0).abs() < 1e-9);
+        assert!((transform_work(100.0, &config) - 10.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_power_zero() {
+        let config =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.0).unwrap();
+        // exponent=0 means no work term (returns 1.0)
+        assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
+        assert!((transform_work(100.0, &config) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_log() {
+        let config =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0).unwrap();
+        // ln(e) = 1, ln(e^2) = 2
+        let e = std::f64::consts::E;
+        assert!((transform_work(e, &config) - 1.0).abs() < 1e-9);
+        assert!((transform_work(e * e, &config) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_log10() {
+        let config =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0).unwrap();
+        // log10(10) = 1, log10(100) = 2
+        assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
+        assert!((transform_work(100.0, &config) - 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_transform_work_floors_small_values() {
+        let config_log =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0).unwrap();
+        // Very small work values should be floored to avoid negative/tiny log values
+        assert!(transform_work(0.01, &config_log) >= 0.1);
+
+        let config_log10 =
+            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0).unwrap();
+        assert!(transform_work(0.01, &config_log10) >= 0.1);
     }
 }

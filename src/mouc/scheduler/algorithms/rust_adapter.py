@@ -201,6 +201,8 @@ class RustSchedulerAdapter:
             rollout_enabled=config.critical_path.rollout_enabled,
             rollout_score_ratio_threshold=config.critical_path.rollout_score_ratio_threshold,
             rollout_max_horizon_days=config.critical_path.rollout_max_horizon_days,
+            work_transform=config.critical_path.work_transform,
+            work_exponent=config.critical_path.work_exponent,
         )
 
     def schedule(self) -> AlgorithmResult:

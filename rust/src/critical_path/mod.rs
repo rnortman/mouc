@@ -21,4 +21,6 @@ pub use rollout::{ResourceReservation, RolloutConfig};
 pub use scheduler::{CriticalPathScheduler, CriticalPathSchedulerError};
 pub use scoring::{score_target, score_task};
 pub use state::CriticalPathSchedulerState;
-pub use types::{CriticalPathConfig, TargetInfo, TaskTiming};
+pub use types::{
+    CriticalPathConfig, ResourceIndex, ResourceMask, TargetInfo, TaskResourceReq, TaskTiming,
+};

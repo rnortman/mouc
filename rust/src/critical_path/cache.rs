@@ -10,6 +10,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::models::Task;
 
 use super::calculation::{calculate_critical_path_interned, InternedContext};
+use super::scoring::{compute_deadline_urgency, compute_no_deadline_urgency, transform_work};
 use super::types::{CriticalPathConfig, TargetInfo};
 
 /// Cache for critical path target information.
@@ -179,27 +180,39 @@ impl CriticalPathCache {
             self.targets.values().map(|t| t.total_work).sum::<f64>() / self.targets.len() as f64;
 
         // Compute scores and update in place
-        // First pass: compute urgencies based on context
-        let has_deadline_targets = self.targets.values().any(|t| t.deadline.is_some());
+        // First pass: compute min urgency among deadline targets for context
+        let min_deadline_urgency = self
+            .targets
+            .values()
+            .filter_map(|t| {
+                t.deadline.map(|deadline| {
+                    compute_deadline_urgency(
+                        deadline,
+                        t.critical_path_length,
+                        current_time,
+                        config,
+                        avg_work,
+                    )
+                })
+            })
+            .reduce(f64::min);
 
         for target in self.targets.values_mut() {
-            // Simplified urgency calculation to avoid cloning all targets
-            let urgency = if let Some(deadline) = target.deadline {
-                let days_until_deadline = (deadline - current_time).num_days() as f64;
-                let slack = days_until_deadline - target.total_work;
-                let slack_ratio = slack / avg_work.max(1.0);
-                let raw_urgency = (-slack_ratio / config.k).exp();
-                raw_urgency.max(config.urgency_floor)
-            } else if has_deadline_targets {
-                config.no_deadline_urgency_multiplier * config.urgency_floor
-            } else {
-                1.0
+            let urgency = match target.deadline {
+                Some(deadline) => compute_deadline_urgency(
+                    deadline,
+                    target.critical_path_length,
+                    current_time,
+                    config,
+                    avg_work,
+                ),
+                None => compute_no_deadline_urgency(min_deadline_urgency, config),
             };
 
             let priority = target.priority as f64;
-            let work = target.total_work.max(0.1);
+            let transformed_work = transform_work(target.total_work, config);
             target.urgency = urgency;
-            target.score = (priority / work) * urgency;
+            target.score = (priority / transformed_work) * urgency;
         }
 
         // Collect references and sort
@@ -323,5 +336,188 @@ mod tests {
         assert_eq!(targets.len(), 2);
         // b and c should have been recomputed
         assert_eq!(recomputed, 2);
+    }
+
+    #[test]
+    fn test_urgency_uses_critical_path_length_not_total_work() {
+        // Target with parallel work paths:
+        //   a (5d) \
+        //           -> c (1d)
+        //   b (2d) /
+        // critical_path_length = 5 + 1 = 6 (via a)
+        // total_work = 5 + 2 + 1 = 8
+        let tasks: FxHashMap<String, Task> = [
+            make_task("a", 5.0, vec![], Some(50)),
+            make_task("b", 2.0, vec![], Some(50)),
+            make_task("c", 1.0, vec![("a", 0.0), ("b", 0.0)], Some(50)),
+        ]
+        .into_iter()
+        .map(|t| (t.id.clone(), t))
+        .collect();
+
+        let mut unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
+        unscheduled.remove("a");
+        unscheduled.remove("b");
+        // Only c is unscheduled, so only c is a target
+
+        let ctx = InternedContext::new(&tasks);
+        let completed_vec = vec![false; ctx.interner.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+
+        let mut cache = CriticalPathCache::new(
+            &unscheduled,
+            &tasks,
+            &ctx,
+            &scheduled_vec,
+            &completed_vec,
+            50,
+        )
+        .unwrap();
+
+        // Set deadline so urgency depends on slack
+        // Deadline in 10 days from now
+        // If using critical_path_length (6): slack = 10 - 6 = 4
+        // If using total_work (8): slack = 10 - 8 = 2 (tighter, higher urgency)
+        let deadline = chrono::NaiveDate::from_ymd_opt(2025, 1, 11).unwrap(); // 10 days from Jan 1
+        cache.targets.get_mut("c").unwrap().deadline = Some(deadline);
+
+        let config = CriticalPathConfig::default();
+        let current_time = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+
+        let targets = cache.get_ranked_targets(&config, current_time);
+        let target_c = targets.iter().find(|t| t.target_id == "c").unwrap();
+
+        // Verify the target uses critical_path_length
+        assert!((target_c.critical_path_length - 6.0).abs() < 1e-9);
+        assert!((target_c.total_work - 8.0).abs() < 1e-9);
+
+        // The urgency calculation uses critical_path_length, so slack = 10 - 6 = 4
+        // avg_work = 8 (single target), k = 2.0
+        // urgency = exp(-4 / (2 * 8)) = exp(-0.25) ≈ 0.778
+        //
+        // If it used total_work (slack = 10 - 8 = 2):
+        // urgency = exp(-2 / (2 * 8)) = exp(-0.125) ≈ 0.882
+        //
+        // So urgency should be closer to 0.778 than 0.882
+        let expected_with_cp = (-4.0_f64 / 16.0).exp(); // ~0.778
+        let expected_with_total = (-2.0_f64 / 16.0).exp(); // ~0.882
+
+        assert!(
+            (target_c.urgency - expected_with_cp).abs() < 0.01,
+            "Urgency {} should be ~{} (using critical_path_length), not ~{} (total_work)",
+            target_c.urgency,
+            expected_with_cp,
+            expected_with_total
+        );
+    }
+
+    #[test]
+    fn test_no_deadline_urgency_with_non_default_config() {
+        // This test uses config like the user's: urgency_floor=0.001, multiplier=0.9
+        // With the buggy code (multiplier * floor), no-deadline targets got 0.0009
+        // With correct code, they should get a reasonable value
+
+        let tasks: FxHashMap<String, Task> = [make_task("a", 5.0, vec![], Some(50))]
+            .into_iter()
+            .map(|t| (t.id.clone(), t))
+            .collect();
+
+        let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
+        let ctx = InternedContext::new(&tasks);
+        let completed_vec = vec![false; ctx.interner.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+
+        let mut cache = CriticalPathCache::new(
+            &unscheduled,
+            &tasks,
+            &ctx,
+            &scheduled_vec,
+            &completed_vec,
+            50,
+        )
+        .unwrap();
+
+        // User's config values
+        let config = CriticalPathConfig::new(
+            1.5,   // k
+            0.9,   // no_deadline_urgency_multiplier
+            0.001, // urgency_floor (very small)
+            0,
+            true,
+            1.0,
+            Some(60),
+            "power",
+            1.0,
+        )
+        .unwrap();
+        let current_time = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+
+        let targets = cache.get_ranked_targets(&config, current_time);
+        let target_a = &targets[0];
+
+        // No deadline, no other deadline targets: urgency should be 1.0
+        // NOT 0.9 * 0.001 = 0.0009
+        assert!(
+            target_a.urgency > 0.5,
+            "Urgency {} should be > 0.5 for no-deadline target with no deadline context",
+            target_a.urgency
+        );
+    }
+
+    #[test]
+    fn test_no_deadline_urgency_tracks_min_deadline_urgency() {
+        // Two targets: one with deadline, one without
+        // The no-deadline target's urgency should be based on the deadline target's urgency
+
+        let tasks: FxHashMap<String, Task> = [
+            make_task("a", 5.0, vec![], Some(50)), // no deadline
+            make_task("b", 5.0, vec![], Some(50)), // will have deadline
+        ]
+        .into_iter()
+        .map(|t| (t.id.clone(), t))
+        .collect();
+
+        let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
+        let ctx = InternedContext::new(&tasks);
+        let completed_vec = vec![false; ctx.interner.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+
+        let mut cache = CriticalPathCache::new(
+            &unscheduled,
+            &tasks,
+            &ctx,
+            &scheduled_vec,
+            &completed_vec,
+            50,
+        )
+        .unwrap();
+
+        // Set deadline on b: 30 days away, 5 days work = 25 days slack (low urgency)
+        let deadline = chrono::NaiveDate::from_ymd_opt(2025, 1, 31).unwrap();
+        cache.targets.get_mut("b").unwrap().deadline = Some(deadline);
+
+        let config = CriticalPathConfig::default(); // multiplier=0.5, floor=0.1
+        let current_time = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+
+        let targets = cache.get_ranked_targets(&config, current_time);
+        let target_a = targets.iter().find(|t| t.target_id == "a").unwrap();
+        let target_b = targets.iter().find(|t| t.target_id == "b").unwrap();
+
+        // b has a deadline with lots of slack, so low urgency
+        assert!(
+            target_b.urgency < 0.5,
+            "Deadline target urgency should be low"
+        );
+
+        // a (no deadline) should get: min_deadline_urgency * 0.5, floored at 0.1
+        // Since b's urgency is low, a's should be even lower (but at least floor)
+        let expected_min =
+            (target_b.urgency * config.no_deadline_urgency_multiplier).max(config.urgency_floor);
+        assert!(
+            (target_a.urgency - expected_min).abs() < 1e-9,
+            "No-deadline urgency {} should equal max(min_deadline_urgency * multiplier, floor) = {}",
+            target_a.urgency,
+            expected_min
+        );
     }
 }
