@@ -2,9 +2,13 @@
 
 ## Overview
 
-This document describes a more sophisticated approach to resource selection in the critical path scheduler. Instead of using a heuristic, this approach uses rollout simulation to compare outcomes when assigning a task to different resources.
+This document describes the resource selection approach in the critical path scheduler. When auto-assigning resources, the scheduler uses a combination of fast-path heuristics and rollout simulation to make intelligent decisions.
 
-**Status**: Design only. Not implemented. See `prefer_fungible_resources` config flag for the simpler heuristic approach.
+**Status**: Implemented. The scheduler uses a two-tier approach:
+1. **Fast path**: If any tied candidate has 0 blocking exclusive tasks, pick it immediately
+2. **Rollout path**: If ALL tied candidates are scarce (have blocking exclusive tasks), simulate each choice and pick the one with the best schedule score
+
+This is controlled by the `prefer_fungible_resources` and `rollout_enabled` config flags.
 
 ## Problem Statement
 

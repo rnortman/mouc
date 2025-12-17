@@ -561,6 +561,7 @@ impl CriticalPathScheduler {
                     // Note: We pass unscheduled_vec separately to avoid borrow conflicts
                     if let Some(scheduled_task) = self.try_schedule_task(
                         &best_task_id,
+                        best_task_int,
                         state.current_time,
                         &mut state.resource_schedules,
                         &state.reservations,
@@ -937,6 +938,7 @@ impl CriticalPathScheduler {
     fn try_schedule_task(
         &self,
         task_id: &str,
+        task_int: TaskId,
         current_time: NaiveDate,
         resource_schedules: &mut [ResourceSchedule],
         reservations: &FxHashMap<u32, ResourceReservation>,
@@ -963,6 +965,7 @@ impl CriticalPathScheduler {
         if task.resource_spec.is_some() && self.resource_config.is_some() {
             return self.try_schedule_auto_assignment(
                 task_id,
+                task_int,
                 task,
                 current_time,
                 resource_schedules,
@@ -995,6 +998,7 @@ impl CriticalPathScheduler {
     fn try_schedule_auto_assignment(
         &self,
         task_id: &str,
+        task_int: TaskId,
         task: &Task,
         current_time: NaiveDate,
         resource_schedules: &mut [ResourceSchedule],
@@ -1078,8 +1082,8 @@ impl CriticalPathScheduler {
                 );
                 (id, name)
             } else {
-                // Multiple tied candidates - prefer the most fungible one
-                // (fewest exclusive tasks that would be blocked)
+                // Multiple tied candidates - use smart resource selection
+                // (fast path for fungible, rollout for scarce)
                 log_debug!(
                     verbosity,
                     "    Checking fungibility for {} candidates:",
@@ -1108,12 +1112,14 @@ impl CriticalPathScheduler {
                         log_debug!(verbosity, "        - {}", detail);
                     }
                 }
-                self.select_most_fungible_resource(
+                self.select_best_resource(
                     tied_candidates,
-                    best_completion,
+                    task_int,
                     ctx,
                     scheduled_vec,
                     unscheduled_vec,
+                    resource_schedules,
+                    reservations,
                     initial_time,
                     current_time,
                 )
@@ -1141,44 +1147,234 @@ impl CriticalPathScheduler {
         })
     }
 
-    /// Select the most fungible resource from tied candidates.
+    /// Select the best resource from tied candidates.
     ///
-    /// Prefers resources with fewer exclusive tasks that would become eligible
-    /// before the current task completes.
+    /// Strategy:
+    /// 1. Fast path: If any candidate has 0 blocking exclusive tasks, pick it immediately
+    /// 2. Rollout path: If all candidates are scarce and rollout is enabled, simulate each
+    ///    choice and pick the one with the best schedule score
+    /// 3. Fallback: Pick the candidate with fewest blocking tasks
     #[allow(clippy::too_many_arguments)]
-    fn select_most_fungible_resource(
+    fn select_best_resource(
         &self,
         tied_candidates: Vec<(u32, String, NaiveDate)>,
-        task_completion: NaiveDate,
+        task_int: TaskId,
         ctx: &TaskData,
         scheduled_vec: &[(f64, f64)],
         unscheduled_vec: &[bool],
+        resource_schedules: &[ResourceSchedule],
+        reservations: &FxHashMap<u32, ResourceReservation>,
         initial_time: NaiveDate,
         current_time: NaiveDate,
     ) -> (u32, String) {
-        let mut best_resource_id = tied_candidates[0].0;
-        let mut best_resource_name = tied_candidates[0].1.clone();
-        let mut best_blocking_count = usize::MAX;
+        let verbosity = self.config.verbosity;
 
-        for (resource_id, resource_name, _) in tied_candidates {
-            let blocking_count = self.count_exclusive_blocking_tasks(
-                resource_id,
-                task_completion,
+        // Compute blocking count for each candidate
+        let candidates_with_counts: Vec<(u32, String, NaiveDate, usize)> = tied_candidates
+            .into_iter()
+            .map(|(id, name, completion)| {
+                let blocking = self.count_exclusive_blocking_tasks(
+                    id,
+                    completion,
+                    ctx,
+                    scheduled_vec,
+                    unscheduled_vec,
+                    initial_time,
+                    current_time,
+                );
+                (id, name, completion, blocking)
+            })
+            .collect();
+
+        // Fast path: any truly fungible candidate (0 blocking)?
+        if let Some((id, name, _, _)) = candidates_with_counts
+            .iter()
+            .find(|(_, _, _, count)| *count == 0)
+        {
+            log_debug!(
+                verbosity,
+                "    Fast path: picking fungible resource {} (0 blocking tasks)",
+                name
+            );
+            return (*id, name.clone());
+        }
+
+        // All candidates are scarce - use rollout if enabled
+        if self.config.rollout_enabled && candidates_with_counts.len() > 1 {
+            log_debug!(
+                verbosity,
+                "    All {} candidates are scarce, using rollout to decide",
+                candidates_with_counts.len()
+            );
+            return self.select_resource_via_rollout(
+                candidates_with_counts,
+                task_int,
                 ctx,
                 scheduled_vec,
                 unscheduled_vec,
+                resource_schedules,
+                reservations,
                 initial_time,
                 current_time,
             );
+        }
 
-            if blocking_count < best_blocking_count {
-                best_blocking_count = blocking_count;
-                best_resource_id = resource_id;
-                best_resource_name = resource_name;
-            }
+        // Fallback: pick candidate with lowest blocking count
+        let best = candidates_with_counts
+            .iter()
+            .min_by_key(|(_, _, _, count)| *count)
+            .unwrap();
+        log_debug!(
+            verbosity,
+            "    Fallback: picking {} with {} blocking tasks",
+            best.1,
+            best.3
+        );
+        (best.0, best.1.clone())
+    }
+
+    /// Select the best resource using rollout simulation.
+    ///
+    /// Simulates scheduling the task on each candidate resource and picks
+    /// the one that produces the best overall schedule score.
+    #[allow(clippy::too_many_arguments)]
+    fn select_resource_via_rollout(
+        &self,
+        candidates: Vec<(u32, String, NaiveDate, usize)>,
+        task_int: TaskId,
+        ctx: &TaskData,
+        scheduled_vec: &[(f64, f64)],
+        unscheduled_vec: &[bool],
+        resource_schedules: &[ResourceSchedule],
+        reservations: &FxHashMap<u32, ResourceReservation>,
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> (u32, String) {
+        let verbosity = self.config.verbosity;
+
+        // Calculate horizon for simulation
+        let horizon = self.calculate_resource_choice_horizon(&candidates, current_time, ctx);
+
+        log_debug!(
+            verbosity,
+            "    Resource choice rollout: {} candidates, horizon={}",
+            candidates.len(),
+            horizon
+        );
+
+        // Collect all scores for summary
+        let mut scores: Vec<(u32, String, usize, f64)> = Vec::with_capacity(candidates.len());
+
+        for (resource_id, resource_name, completion, blocking_count) in &candidates {
+            // Construct a temporary state for simulation
+            let temp_state = CriticalPathSchedulerState::new(
+                scheduled_vec.to_vec(),
+                unscheduled_vec.to_vec(),
+                initial_time,
+                resource_schedules.to_vec(),
+                current_time,
+            );
+
+            // Clone and modify for this candidate
+            let mut sim_state = temp_state.clone_for_rollout();
+            sim_state.reservations = reservations.clone();
+
+            // Mark this task as scheduled on this resource
+            let start_offset = (current_time - initial_time).num_days() as f64;
+            let end_offset = (*completion - initial_time).num_days() as f64;
+            sim_state.scheduled_vec[task_int as usize] = (start_offset, end_offset);
+            sim_state.unscheduled_vec[task_int as usize] = false;
+            sim_state.resource_schedules[*resource_id as usize]
+                .add_busy_period(current_time, *completion);
+
+            // Run simulation to horizon (rollout disabled to prevent recursion)
+            let final_state = self
+                .schedule_from_state_internal(sim_state, ctx, Some(horizon), false, None)
+                .unwrap_or_else(|_| {
+                    CriticalPathSchedulerState::new(
+                        vec![(f64::MAX, f64::MAX); ctx.len()],
+                        vec![false; ctx.len()],
+                        initial_time,
+                        Vec::new(),
+                        current_time,
+                    )
+                });
+            let score = self.score_state_int(&final_state, ctx, horizon);
+
+            log_debug!(
+                verbosity,
+                "      {}: blocking={}, rollout_score={:.4}",
+                resource_name,
+                blocking_count,
+                score
+            );
+
+            scores.push((*resource_id, resource_name.clone(), *blocking_count, score));
+        }
+
+        // Find the best score
+        let (best_resource_id, best_resource_name, _, _best_score) = scores
+            .iter()
+            .min_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
+            .cloned()
+            .unwrap();
+
+        // Print summary block with all scores
+        log_checks!(
+            verbosity,
+            "    Resource choice rollout summary (horizon={}):",
+            horizon
+        );
+        for (_, name, blocking, score) in &scores {
+            let marker = if *name == best_resource_name {
+                " <-- BEST"
+            } else {
+                ""
+            };
+            log_checks!(
+                verbosity,
+                "      {}: score={:.4}, blocking={}{}",
+                name,
+                score,
+                blocking,
+                marker
+            );
         }
 
         (best_resource_id, best_resource_name)
+    }
+
+    /// Calculate horizon for resource choice rollout.
+    ///
+    /// Uses the max estimated completion of exclusive tasks across all candidate resources,
+    /// capped by the configured max horizon.
+    fn calculate_resource_choice_horizon(
+        &self,
+        candidates: &[(u32, String, NaiveDate, usize)],
+        current_time: NaiveDate,
+        ctx: &TaskData,
+    ) -> NaiveDate {
+        let mut max_completion = current_time;
+
+        // Find max estimated completion across all candidate resources' exclusive tasks
+        for (resource_id, _, _, _) in candidates {
+            for &task_int in &self.resource_exclusive_tasks[*resource_id as usize] {
+                // Simple estimate: current_time + task duration
+                let task_duration = ctx.durations[task_int as usize];
+                let estimated = current_time + chrono::Duration::days(task_duration.ceil() as i64);
+                if estimated > max_completion {
+                    max_completion = estimated;
+                }
+            }
+        }
+
+        // Cap to configured max
+        if let Some(max_days) = self.config.rollout_max_horizon_days {
+            let cap = current_time + chrono::Duration::days(max_days as i64);
+            max_completion = max_completion.min(cap);
+        }
+
+        max_completion
     }
 
     /// Count exclusive tasks for a resource that would become eligible before task_end.
