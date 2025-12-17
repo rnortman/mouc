@@ -9,7 +9,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::models::Task;
 
-use super::calculation::{calculate_critical_path_interned, InternedContext};
+use super::calculation::{calculate_critical_path_interned, TaskData as InternedContext};
 use super::scoring::{compute_deadline_urgency, compute_no_deadline_urgency, transform_work};
 use super::types::{CriticalPathConfig, TargetInfo};
 
@@ -49,16 +49,29 @@ impl CriticalPathCache {
                 None => continue,
             };
 
+            // Get integer ID for this task
+            let target_int = match ctx.index.get_id(task_id) {
+                Some(id) => id,
+                None => continue,
+            };
+
             let priority = task.priority.unwrap_or(default_priority);
             let deadline = task.end_before;
 
             let cp_result =
                 calculate_critical_path_interned(task_id, ctx, scheduled_vec, completed_vec)?;
 
-            let mut info = TargetInfo::new(task_id.clone(), priority, deadline);
+            let mut info = TargetInfo::new(task_id.clone(), target_int, priority, deadline);
             info.critical_path_tasks = cp_result.critical_path_tasks.clone();
             info.total_work = cp_result.total_work;
             info.critical_path_length = cp_result.critical_path_length;
+
+            // Build critical_path_ints from critical_path_tasks
+            info.critical_path_ints = cp_result
+                .critical_path_tasks
+                .iter()
+                .filter_map(|id| ctx.index.get_id(id))
+                .collect();
 
             // Build reverse index: for each task on this target's critical path,
             // add this target to that task's set
@@ -128,6 +141,12 @@ impl CriticalPathCache {
                 None => continue,
             };
 
+            // Get integer ID for this task
+            let target_int = match ctx.index.get_id(target_id) {
+                Some(id) => id,
+                None => continue,
+            };
+
             let priority = task.priority.unwrap_or(default_priority);
             let deadline = task.end_before;
 
@@ -136,10 +155,17 @@ impl CriticalPathCache {
                 calculate_critical_path_interned(target_id, ctx, scheduled_vec, completed_vec)?;
 
             // Update the target info
-            let mut info = TargetInfo::new(target_id.clone(), priority, deadline);
+            let mut info = TargetInfo::new(target_id.clone(), target_int, priority, deadline);
             info.critical_path_tasks = cp_result.critical_path_tasks.clone();
             info.total_work = cp_result.total_work;
             info.critical_path_length = cp_result.critical_path_length;
+
+            // Build critical_path_ints from critical_path_tasks
+            info.critical_path_ints = cp_result
+                .critical_path_tasks
+                .iter()
+                .filter_map(|id| ctx.index.get_id(id))
+                .collect();
 
             // Update reverse index: remove old entries, add new ones
             // First, remove this target from all task entries (from the old critical path)
@@ -271,9 +297,9 @@ mod tests {
         .collect();
 
         let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
-        let ctx = InternedContext::new(&tasks);
-        let completed_vec = vec![false; ctx.interner.len()];
-        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+        let ctx = InternedContext::new(&tasks, 50);
+        let completed_vec = vec![false; ctx.index.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.index.len()];
 
         let mut cache = CriticalPathCache::new(
             &unscheduled,
@@ -306,9 +332,9 @@ mod tests {
         .collect();
 
         let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
-        let ctx = InternedContext::new(&tasks);
-        let completed_vec = vec![false; ctx.interner.len()];
-        let mut scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+        let ctx = InternedContext::new(&tasks, 50);
+        let completed_vec = vec![false; ctx.index.len()];
+        let mut scheduled_vec = vec![f64::MAX; ctx.index.len()];
 
         let mut cache = CriticalPathCache::new(
             &unscheduled,
@@ -321,7 +347,7 @@ mod tests {
         .unwrap();
 
         // Schedule task a
-        let a_id = ctx.interner.get("a").unwrap() as usize;
+        let a_id = ctx.index.get_id("a").unwrap() as usize;
         scheduled_vec[a_id] = 0.0; // scheduled at time 0
 
         let recomputed = cache
@@ -360,9 +386,9 @@ mod tests {
         unscheduled.remove("b");
         // Only c is unscheduled, so only c is a target
 
-        let ctx = InternedContext::new(&tasks);
-        let completed_vec = vec![false; ctx.interner.len()];
-        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+        let ctx = InternedContext::new(&tasks, 50);
+        let completed_vec = vec![false; ctx.index.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.index.len()];
 
         let mut cache = CriticalPathCache::new(
             &unscheduled,
@@ -423,9 +449,9 @@ mod tests {
             .collect();
 
         let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
-        let ctx = InternedContext::new(&tasks);
-        let completed_vec = vec![false; ctx.interner.len()];
-        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+        let ctx = InternedContext::new(&tasks, 50);
+        let completed_vec = vec![false; ctx.index.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.index.len()];
 
         let mut cache = CriticalPathCache::new(
             &unscheduled,
@@ -478,9 +504,9 @@ mod tests {
         .collect();
 
         let unscheduled: FxHashSet<String> = tasks.keys().cloned().collect();
-        let ctx = InternedContext::new(&tasks);
-        let completed_vec = vec![false; ctx.interner.len()];
-        let scheduled_vec = vec![f64::MAX; ctx.interner.len()];
+        let ctx = InternedContext::new(&tasks, 50);
+        let completed_vec = vec![false; ctx.index.len()];
+        let scheduled_vec = vec![f64::MAX; ctx.index.len()];
 
         let mut cache = CriticalPathCache::new(
             &unscheduled,

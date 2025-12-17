@@ -219,6 +219,8 @@ mod tests {
     fn make_target(id: &str, score: f64, cp_tasks: Vec<&str>) -> TargetInfo {
         TargetInfo {
             target_id: id.to_string(),
+            target_int: 0, // Test value
+            critical_path_ints: Vec::new(),
             critical_path_tasks: cp_tasks.into_iter().map(|s| s.to_string()).collect(),
             total_work: 10.0,
             critical_path_length: 10.0,

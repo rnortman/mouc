@@ -57,6 +57,64 @@ impl ResourceIndex {
     }
 }
 
+/// Task ID type (u32 for compact storage and fast indexing).
+pub type TaskId = u32;
+
+/// Maps task ID strings to consecutive integer IDs for fast lookups.
+///
+/// Avoids expensive string hashing during scheduling by using array indexing.
+#[derive(Clone, Debug)]
+pub struct TaskIndex {
+    name_to_id: FxHashMap<String, TaskId>,
+    id_to_name: Vec<String>,
+}
+
+impl TaskIndex {
+    /// Create a new task index from an iterator of task ID strings.
+    pub fn new(task_ids: impl Iterator<Item = String>) -> Self {
+        let id_to_name: Vec<String> = task_ids.collect();
+        let name_to_id: FxHashMap<String, TaskId> = id_to_name
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (name.clone(), i as TaskId))
+            .collect();
+        Self {
+            name_to_id,
+            id_to_name,
+        }
+    }
+
+    /// Get the integer ID for a task ID string.
+    #[inline]
+    pub fn get_id(&self, name: &str) -> Option<TaskId> {
+        self.name_to_id.get(name).copied()
+    }
+
+    /// Get the task ID string for an integer ID.
+    #[inline]
+    pub fn get_name(&self, id: TaskId) -> Option<&str> {
+        self.id_to_name.get(id as usize).map(|s| s.as_str())
+    }
+
+    /// Get the number of tasks in the index.
+    pub fn len(&self) -> usize {
+        self.id_to_name.len()
+    }
+
+    /// Check if the index is empty.
+    pub fn is_empty(&self) -> bool {
+        self.id_to_name.is_empty()
+    }
+
+    /// Iterate over all (id, name) pairs.
+    pub fn iter(&self) -> impl Iterator<Item = (TaskId, &str)> {
+        self.id_to_name
+            .iter()
+            .enumerate()
+            .map(|(i, name)| (i as TaskId, name.as_str()))
+    }
+}
+
 /// Bitmask representing a set of resources by ID.
 ///
 /// Supports up to 128 resources. Uses bitwise operations for O(1) set operations.
@@ -330,10 +388,16 @@ impl TaskTiming {
 /// Information about a target and its critical path.
 #[derive(Clone, Debug)]
 pub struct TargetInfo {
-    /// Task ID of this target.
+    /// Task ID of this target (string, for logging/output).
     pub target_id: String,
 
-    /// Set of task IDs on the critical path to this target.
+    /// Integer task ID of this target (for fast array indexing).
+    pub target_int: TaskId,
+
+    /// Task IDs on the critical path as integers (for fast iteration).
+    pub critical_path_ints: Vec<TaskId>,
+
+    /// Set of task IDs on the critical path to this target (for compatibility, will be removed).
     pub critical_path_tasks: FxHashSet<String>,
 
     /// Total work remaining (sum of all dependency durations, not just critical path).
@@ -356,9 +420,16 @@ pub struct TargetInfo {
 }
 
 impl TargetInfo {
-    pub fn new(target_id: String, priority: i32, deadline: Option<NaiveDate>) -> Self {
+    pub fn new(
+        target_id: String,
+        target_int: TaskId,
+        priority: i32,
+        deadline: Option<NaiveDate>,
+    ) -> Self {
         Self {
             target_id,
+            target_int,
+            critical_path_ints: Vec::new(),
             critical_path_tasks: FxHashSet::default(),
             total_work: 0.0,
             critical_path_length: 0.0,

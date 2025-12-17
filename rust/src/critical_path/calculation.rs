@@ -1,12 +1,12 @@
 //! Critical path calculation using forward and backward passes.
 
+use chrono::NaiveDate;
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::VecDeque;
 
-use crate::interner::{TaskIdInt, TaskIdInterner};
 use crate::models::Task;
 
-use super::types::TaskTiming;
+use super::types::{TaskId, TaskIndex, TaskResourceReq, TaskTiming};
 
 /// Pre-computed reverse dependency map: task_id -> Vec<(dependent_id, lag)>
 /// This allows O(1) lookup of all tasks that depend on a given task.
@@ -29,103 +29,156 @@ pub fn build_dependents_map(tasks: &FxHashMap<String, Task>) -> DependentsMap<'_
     dependents
 }
 
-/// Pre-computed interned context for fast critical path calculations.
+/// Pre-computed task data for fast critical path calculations.
 /// Build this once and reuse for multiple target calculations.
 /// All lookups use direct array indexing for O(1) access.
-pub struct InternedContext {
-    pub interner: TaskIdInterner,
-    /// Task durations indexed by interned ID
+pub struct TaskData {
+    /// Task ID string <-> integer mapping.
+    pub index: TaskIndex,
+    /// Task durations indexed by task ID.
     pub durations: Vec<f64>,
-    /// Task dependencies as (dep_id, lag) pairs, indexed by interned ID
-    pub deps: Vec<Vec<(TaskIdInt, f64)>>,
-    /// Reverse dependencies (dependents) as (dependent_id, lag) pairs, indexed by interned ID
-    pub dependents_vec: Vec<Vec<(TaskIdInt, f64)>>,
+    /// Task priorities indexed by task ID.
+    pub priorities: Vec<i32>,
+    /// Task start_after constraints indexed by task ID.
+    pub start_afters: Vec<Option<NaiveDate>>,
+    /// Task dependencies as (dep_id, lag) pairs, indexed by task ID.
+    pub deps: Vec<Vec<(TaskId, f64)>>,
+    /// Reverse dependencies (dependents) as (dependent_id, lag) pairs, indexed by task ID.
+    pub dependents: Vec<Vec<(TaskId, f64)>>,
+    /// Pre-computed resource requirements indexed by task ID.
+    pub resource_reqs: Vec<Option<TaskResourceReq>>,
 }
 
-impl InternedContext {
-    /// Build interned context from tasks.
-    pub fn new(tasks: &FxHashMap<String, Task>) -> Self {
-        let mut interner = TaskIdInterner::with_capacity(tasks.len());
-
-        // First pass: intern all task IDs
-        for task_id in tasks.keys() {
-            interner.intern(task_id);
-        }
-        // Also intern dependency targets
+impl TaskData {
+    /// Build task data from tasks map.
+    ///
+    /// The `default_priority` is used for tasks without an explicit priority.
+    /// The `resource_reqs` field is initially empty; call `set_resource_reqs()` after
+    /// building the ResourceIndex to populate it.
+    pub fn new(tasks: &FxHashMap<String, Task>, default_priority: i32) -> Self {
+        // Collect all task IDs (from both keys and dependency targets)
+        let mut all_ids: FxHashSet<String> = tasks.keys().cloned().collect();
         for task in tasks.values() {
             for dep in &task.dependencies {
-                interner.intern(&dep.entity_id);
+                all_ids.insert(dep.entity_id.clone());
             }
         }
 
-        let n = interner.len();
+        // Build index with deterministic ordering
+        let mut sorted_ids: Vec<String> = all_ids.into_iter().collect();
+        sorted_ids.sort();
+        let index = TaskIndex::new(sorted_ids.into_iter());
 
-        // Build durations vector (indexed by interned ID)
+        let n = index.len();
+
+        // Build data vectors (indexed by task ID)
         let mut durations = vec![0.0; n];
-        for (task_id, task) in tasks {
-            if let Some(id) = interner.get(task_id) {
-                durations[id as usize] = task.duration_days;
-            }
-        }
+        let mut priorities = vec![default_priority; n];
+        let mut start_afters = vec![None; n];
+        let mut deps: Vec<Vec<(TaskId, f64)>> = vec![Vec::new(); n];
+        let mut dependents: Vec<Vec<(TaskId, f64)>> = vec![Vec::new(); n];
 
-        // Build dependencies vector (indexed by interned ID)
-        let mut deps: Vec<Vec<(TaskIdInt, f64)>> = vec![Vec::new(); n];
         for (task_id, task) in tasks {
-            if let Some(task_int) = interner.get(task_id) {
+            if let Some(id) = index.get_id(task_id) {
+                let idx = id as usize;
+                durations[idx] = task.duration_days;
+                priorities[idx] = task.priority.unwrap_or(default_priority);
+                start_afters[idx] = task.start_after;
+
                 for dep in &task.dependencies {
-                    if let Some(dep_int) = interner.get(&dep.entity_id) {
-                        deps[task_int as usize].push((dep_int, dep.lag_days));
+                    if let Some(dep_id) = index.get_id(&dep.entity_id) {
+                        deps[idx].push((dep_id, dep.lag_days));
+                        dependents[dep_id as usize].push((id, dep.lag_days));
                     }
                 }
             }
         }
 
-        // Build dependents vector (reverse of deps)
-        let mut dependents_vec: Vec<Vec<(TaskIdInt, f64)>> = vec![Vec::new(); n];
-        for (task_id, task) in tasks {
-            let task_int = interner.get(task_id).unwrap();
-            for dep in &task.dependencies {
-                if let Some(dep_int) = interner.get(&dep.entity_id) {
-                    dependents_vec[dep_int as usize].push((task_int, dep.lag_days));
-                }
-            }
-        }
-
         Self {
-            interner,
+            index,
             durations,
+            priorities,
+            start_afters,
             deps,
-            dependents_vec,
+            dependents,
+            resource_reqs: vec![None; n],
         }
+    }
+
+    /// Set the pre-computed resource requirements.
+    pub fn set_resource_reqs(&mut self, reqs: Vec<Option<TaskResourceReq>>) {
+        self.resource_reqs = reqs;
+    }
+
+    /// Get number of tasks.
+    pub fn len(&self) -> usize {
+        self.index.len()
+    }
+
+    /// Check if empty.
+    pub fn is_empty(&self) -> bool {
+        self.index.is_empty()
     }
 
     /// Create a boolean vector for a set of string IDs.
     pub fn to_bool_vec(&self, strings: &FxHashSet<String>) -> Vec<bool> {
-        let mut result = vec![false; self.interner.len()];
+        let mut result = vec![false; self.index.len()];
         for s in strings {
-            if let Some(id) = self.interner.get(s) {
+            if let Some(id) = self.index.get_id(s) {
                 result[id as usize] = true;
             }
         }
         result
     }
 
-    /// Create a scheduled times vector (f64::MAX for unscheduled).
-    pub fn to_scheduled_vec(
+    /// Create a scheduled end times vector (f64::MAX for unscheduled).
+    /// Values are days relative to current_time.
+    pub fn to_scheduled_end_vec(
         &self,
-        scheduled: &FxHashMap<String, (chrono::NaiveDate, chrono::NaiveDate)>,
-        current_time: chrono::NaiveDate,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        current_time: NaiveDate,
     ) -> Vec<f64> {
-        let mut result = vec![f64::MAX; self.interner.len()];
+        let mut result = vec![f64::MAX; self.index.len()];
         for (id, (_, end)) in scheduled {
-            if let Some(int_id) = self.interner.get(id) {
+            if let Some(int_id) = self.index.get_id(id) {
                 let days = (*end - current_time).num_days() as f64;
                 result[int_id as usize] = days.max(0.0);
             }
         }
         result
     }
+
+    /// Create a scheduled start times vector (f64::MAX for unscheduled).
+    /// Values are days relative to current_time.
+    pub fn to_scheduled_start_vec(
+        &self,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        current_time: NaiveDate,
+    ) -> Vec<f64> {
+        let mut result = vec![f64::MAX; self.index.len()];
+        for (id, (start, _)) in scheduled {
+            if let Some(int_id) = self.index.get_id(id) {
+                let days = (*start - current_time).num_days() as f64;
+                result[int_id as usize] = days;
+            }
+        }
+        result
+    }
+
+    /// Create an unscheduled boolean vector from a set of unscheduled task IDs.
+    pub fn to_unscheduled_vec(&self, unscheduled: &FxHashSet<String>) -> Vec<bool> {
+        let mut result = vec![false; self.index.len()];
+        for id in unscheduled {
+            if let Some(int_id) = self.index.get_id(id) {
+                result[int_id as usize] = true;
+            }
+        }
+        result
+    }
 }
+
+// Type alias for backwards compatibility during migration
+pub type InternedContext = TaskData;
 
 /// Error types for critical path calculation.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -364,15 +417,15 @@ pub fn calculate_critical_path_with_dependents<'a>(
     })
 }
 
-/// Calculate critical path using interned integer IDs and array indexing for maximum performance.
+/// Calculate critical path using integer IDs and array indexing for maximum performance.
 /// All internal operations use integer IDs with direct array access; strings are only used at boundaries.
 pub fn calculate_critical_path_interned(
     target_id: &str,
-    ctx: &InternedContext,
-    scheduled_vec: &[f64], // indexed by TaskIdInt, f64::MAX means not scheduled
-    completed_vec: &[bool], // indexed by TaskIdInt
+    ctx: &TaskData,
+    scheduled_vec: &[f64],  // indexed by TaskId, f64::MAX means not scheduled
+    completed_vec: &[bool], // indexed by TaskId
 ) -> Result<CriticalPathResult, CriticalPathError> {
-    let target_int = match ctx.interner.get(target_id) {
+    let target_int = match ctx.index.get_id(target_id) {
         Some(id) => id,
         None => {
             return Ok(CriticalPathResult {
@@ -384,7 +437,7 @@ pub fn calculate_critical_path_interned(
         }
     };
 
-    let n = ctx.interner.len();
+    let n = ctx.index.len();
 
     // Find subgraph using array-based lookup
     let (subgraph_vec, subgraph_ids) =
@@ -471,8 +524,8 @@ pub fn calculate_critical_path_interned(
         let idx = task_int as usize;
         let mut latest_finish = f64::MAX;
 
-        // Use dependents_vec for O(1) lookup
-        for &(dependent_int, lag) in &ctx.dependents_vec[idx] {
+        // Use dependents for O(1) lookup
+        for &(dependent_int, lag) in &ctx.dependents[idx] {
             let dep_idx = dependent_int as usize;
             if !subgraph_vec[dep_idx] && dependent_int != target_int {
                 continue;
@@ -508,7 +561,7 @@ pub fn calculate_critical_path_interned(
     for &task_int in &topo_order {
         let idx = task_int as usize;
         if let Some(timing) = timings[idx].take() {
-            if let Some(name) = ctx.interner.resolve(task_int) {
+            if let Some(name) = ctx.index.get_name(task_int) {
                 if timing.is_critical() {
                     critical_path_tasks.insert(name.to_string());
                 }
@@ -528,15 +581,15 @@ pub fn calculate_critical_path_interned(
 /// Find dependency subgraph using array-based lookups.
 /// Returns (subgraph_vec, subgraph_ids) where subgraph_vec[i] is true if task i is in subgraph.
 fn find_dependency_subgraph_vec(
-    target_int: TaskIdInt,
-    ctx: &InternedContext,
+    target_int: TaskId,
+    ctx: &TaskData,
     completed_vec: &[bool],
     scheduled_vec: &[f64],
-) -> (Vec<bool>, Vec<TaskIdInt>) {
-    let n = ctx.interner.len();
+) -> (Vec<bool>, Vec<TaskId>) {
+    let n = ctx.index.len();
     let mut subgraph_vec = vec![false; n];
     let mut subgraph_ids = Vec::new();
-    let mut queue: VecDeque<TaskIdInt> = VecDeque::new();
+    let mut queue: VecDeque<TaskId> = VecDeque::new();
 
     // Start from target's dependencies
     for &(dep_int, _) in &ctx.deps[target_int as usize] {
@@ -572,11 +625,11 @@ fn find_dependency_subgraph_vec(
 /// Topological sort using array-based lookups.
 fn topological_sort_vec(
     subgraph_vec: &[bool],
-    subgraph_ids: &[TaskIdInt],
-    target_int: TaskIdInt,
-    ctx: &InternedContext,
-) -> Result<Vec<TaskIdInt>, CriticalPathError> {
-    let n = ctx.interner.len();
+    subgraph_ids: &[TaskId],
+    target_int: TaskId,
+    ctx: &TaskData,
+) -> Result<Vec<TaskId>, CriticalPathError> {
+    let n = ctx.index.len();
     let node_count = subgraph_ids.len() + 1;
 
     // Build node set including target
@@ -602,7 +655,7 @@ fn topological_sort_vec(
     }
 
     // Initialize queue with zero in-degree nodes
-    let mut queue: VecDeque<TaskIdInt> = VecDeque::new();
+    let mut queue: VecDeque<TaskId> = VecDeque::new();
     for &task_int in subgraph_ids {
         if in_degree[task_int as usize] == 0 {
             queue.push_back(task_int);
@@ -612,13 +665,13 @@ fn topological_sort_vec(
         queue.push_back(target_int);
     }
 
-    let mut result: Vec<TaskIdInt> = Vec::with_capacity(node_count);
+    let mut result: Vec<TaskId> = Vec::with_capacity(node_count);
 
     while let Some(task_int) = queue.pop_front() {
         result.push(task_int);
 
         // Update dependents
-        for &(dependent_int, _) in &ctx.dependents_vec[task_int as usize] {
+        for &(dependent_int, _) in &ctx.dependents[task_int as usize] {
             let dep_idx = dependent_int as usize;
             if node_vec[dep_idx] {
                 in_degree[dep_idx] -= 1;

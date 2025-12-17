@@ -139,6 +139,8 @@ mod tests {
     fn make_target(id: &str, priority: i32, total_work: f64, cp_length: f64) -> TargetInfo {
         TargetInfo {
             target_id: id.to_string(),
+            target_int: 0, // Test value
+            critical_path_ints: Vec::new(),
             critical_path_tasks: FxHashSet::default(),
             total_work,
             critical_path_length: cp_length,
