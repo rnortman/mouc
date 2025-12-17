@@ -47,6 +47,10 @@ pub struct TaskData {
     pub dependents: Vec<Vec<(TaskId, f64)>>,
     /// Pre-computed resource requirements indexed by task ID.
     pub resource_reqs: Vec<Option<TaskResourceReq>>,
+    /// Explicit resources assigned to each task: Vec<(resource_name, allocation)>
+    pub explicit_resources: Vec<Vec<(String, f64)>>,
+    /// Resource specs for auto-assignment.
+    pub resource_specs: Vec<Option<String>>,
 }
 
 impl TaskData {
@@ -77,6 +81,8 @@ impl TaskData {
         let mut start_afters = vec![None; n];
         let mut deps: Vec<Vec<(TaskId, f64)>> = vec![Vec::new(); n];
         let mut dependents: Vec<Vec<(TaskId, f64)>> = vec![Vec::new(); n];
+        let mut explicit_resources = vec![Vec::new(); n];
+        let mut resource_specs = vec![None; n];
 
         for (task_id, task) in tasks {
             if let Some(id) = index.get_id(task_id) {
@@ -84,6 +90,8 @@ impl TaskData {
                 durations[idx] = task.duration_days;
                 priorities[idx] = task.priority.unwrap_or(default_priority);
                 start_afters[idx] = task.start_after;
+                explicit_resources[idx] = task.resources.clone();
+                resource_specs[idx] = task.resource_spec.clone();
 
                 for dep in &task.dependencies {
                     if let Some(dep_id) = index.get_id(&dep.entity_id) {
@@ -102,6 +110,8 @@ impl TaskData {
             deps,
             dependents,
             resource_reqs: vec![None; n],
+            explicit_resources,
+            resource_specs,
         }
     }
 
@@ -174,6 +184,34 @@ impl TaskData {
             }
         }
         result
+    }
+
+    /// Create a scheduled times vector as (start_offset, end_offset) pairs.
+    /// Values are f64::MAX for unscheduled tasks.
+    pub fn to_scheduled_times_vec(
+        &self,
+        scheduled: &FxHashMap<String, (NaiveDate, NaiveDate)>,
+        reference_time: NaiveDate,
+    ) -> Vec<(f64, f64)> {
+        let mut result = vec![(f64::MAX, f64::MAX); self.index.len()];
+        for (id, (start, end)) in scheduled {
+            if let Some(int_id) = self.index.get_id(id) {
+                let start_offset = (*start - reference_time).num_days() as f64;
+                let end_offset = (*end - reference_time).num_days() as f64;
+                result[int_id as usize] = (start_offset, end_offset.max(0.0));
+            }
+        }
+        result
+    }
+
+    /// Create an initial scheduled_vec with all tasks unscheduled.
+    pub fn create_empty_scheduled_vec(&self) -> Vec<(f64, f64)> {
+        vec![(f64::MAX, f64::MAX); self.index.len()]
+    }
+
+    /// Create an initial unscheduled_vec with specified tasks marked as unscheduled.
+    pub fn create_unscheduled_vec(&self, unscheduled_ids: &FxHashSet<String>) -> Vec<bool> {
+        self.to_unscheduled_vec(unscheduled_ids)
     }
 }
 
