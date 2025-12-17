@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bounded rollout scheduler uses rollout for resource choice when best resource unavailable
 
 ### Added
+- CSV output filtering: `@filter_entity(formats=['csv'])` filters apply to `--output-csv` output
 - Phased scheduling: `schedule --output-lock`, `--lock-file`, `--style-tags`, `--style-file` for multi-pass scheduling
 - `gantt --lock-file` to render charts from pre-computed schedules (skips scheduling)
 - `schedule --output-csv` and `compare` commands for scenario analysis

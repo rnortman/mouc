@@ -1,11 +1,17 @@
 """Tests for CLI commands."""
 
+# pyright: reportUnusedFunction=false
+
 import csv
+from collections.abc import Sequence
 from pathlib import Path
 
 from typer.testing import CliRunner
 
+from mouc import styling
 from mouc.cli import app
+from mouc.styling import Entity as EntityProtocol
+from mouc.styling import StylingContext
 
 runner = CliRunner()
 
@@ -203,6 +209,44 @@ class TestScheduleCommand:
 
             # task_id should not be empty
             assert row["task_id"]
+
+    def test_schedule_csv_respects_filters(self, tmp_path: Path) -> None:
+        """Test that CSV output respects @filter_entity(formats=['csv']) filters."""
+        styling.clear_registrations()
+
+        # Register a filter that only keeps entities with id containing "queue"
+        @styling.filter_entity(formats=["csv"])
+        def filter_queue_only(
+            entities: Sequence[EntityProtocol], _context: StylingContext
+        ) -> list[EntityProtocol]:
+            return [e for e in entities if "queue" in e.id.lower()]
+
+        output_file = tmp_path / "schedule.csv"
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "examples/feature_map.yaml",
+                "--current-date",
+                "2025-01-01",
+                "--output-csv",
+                str(output_file),
+            ],
+        )
+
+        assert result.exit_code == 0
+        assert output_file.exists()
+
+        with output_file.open(newline="") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+        # All rows should have "queue" in task_id (due to filter)
+        assert len(rows) > 0
+        for row in rows:
+            assert "queue" in row["task_id"].lower()
+
+        styling.clear_registrations()
 
 
 class TestCompareCommand:

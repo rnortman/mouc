@@ -6,11 +6,12 @@ import csv
 import importlib
 import importlib.util
 import sys
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, cast
 
 import typer
 
@@ -23,7 +24,7 @@ from .graph import GraphGenerator, GraphView
 from .jira_cli import jira_app, write_feature_map
 from .loader import load_feature_map
 from .logger import setup_logger
-from .models import FeatureMap
+from .models import Entity, FeatureMap
 from .scheduler import (
     AlgorithmConfig,
     AlgorithmType,
@@ -665,7 +666,7 @@ def _display_schedule_results(feature_map: FeatureMap, result: SchedulingResult)
 
 
 def _export_schedule_csv(
-    feature_map: FeatureMap,
+    entities: Sequence[Entity],
     result: SchedulingResult,
     output_path: Path,
     default_priority: int,
@@ -675,7 +676,7 @@ def _export_schedule_csv(
         writer = csv.writer(f)
         writer.writerow(["task_id", "task_name", "priority", "deadline", "completion_date"])
 
-        for entity in feature_map.entities:
+        for entity in entities:
             if entity.id not in result.annotations:
                 continue
 
@@ -844,12 +845,19 @@ def schedule(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple op
 
     # Display or persist results
     if output_csv:
+        # Apply CSV-specific output filters
+        csv_context = styling.create_styling_context(
+            feature_map, output_format="csv", style_tags=active_style_tags
+        )
+        csv_entities = cast(
+            list[Entity], styling.apply_entity_filters(feature_map.entities, csv_context)
+        )
         default_priority = (
             scheduler_config.default_priority
             if scheduler_config
             else SchedulingConfig().default_priority
         )
-        _export_schedule_csv(feature_map, result, output_csv, default_priority)
+        _export_schedule_csv(csv_entities, result, output_csv, default_priority)
         typer.echo(f"Schedule exported to {output_csv}")
     elif annotate_yaml:
         _annotate_feature_map(feature_map, result, file)
