@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Critical path urgency can now exceed 1.0 for slipping deadlines (negative slack)
 - Removed `default_priority` from `critical_path` config section; now uses global `scheduler.default_priority`
 - CP-SAT scheduler now rejects multi-resource tasks (use `resource_spec` for auto-assignment instead)
 - CP-SAT scheduler now supports DNS splitting (tasks can span DNS periods, matching greedy scheduler behavior)

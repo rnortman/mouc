@@ -55,8 +55,8 @@ pub fn score_target(
 /// Formula: `urgency = exp(-slack / (K * avg_work))`
 /// where `slack = deadline - now - critical_path_length`
 ///
-/// Returns 1.0 (maximum urgency) if slack <= 0 (late or on time).
-/// Otherwise returns exponential decay floored by `urgency_floor`.
+/// Returns urgency > 1.0 for negative slack (slipping deadlines),
+/// 1.0 for slack = 0, and exponential decay floored by `urgency_floor` for positive slack.
 pub fn compute_deadline_urgency(
     deadline: NaiveDate,
     critical_path_length: f64,
@@ -67,11 +67,12 @@ pub fn compute_deadline_urgency(
     let days_until = (deadline - current_time).num_days() as f64;
     let slack = days_until - critical_path_length;
 
-    if slack <= 0.0 {
-        1.0
+    let denominator = config.k * avg_work.max(1.0);
+    let urgency = (-slack / denominator).exp();
+    if slack > 0.0 {
+        urgency.max(config.urgency_floor)
     } else {
-        let denominator = config.k * avg_work.max(1.0);
-        (-slack / denominator).exp().max(config.urgency_floor)
+        urgency
     }
 }
 
@@ -135,19 +136,21 @@ pub fn score_task(priority: i32, duration: f64) -> f64 {
 ///
 /// Formula: `urgency = exp(-slack / (K * denominator))`
 ///
-/// Returns 1.0 (maximum urgency) if slack <= 0 (on critical path).
-/// Otherwise returns exponential decay floored by `urgency_floor`.
+/// Returns urgency > 1.0 for negative slack (behind schedule),
+/// 1.0 for slack = 0 (on critical path), and exponential decay
+/// floored by `urgency_floor` for positive slack.
 ///
 /// # Arguments
 /// * `slack` - Task's slack relative to a target (days)
 /// * `config` - Scheduler configuration
 /// * `denominator` - The value to use in the decay formula (varies by config)
 pub fn compute_task_urgency(slack: f64, config: &CriticalPathConfig, denominator: f64) -> f64 {
-    if slack <= 0.0 {
-        1.0
+    let decay_factor = config.k * denominator.max(1.0);
+    let urgency = (-slack / decay_factor).exp();
+    if slack > 0.0 {
+        urgency.max(config.urgency_floor)
     } else {
-        let decay_factor = config.k * denominator.max(1.0);
-        (-slack / decay_factor).exp().max(config.urgency_floor)
+        urgency
     }
 }
 
@@ -276,14 +279,18 @@ mod tests {
 
     #[test]
     fn test_urgency_past_deadline() {
-        let config = CriticalPathConfig::default();
+        let config = CriticalPathConfig::default(); // k=2.0
         let current_time = d(2025, 1, 15);
 
         let mut past_deadline = make_target("a", 50, 10.0, 10.0);
         past_deadline.deadline = Some(d(2025, 1, 10)); // Already past!
 
+        // slack = (10 - 15) - 10 = -15 days
+        // urgency = exp(-(-15) / (2 * 10)) = exp(0.75) ≈ 2.117
         let urgency = compute_urgency(&past_deadline, &config, current_time, 10.0);
-        assert!((urgency - 1.0).abs() < 1e-9); // Maximum urgency
+        let expected = (0.75_f64).exp();
+        assert!(urgency > 1.0); // Above maximum for slipping deadlines
+        assert!((urgency - expected).abs() < 1e-9);
     }
 
     #[test]
@@ -530,11 +537,13 @@ mod tests {
 
     #[test]
     fn test_compute_task_urgency_zero_slack() {
-        let config = CriticalPathConfig::default();
-        // Zero slack (on critical path) should give maximum urgency
+        let config = CriticalPathConfig::default(); // k=2.0
+                                                    // Zero slack (on critical path) should give urgency = 1.0
         assert!((compute_task_urgency(0.0, &config, 10.0) - 1.0).abs() < 1e-9);
-        // Negative slack should also give maximum urgency
-        assert!((compute_task_urgency(-5.0, &config, 10.0) - 1.0).abs() < 1e-9);
+        // Negative slack should give urgency > 1.0
+        // slack=-5, denom=10, k=2: exp(-(-5) / (2 * 10)) = exp(0.25) ≈ 1.284
+        let expected = (0.25_f64).exp();
+        assert!((compute_task_urgency(-5.0, &config, 10.0) - expected).abs() < 1e-9);
     }
 
     #[test]

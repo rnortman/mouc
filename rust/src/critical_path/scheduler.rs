@@ -548,7 +548,13 @@ impl CriticalPathScheduler {
                         let target_name = ctx.index.get_name(best_target).unwrap_or("?");
                         eprintln!(
                             "    {} via {} slack={:.1} denom={:.1} urg={:.3} tgt={:.3} => {:.3}",
-                            task_name, target_name, slack, denom, task_urg, target_score, final_score
+                            task_name,
+                            target_name,
+                            slack,
+                            denom,
+                            task_urg,
+                            target_score,
+                            final_score
                         );
                     }
                 }

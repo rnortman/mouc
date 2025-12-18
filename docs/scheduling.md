@@ -720,10 +720,11 @@ This naturally favors **low-hanging fruit** (high priority, low total work) whil
 
 **Urgency Calculation:**
 ```
-urgency = exp(-max(0, slack) / (K × avg_work))
+urgency = exp(-slack / (K × avg_work))
 ```
-- Tasks with tight deadlines get urgency → 1.0
-- Tasks with slack get exponentially decreasing urgency
+- Tasks with negative slack (slipping deadlines) get urgency > 1.0
+- Tasks with zero slack get urgency = 1.0
+- Tasks with positive slack get exponentially decreasing urgency (floored)
 - No-deadline tasks get: `min(deadline_urgency) × multiplier`, with a floor
 
 **Unified Task Scoring:**
@@ -734,6 +735,7 @@ Each eligible task gets a score based on its contribution to ALL targets in whos
 task_score(T) = max over all targets G: [target_score(G) × exp(-slack(T,G) / (K × denominator))]
 ```
 
+- **Behind-schedule tasks** (slack < 0): Get urgency > 1.0, boosting their score
 - **Critical path tasks** (slack = 0): Get urgency = 1.0, inherit target's full score
 - **Near-critical tasks** (small slack): Get slightly reduced urgency via exponential decay
 - **Slack tasks** (large slack): Get low urgency, unlikely to be scheduled until needed
