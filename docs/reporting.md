@@ -31,6 +31,16 @@ mouc report effort roadmap.yaml schedule.lock --timeframe 2025w12 -o effort.csv
 mouc report effort roadmap.yaml schedule.lock --start 2025-01-01 --end 2025-03-31 -o effort.csv
 ```
 
+### Workflow Phase Combining
+
+By default, workflow phases are combined into single line items. For example, if an entity has a `design_impl` workflow that creates a design phase and implementation phase, the effort report will show a single row with the combined effort.
+
+To see phases separately, use `--no-combine-phases`:
+
+```bash
+mouc report effort roadmap.yaml schedule.lock --timeframe 2025q1 -o effort.csv --no-combine-phases
+```
+
 ### Output Format
 
 The output is a CSV file with three columns:

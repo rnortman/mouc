@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- `mouc report effort` command: Generate CSV reports of task effort within a time range (supports `--timeframe` or `--start`/`--end`)
+- `mouc report effort` command: Generate CSV reports of task effort within a time range (supports `--timeframe` or `--start`/`--end`, `--combine-phases`/`--no-combine-phases`)
 
 ### Fixed
 - Config auto-discovery now checks the feature map directory before falling back to current directory

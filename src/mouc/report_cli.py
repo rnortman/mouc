@@ -60,20 +60,126 @@ def _validate_and_parse_time_range(
     return range_start, range_end
 
 
+def _group_entities_by_phase(
+    entities: list[Entity],
+) -> tuple[dict[str, Entity], dict[str, list[Entity]], list[Entity]]:
+    """Group entities into parent entities, phase entities by parent, and standalone entities."""
+    parent_entities: dict[str, Entity] = {}
+    phase_entities_by_parent: dict[str, list[Entity]] = {}
+
+    for entity in entities:
+        if entity.phase_of is not None:
+            parent_id = entity.phase_of[0]
+            phase_entities_by_parent.setdefault(parent_id, []).append(entity)
+        else:
+            parent_entities[entity.id] = entity
+
+    # Standalone entities are those without phases
+    standalone_entities = [
+        entity
+        for entity_id, entity in parent_entities.items()
+        if entity_id not in phase_entities_by_parent
+    ]
+
+    return parent_entities, phase_entities_by_parent, standalone_entities
+
+
+def _calculate_combined_effort(
+    entities: list[Entity],
+    schedule_lock: ScheduleLock,
+    range_start: date,
+    range_end: date,
+    validator: SchedulerInputValidator,
+) -> float | None:
+    """Calculate combined effort for a list of entities. Returns None if no overlap."""
+    total_effort = 0.0
+    has_any_effort = False
+
+    for entity in entities:
+        effort = _calculate_entity_effort(entity, schedule_lock, range_start, range_end, validator)
+        if effort is not None:
+            total_effort += effort
+            has_any_effort = True
+
+    return round(total_effort, 2) if has_any_effort else None
+
+
 def _calculate_effort_rows(
     feature_map: FeatureMap,
     schedule_lock: ScheduleLock,
     range_start: date,
     range_end: date,
+    combine_phases: bool = True,
 ) -> list[tuple[str, str, float]]:
     """Calculate effort per task in the given time range."""
     validator = SchedulerInputValidator()
-    rows: list[tuple[str, str, float]] = []
 
-    for entity in feature_map.entities:
+    if not combine_phases:
+        return _calculate_effort_rows_simple(
+            feature_map.entities, schedule_lock, range_start, range_end, validator
+        )
+
+    return _calculate_effort_rows_combined(
+        feature_map.entities, schedule_lock, range_start, range_end, validator
+    )
+
+
+def _calculate_effort_rows_simple(
+    entities: list[Entity],
+    schedule_lock: ScheduleLock,
+    range_start: date,
+    range_end: date,
+    validator: SchedulerInputValidator,
+) -> list[tuple[str, str, float]]:
+    """Calculate effort rows without phase combining."""
+    rows: list[tuple[str, str, float]] = []
+    for entity in entities:
         effort = _calculate_entity_effort(entity, schedule_lock, range_start, range_end, validator)
         if effort is not None:
             rows.append((entity.id, entity.name, effort))
+    return rows
+
+
+def _calculate_effort_rows_combined(
+    entities: list[Entity],
+    schedule_lock: ScheduleLock,
+    range_start: date,
+    range_end: date,
+    validator: SchedulerInputValidator,
+) -> list[tuple[str, str, float]]:
+    """Calculate effort rows with workflow phases combined."""
+    parent_entities, phase_entities_by_parent, standalone_entities = _group_entities_by_phase(
+        entities
+    )
+
+    rows: list[tuple[str, str, float]] = []
+
+    # Process parent entities with their phases combined
+    for parent_id, phases in phase_entities_by_parent.items():
+        parent = parent_entities.get(parent_id)
+        if parent is None:
+            # Orphan phase entities - treat individually
+            rows.extend(
+                _calculate_effort_rows_simple(
+                    phases, schedule_lock, range_start, range_end, validator
+                )
+            )
+            continue
+
+        # Combine parent + all phases
+        all_entities = [parent, *phases]
+        combined_effort = _calculate_combined_effort(
+            all_entities, schedule_lock, range_start, range_end, validator
+        )
+        if combined_effort is not None:
+            rows.append((parent.id, parent.name, combined_effort))
+
+    # Process standalone entities (no phases)
+    rows.extend(
+        _calculate_effort_rows_simple(
+            standalone_entities, schedule_lock, range_start, range_end, validator
+        )
+    )
 
     return rows
 
@@ -141,6 +247,13 @@ def effort(  # noqa: PLR0913 - CLI commands need all parameters for typer
         Path | None,
         typer.Option("--output", "-o", help="Output CSV file path (required)"),
     ] = None,
+    combine_phases: Annotated[
+        bool,
+        typer.Option(
+            "--combine-phases/--no-combine-phases",
+            help="Combine workflow phases into single line items (default: combine)",
+        ),
+    ] = True,
 ) -> None:
     """Generate effort report for a time range.
 
@@ -177,7 +290,9 @@ def effort(  # noqa: PLR0913 - CLI commands need all parameters for typer
         raise typer.Exit(1) from None
 
     # Calculate effort per task in range
-    rows = _calculate_effort_rows(feature_map, schedule_lock, range_start, range_end)
+    rows = _calculate_effort_rows(
+        feature_map, schedule_lock, range_start, range_end, combine_phases
+    )
 
     # Write CSV
     with output.open("w", newline="") as f:

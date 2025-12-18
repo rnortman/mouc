@@ -10,8 +10,10 @@ import yaml
 from typer.testing import CliRunner
 
 from mouc.cli import app
+from mouc.models import Entity, FeatureMap, FeatureMapMetadata
+from mouc.report_cli import _calculate_effort_rows  # pyright: ignore[reportPrivateUsage]
 from mouc.scheduler.core import ScheduleAnnotations, SchedulingResult
-from mouc.scheduler.lock import write_lock_file
+from mouc.scheduler.lock import ScheduleLock, TaskLock, write_lock_file
 
 runner = CliRunner()
 
@@ -375,3 +377,221 @@ class TestEffortReportCommand:
         assert result.exit_code == 1
         # The validation catches this as missing both timeframe and complete date range
         assert "Must specify either --timeframe or both --start and --end" in result.output
+
+
+class TestEffortReportPhaseCombining:
+    """Tests for workflow phase combining in effort reports."""
+
+    def test_phases_combined_by_default(self, tmp_path: Path):
+        """Test that workflow phases are combined by default."""
+        # Create entities with phase_of set (simulating workflow expansion)
+        entities = [
+            Entity(
+                type="capability",
+                id="auth",
+                name="Authentication",
+                description="Auth implementation",
+                meta={"effort": "2w"},
+                phase_of=None,  # Parent entity
+            ),
+            Entity(
+                type="capability",
+                id="auth_design",
+                name="Authentication Design",
+                description="Auth design phase",
+                meta={"effort": "1w"},
+                phase_of=("auth", "design"),  # Phase entity
+            ),
+            Entity(
+                type="capability",
+                id="standalone",
+                name="Standalone Feature",
+                description="No workflow",
+                meta={"effort": "3w"},
+                phase_of=None,  # Standalone (no phases)
+            ),
+        ]
+
+        feature_map = FeatureMap(
+            metadata=FeatureMapMetadata(),
+            entities=entities,
+        )
+
+        schedule_lock = ScheduleLock(
+            version=1,
+            locks={
+                "auth": TaskLock(
+                    start_date=date(2025, 1, 15),
+                    end_date=date(2025, 1, 29),
+                    resources=[("alice", 1.0)],
+                ),
+                "auth_design": TaskLock(
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 8),
+                    resources=[("alice", 1.0)],
+                ),
+                "standalone": TaskLock(
+                    start_date=date(2025, 2, 1),
+                    end_date=date(2025, 2, 22),
+                    resources=[("bob", 1.0)],
+                ),
+            },
+        )
+
+        # Default: combine_phases=True
+        rows = _calculate_effort_rows(
+            feature_map, schedule_lock, date(2025, 1, 1), date(2025, 3, 31), combine_phases=True
+        )
+
+        # Should have 2 rows: auth (combined) + standalone
+        assert len(rows) == 2
+
+        # Find auth row - should have combined effort (1w + 2w = 3w)
+        auth_row = next(r for r in rows if r[0] == "auth")
+        assert auth_row[2] == 3.0
+
+        # Find standalone row - unaffected
+        standalone_row = next(r for r in rows if r[0] == "standalone")
+        assert standalone_row[2] == 3.0
+
+    def test_phases_separate_with_flag(self, tmp_path: Path):
+        """Test that combine_phases=False shows phases separately."""
+        entities = [
+            Entity(
+                type="capability",
+                id="auth",
+                name="Authentication",
+                description="Auth implementation",
+                meta={"effort": "2w"},
+                phase_of=None,
+            ),
+            Entity(
+                type="capability",
+                id="auth_design",
+                name="Authentication Design",
+                description="Auth design phase",
+                meta={"effort": "1w"},
+                phase_of=("auth", "design"),
+            ),
+            Entity(
+                type="capability",
+                id="standalone",
+                name="Standalone Feature",
+                description="No workflow",
+                meta={"effort": "3w"},
+                phase_of=None,
+            ),
+        ]
+
+        feature_map = FeatureMap(
+            metadata=FeatureMapMetadata(),
+            entities=entities,
+        )
+
+        schedule_lock = ScheduleLock(
+            version=1,
+            locks={
+                "auth": TaskLock(
+                    start_date=date(2025, 1, 15),
+                    end_date=date(2025, 1, 29),
+                    resources=[("alice", 1.0)],
+                ),
+                "auth_design": TaskLock(
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 8),
+                    resources=[("alice", 1.0)],
+                ),
+                "standalone": TaskLock(
+                    start_date=date(2025, 2, 1),
+                    end_date=date(2025, 2, 22),
+                    resources=[("bob", 1.0)],
+                ),
+            },
+        )
+
+        # combine_phases=False
+        rows = _calculate_effort_rows(
+            feature_map, schedule_lock, date(2025, 1, 1), date(2025, 3, 31), combine_phases=False
+        )
+
+        # Should have 3 rows: auth, auth_design, standalone
+        assert len(rows) == 3
+        row_ids = {r[0] for r in rows}
+        assert row_ids == {"auth", "auth_design", "standalone"}
+
+    def test_combined_phases_proportional_effort(self, tmp_path: Path):
+        """Test proportional effort calculation with combined phases."""
+        entities = [
+            Entity(
+                type="capability",
+                id="auth",
+                name="Authentication",
+                description="Auth implementation",
+                meta={"effort": "2w"},
+                phase_of=None,
+            ),
+            Entity(
+                type="capability",
+                id="auth_design",
+                name="Authentication Design",
+                description="Auth design phase",
+                meta={"effort": "1w"},
+                phase_of=("auth", "design"),
+            ),
+        ]
+
+        feature_map = FeatureMap(
+            metadata=FeatureMapMetadata(),
+            entities=entities,
+        )
+
+        schedule_lock = ScheduleLock(
+            version=1,
+            locks={
+                "auth": TaskLock(
+                    start_date=date(2025, 1, 15),
+                    end_date=date(2025, 1, 29),  # 14 days, fully in January
+                    resources=[("alice", 1.0)],
+                ),
+                "auth_design": TaskLock(
+                    start_date=date(2025, 1, 1),
+                    end_date=date(2025, 1, 8),  # 7 days, fully in January
+                    resources=[("alice", 1.0)],
+                ),
+            },
+        )
+
+        # January only
+        rows = _calculate_effort_rows(
+            feature_map, schedule_lock, date(2025, 1, 1), date(2025, 2, 1), combine_phases=True
+        )
+
+        # Should have 1 combined row
+        assert len(rows) == 1
+        assert rows[0][0] == "auth"
+        # Both tasks fully in January: 1w + 2w = 3w
+        assert rows[0][2] == 3.0
+
+    def test_cli_no_combine_phases_flag(
+        self, tmp_path: Path, sample_yaml: Path, sample_lock_file: Path
+    ):
+        """Test that --no-combine-phases CLI flag works."""
+        output_csv = tmp_path / "effort.csv"
+
+        result = runner.invoke(
+            app,
+            [
+                "report",
+                "effort",
+                str(sample_yaml),
+                str(sample_lock_file),
+                "--timeframe",
+                "2025q1",
+                "--no-combine-phases",
+                "-o",
+                str(output_csv),
+            ],
+        )
+
+        assert result.exit_code == 0, f"Command failed: {result.output}"
+        assert output_csv.exists()
