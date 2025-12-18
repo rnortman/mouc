@@ -216,6 +216,7 @@ See [docs/jira.md](docs/jira.md) for setup and configuration.
 | `mouc gantt` | Generate Mermaid Gantt chart with automatic scheduling |
 | `mouc schedule` | Run scheduler and display or export results |
 | `mouc compare` | Compare schedule scenarios (CSV diff with deltas) |
+| `mouc report effort` | Generate effort report for a time range (CSV) |
 | `mouc graph` | Generate Graphviz dependency graph |
 | `mouc doc` | Generate Markdown or DOCX documentation |
 | `mouc jira sync` | Sync metadata from Jira |
@@ -284,6 +285,7 @@ See [docs/config.md](docs/config.md) for all options.
 - [Data Model](docs/data-model.md) - entity types, fields, dependencies
 - [Gantt Charts](docs/gantt.md) - scheduling options and output
 - [Scheduling Algorithm](docs/scheduling.md) - how the scheduler works
+- [Reporting](docs/reporting.md) - effort reports and analysis
 - [Workflows](docs/workflows.md) - phase expansion patterns
 - [Resources](docs/resources.md) - team definition and auto-assignment
 - [Jira Integration](docs/jira.md) - syncing with Jira

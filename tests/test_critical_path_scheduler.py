@@ -882,6 +882,7 @@ entities:
     description: A feature
     meta:
       effort: 5d
+      resources: [alice]
 """
         test_file = Path(tmp_path) / "test.yaml"
         test_file.write_text(yaml_content)

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `mouc report effort` command: Generate CSV reports of task effort within a time range (supports `--timeframe` or `--start`/`--end`)
+
+### Fixed
+- Config auto-discovery now checks the feature map directory before falling back to current directory
+
 ## [0.7.1] - 2025-12-18
 
 - Fix CI packaging

@@ -25,6 +25,7 @@ from .jira_cli import jira_app, write_feature_map
 from .loader import load_feature_map
 from .logger import setup_logger
 from .models import Entity, FeatureMap
+from .report_cli import report_app
 from .scheduler import (
     AlgorithmConfig,
     AlgorithmType,
@@ -48,6 +49,35 @@ app = typer.Typer(
 def get_config_path() -> Path | None:
     """Get the global config path."""
     return context.get_config_path()
+
+
+def resolve_config_path(feature_map_path: Path | None = None) -> Path | None:
+    """Resolve config path with priority: global --config > feature_map dir > cwd.
+
+    Args:
+        feature_map_path: Path to feature map YAML file. If provided, its parent
+            directory is checked for mouc_config.yaml before falling back to cwd.
+
+    Returns:
+        Path to config file if found, None otherwise.
+    """
+    # Priority 1: Global --config option
+    global_config = get_config_path()
+    if global_config:
+        return global_config
+
+    # Priority 2: Config in feature map directory
+    if feature_map_path:
+        config_in_dir = feature_map_path.parent / "mouc_config.yaml"
+        if config_in_dir.exists():
+            return config_in_dir
+
+    # Priority 3: Config in current working directory
+    default = Path("mouc_config.yaml")
+    if default.exists():
+        return default
+
+    return None
 
 
 @app.callback()
@@ -210,14 +240,8 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
 
     # Load unified config if available
     unified_config = None
-    config_path = get_config_path()
-    if not config_path:
-        # Try feature map directory first, then current directory
-        feature_map_dir = Path(file).parent
-        config_path = feature_map_dir / "mouc_config.yaml"
-        if not config_path.exists():
-            config_path = Path("mouc_config.yaml")
-    if config_path.exists():
+    config_path = resolve_config_path(file)
+    if config_path:
         unified_config = load_unified_config(config_path)
 
     # Optionally run scheduler to populate annotations
@@ -338,20 +362,13 @@ def _parse_date_option(date_str: str | None, option_name: str) -> date | None:
         raise typer.Exit(1) from None
 
 
-def _resolve_gantt_config_path(resources: Path | None) -> Path | None:
-    """Resolve resource config path with priority: --resources > global --config > default."""
+def _resolve_gantt_config_path(
+    resources: Path | None, feature_map_path: Path | None = None
+) -> Path | None:
+    """Resolve resource config path with priority: --resources > global --config > feature_map dir > default."""
     if resources:
         return resources
-
-    global_config_path = get_config_path()
-    if global_config_path:
-        return global_config_path
-
-    default_path = Path("mouc_config.yaml")
-    if default_path.exists():
-        return default_path
-
-    return None
+    return resolve_config_path(feature_map_path)
 
 
 def _format_gantt_output(mermaid_output: str, output_path: Path | None) -> None:
@@ -504,7 +521,7 @@ def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple optio
     feature_map = load_feature_map(file)
 
     # Resolve config path and load config
-    resource_config_path = _resolve_gantt_config_path(resources)
+    resource_config_path = _resolve_gantt_config_path(resources, file)
 
     # Load gantt config and allow CLI override
     gantt_config = None
@@ -785,11 +802,11 @@ def schedule(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple op
             raise typer.Exit(1) from None
 
     # Load resource and scheduler config if available
-    config_path = get_config_path() or Path("mouc_config.yaml")
+    config_path = resolve_config_path(file)
     resource_config = None
     scheduler_config = None
     global_dns_periods = None
-    if config_path.exists():
+    if config_path:
         unified = load_unified_config(config_path)
         resource_config = unified.resources
         scheduler_config = unified.scheduler
@@ -1081,6 +1098,9 @@ def convert_format(
 # Register Jira subcommands (defined in jira_cli.py)
 app.add_typer(jira_app, name="jira")
 
+# Register report subcommands (defined in report_cli.py)
+app.add_typer(report_app, name="report")
+
 
 def _load_styling(style_module: str | None, style_file: Path | None) -> None:
     """Load user styling module or file."""
@@ -1117,15 +1137,8 @@ def _collect_style_tags(cli_style_tags: str | None, feature_map_path: Path) -> s
         tags.update(tag.strip() for tag in cli_style_tags.split(",") if tag.strip())
 
     # Load config tags
-    config_path = get_config_path()
-    if not config_path:
-        # Try feature map directory first, then current directory
-        feature_map_dir = Path(feature_map_path).parent
-        config_path = feature_map_dir / "mouc_config.yaml"
-        if not config_path.exists():
-            config_path = Path("mouc_config.yaml")
-
-    if config_path.exists():
+    config_path = resolve_config_path(Path(feature_map_path))
+    if config_path:
         with suppress(FileNotFoundError, ValueError):
             unified_config = load_unified_config(config_path)
             tags.update(unified_config.style_tags)
