@@ -215,7 +215,7 @@ def _calculate_entity_effort(
     effort_str = str(entity.meta.get("effort", "1w")) if entity.meta else "1w"
     effort_days = validator.parse_effort(effort_str)
     effort_in_range = effort_days * proportion
-    effort_weeks = effort_in_range / 7.0
+    effort_weeks = effort_in_range / 5.0  # Work days per week, not calendar days
 
     return round(effort_weeks, 2)
 
