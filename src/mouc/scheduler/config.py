@@ -103,6 +103,13 @@ class CriticalPathConfig(BaseModel):
     # 1.0 = linear (default), 0.5 = sqrt, 0.0 = no work term
     work_exponent: float = 1.0
 
+    # Task urgency denominator for slack decay calculation
+    # Options: "global_avg" (average work), "target_work", "critical_path"
+    urgency_denominator: str = "global_avg"
+
+    # Prefer "fungible" resources (those not exclusively required by other tasks)
+    prefer_fungible_resources: bool = True
+
     # Rollout configuration
     # Whether rollout simulation is enabled
     rollout_enabled: bool = True

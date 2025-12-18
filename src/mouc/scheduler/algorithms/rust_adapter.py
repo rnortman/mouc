@@ -203,6 +203,8 @@ class RustSchedulerAdapter:
             rollout_max_horizon_days=config.critical_path.rollout_max_horizon_days,
             work_transform=config.critical_path.work_transform,
             work_exponent=config.critical_path.work_exponent,
+            prefer_fungible_resources=config.critical_path.prefer_fungible_resources,  # pyright: ignore[reportCallIssue]
+            urgency_denominator=config.critical_path.urgency_denominator,  # pyright: ignore[reportCallIssue]
         )
 
     def schedule(self) -> AlgorithmResult:

@@ -763,6 +763,12 @@ scheduler:
     no_deadline_urgency_multiplier: 0.5  # Multiplier for no-deadline tasks
     urgency_floor: 0.1             # Minimum urgency (prevents zero)
     urgency_denominator: global_avg  # Denominator for task urgency decay
+    work_transform: power          # How to transform work in target scoring
+    work_exponent: 1.0             # Exponent for power transform
+    rollout_enabled: true          # Enable rollout simulation for resource choice
+    rollout_score_ratio_threshold: 1.0  # Min score ratio to trigger rollout
+    rollout_max_horizon_days: 30   # Max simulation horizon
+    prefer_fungible_resources: true  # Prefer resources not needed by other tasks
 ```
 
 **Parameters:**
@@ -773,6 +779,15 @@ scheduler:
   - `global_avg`: Use average work across all targets (default, similar to ATC)
   - `target_work`: Use each target's total_work (larger projects decay more slowly)
   - `critical_path`: Use each target's critical_path_length (tighter decay for long critical paths)
+- `work_transform` (default: `power`): How to transform work in target scoring formula:
+  - `power`: Use `work^exponent` (default exponent=1.0 is linear)
+  - `log`: Use `ln(work)` (diminishing returns for large projects)
+  - `log10`: Use `log10(work)`
+- `work_exponent` (default: 1.0): Exponent for power transform (0.5=sqrt, 0=ignore work)
+- `rollout_enabled` (default: true): Enable rollout simulation for smart resource selection
+- `rollout_score_ratio_threshold` (default: 1.0): Min score ratio for competing target to trigger rollout
+- `rollout_max_horizon_days` (default: 30): Maximum simulation horizon in days
+- `prefer_fungible_resources` (default: true): When auto-assigning, prefer resources not exclusively needed by other pending tasks
 
 Note: The critical path scheduler uses the global `default_priority` from `SchedulingConfig`.
 
