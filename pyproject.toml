@@ -111,6 +111,7 @@ module-name = "mouc.rust"
 python-source = "src"
 manylinux = "2_17"
 container-runner = "podman"
+include = ["LICENSE"]
 
 [dependency-groups]
 dev = [
