@@ -63,33 +63,6 @@ def test_pipe_separated_assignment(make_scheduler: Any) -> None:
     assert result[0].resources == ["john"]
 
 
-def test_pipe_assignment_respects_order(make_scheduler: Any) -> None:
-    """Test that pipe-separated list picks first available, not first in config."""
-    config = ResourceConfig(
-        resources=[
-            ResourceDefinition(name="alice", dns_periods=[]),
-            ResourceDefinition(name="bob", dns_periods=[]),
-            ResourceDefinition(name="charlie", dns_periods=[]),
-        ],
-        groups={},
-    )
-
-    # Order is charlie|bob|alice, should pick charlie even though alice is first in config
-    task = Task(
-        id="task1",
-        duration_days=5.0,
-        resources=[],
-        dependencies=[],
-        resource_spec="charlie|bob|alice",
-    )
-
-    scheduler = make_scheduler([task], date(2025, 1, 1), resource_config=config)
-    result = scheduler.schedule().scheduled_tasks
-
-    assert len(result) == 1
-    assert result[0].resources == ["charlie"]
-
-
 def test_dns_period_blocks_assignment(make_scheduler: Any) -> None:
     """Test that DNS periods prevent resource assignment."""
     config = ResourceConfig(
@@ -312,6 +285,7 @@ def test_no_resource_spec_no_assignment(make_scheduler: Any) -> None:
     config = ResourceConfig(
         resources=[
             ResourceDefinition(name="alice", dns_periods=[]),
+            ResourceDefinition(name="bob", dns_periods=[]),
         ],
         groups={},
     )

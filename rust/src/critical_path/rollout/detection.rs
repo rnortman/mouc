@@ -74,7 +74,7 @@ pub fn find_competing_targets_int(
     current_completion: NaiveDate,
     resource: &str,
     score_ratio_threshold: f64,
-    all_targets: &[&TargetInfo],
+    all_targets: &[TargetInfo],
     ctx: &TaskData,
     state: &CriticalPathSchedulerState,
     resource_config: Option<&ResourceConfig>,
@@ -86,7 +86,7 @@ pub fn find_competing_targets_int(
     // Get resource ID for checking
     let resource_id = resource_index.get_id(resource);
 
-    for &target in all_targets {
+    for target in all_targets {
         // Skip if target score is not high enough
         if target.score <= score_threshold {
             continue;
@@ -165,6 +165,7 @@ fn find_eligible_cp_task_for_resource_int(
             target_id: target.target_id.clone(),
             target_score: target.score,
             critical_task_id: task_id,
+            critical_task_int: task_int,
             eligible_date,
             estimated_completion,
         });
@@ -294,6 +295,7 @@ fn find_eligible_cp_task_for_resource(
             target_id: target.target_id.clone(),
             target_score: target.score,
             critical_task_id: task_id.clone(),
+            critical_task_int: 0, // Not available in string-based path (test only)
             eligible_date,
             estimated_completion,
         });

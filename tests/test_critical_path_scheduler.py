@@ -1089,7 +1089,7 @@ class TestCriticalPathRollout:
     def test_rollout_with_auto_assignment(self) -> None:
         """Rollout works with resource_spec auto-assignment."""
         rust_resource_config = rust.ResourceConfig(
-            resource_order=["alice", "bob"],
+            resource_order=["alice", "bob", "charlie"],
             dns_periods={},
             spec_expansion={"dev": ["alice", "bob"]},
         )

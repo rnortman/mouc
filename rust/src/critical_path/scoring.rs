@@ -2,7 +2,7 @@
 
 use chrono::NaiveDate;
 
-use super::types::{CriticalPathConfig, TargetInfo, WorkTransform};
+use super::types::{CriticalPathConfig, TargetInfo, TaskId, UrgencyDenominator, WorkTransform};
 
 /// Transform the work term according to config.
 ///
@@ -129,6 +129,76 @@ pub fn score_task(priority: i32, duration: f64) -> f64 {
     let priority = priority as f64;
     let duration = duration.max(0.1); // Avoid division by zero
     priority / duration
+}
+
+/// Compute urgency for a task based on its slack relative to a target.
+///
+/// Formula: `urgency = exp(-slack / (K * denominator))`
+///
+/// Returns 1.0 (maximum urgency) if slack <= 0 (on critical path).
+/// Otherwise returns exponential decay floored by `urgency_floor`.
+///
+/// # Arguments
+/// * `slack` - Task's slack relative to a target (days)
+/// * `config` - Scheduler configuration
+/// * `denominator` - The value to use in the decay formula (varies by config)
+pub fn compute_task_urgency(slack: f64, config: &CriticalPathConfig, denominator: f64) -> f64 {
+    if slack <= 0.0 {
+        1.0
+    } else {
+        let decay_factor = config.k * denominator.max(1.0);
+        (-slack / decay_factor).exp().max(config.urgency_floor)
+    }
+}
+
+/// Get the urgency denominator for a target based on config.
+///
+/// Returns the appropriate value to use in the task urgency formula:
+/// - GlobalAvg: uses the provided avg_work
+/// - TargetWork: uses target's total_work
+/// - CriticalPath: uses target's critical_path_length
+pub fn get_urgency_denominator(
+    target: &TargetInfo,
+    avg_work: f64,
+    config: &CriticalPathConfig,
+) -> f64 {
+    match config.urgency_denominator {
+        UrgencyDenominator::GlobalAvg => avg_work,
+        UrgencyDenominator::TargetWork => target.total_work,
+        UrgencyDenominator::CriticalPath => target.critical_path_length,
+    }
+}
+
+/// Score a task based on its maximum contribution across all targets.
+///
+/// Formula: `max over all targets G: [ target_score(G) * urgency(slack(T, G)) ]`
+///
+/// This unified scoring considers all targets a task contributes to and returns
+/// the maximum score. Critical path tasks (slack=0) get urgency=1.0, so they
+/// naturally score highest for their target.
+///
+/// # Arguments
+/// * `task_target_slacks` - Iterator of (target_int, slack) pairs for this task
+/// * `target_scores` - Precomputed target scores indexed by target_int
+/// * `target_denominators` - Urgency denominators per target indexed by target_int
+/// * `config` - Scheduler configuration
+///
+/// Returns the maximum score contribution, or 0.0 if task has no targets.
+pub fn score_task_unified<'a>(
+    task_target_slacks: impl Iterator<Item = &'a (TaskId, f64)>,
+    target_scores: &[f64],
+    target_denominators: &[f64],
+    config: &CriticalPathConfig,
+) -> f64 {
+    task_target_slacks
+        .map(|(target_int, slack)| {
+            let idx = *target_int as usize;
+            let target_score = target_scores.get(idx).copied().unwrap_or(0.0);
+            let denominator = target_denominators.get(idx).copied().unwrap_or(1.0);
+            let urgency = compute_task_urgency(*slack, config, denominator);
+            target_score * urgency
+        })
+        .fold(0.0_f64, f64::max)
 }
 
 #[cfg(test)]
@@ -289,7 +359,8 @@ mod tests {
             Some(30),
             "power",
             1.0,
-            true, // prefer_fungible_resources
+            true,         // prefer_fungible_resources
+            "global_avg", // urgency_denominator
         )
         .unwrap();
 
@@ -311,7 +382,8 @@ mod tests {
             Some(60),
             "power",
             1.0,
-            true, // prefer_fungible_resources
+            true,         // prefer_fungible_resources
+            "global_avg", // urgency_denominator
         )
         .unwrap();
 
@@ -335,9 +407,20 @@ mod tests {
 
     #[test]
     fn test_transform_work_power_sqrt() {
-        let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.5, true)
-                .unwrap();
+        let config = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            0.5,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         // sqrt transform
         assert!((transform_work(4.0, &config) - 2.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 10.0).abs() < 1e-9);
@@ -345,9 +428,20 @@ mod tests {
 
     #[test]
     fn test_transform_work_power_zero() {
-        let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "power", 0.0, true)
-                .unwrap();
+        let config = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            0.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         // exponent=0 means no work term (returns 1.0)
         assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 1.0).abs() < 1e-9);
@@ -355,9 +449,20 @@ mod tests {
 
     #[test]
     fn test_transform_work_log() {
-        let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0, true)
-                .unwrap();
+        let config = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "log",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         // ln(e) = 1, ln(e^2) = 2
         let e = std::f64::consts::E;
         assert!((transform_work(e, &config) - 1.0).abs() < 1e-9);
@@ -366,9 +471,20 @@ mod tests {
 
     #[test]
     fn test_transform_work_log10() {
-        let config =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0, true)
-                .unwrap();
+        let config = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "log10",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         // log10(10) = 1, log10(100) = 2
         assert!((transform_work(10.0, &config) - 1.0).abs() < 1e-9);
         assert!((transform_work(100.0, &config) - 2.0).abs() < 1e-9);
@@ -376,15 +492,281 @@ mod tests {
 
     #[test]
     fn test_transform_work_floors_small_values() {
-        let config_log =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log", 1.0, true)
-                .unwrap();
+        let config_log = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "log",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         // Very small work values should be floored to avoid negative/tiny log values
         assert!(transform_work(0.01, &config_log) >= 0.1);
 
-        let config_log10 =
-            CriticalPathConfig::new(2.0, 0.5, 0.1, 0, true, 1.0, Some(30), "log10", 1.0, true)
-                .unwrap();
+        let config_log10 = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "log10",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
         assert!(transform_work(0.01, &config_log10) >= 0.1);
+    }
+
+    // Tests for compute_task_urgency
+
+    #[test]
+    fn test_compute_task_urgency_zero_slack() {
+        let config = CriticalPathConfig::default();
+        // Zero slack (on critical path) should give maximum urgency
+        assert!((compute_task_urgency(0.0, &config, 10.0) - 1.0).abs() < 1e-9);
+        // Negative slack should also give maximum urgency
+        assert!((compute_task_urgency(-5.0, &config, 10.0) - 1.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_compute_task_urgency_positive_slack() {
+        let config = CriticalPathConfig::default(); // k=2.0, urgency_floor=0.1
+        let denominator = 10.0;
+        // slack=10, denominator=10, k=2: urgency = exp(-10 / (2 * 10)) = exp(-0.5) ≈ 0.606
+        let urgency = compute_task_urgency(10.0, &config, denominator);
+        let expected = (-0.5_f64).exp();
+        assert!((urgency - expected).abs() < 1e-9);
+        assert!(urgency < 1.0);
+        assert!(urgency > config.urgency_floor);
+    }
+
+    #[test]
+    fn test_compute_task_urgency_respects_floor() {
+        let config = CriticalPathConfig::default(); // urgency_floor=0.1
+        let denominator = 1.0;
+        // Very large slack should hit the floor
+        let urgency = compute_task_urgency(100.0, &config, denominator);
+        assert!((urgency - config.urgency_floor).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_compute_task_urgency_k_parameter() {
+        // Higher K = more tolerant of slack (slower decay)
+        let config_low_k = CriticalPathConfig::new(
+            1.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
+        let config_high_k = CriticalPathConfig::new(
+            4.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
+
+        let slack = 10.0;
+        let denominator = 10.0;
+        let urgency_low_k = compute_task_urgency(slack, &config_low_k, denominator);
+        let urgency_high_k = compute_task_urgency(slack, &config_high_k, denominator);
+
+        // Higher K should give higher urgency for same slack
+        assert!(urgency_high_k > urgency_low_k);
+    }
+
+    // Tests for get_urgency_denominator
+
+    #[test]
+    fn test_get_urgency_denominator_modes() {
+        let target = make_target("test", 50, 100.0, 25.0);
+        let avg_work = 50.0;
+
+        // GlobalAvg mode
+        let config_global = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+            true,
+            "global_avg",
+        )
+        .unwrap();
+        assert!((get_urgency_denominator(&target, avg_work, &config_global) - 50.0).abs() < 1e-9);
+
+        // TargetWork mode
+        let config_work = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+            true,
+            "target_work",
+        )
+        .unwrap();
+        assert!((get_urgency_denominator(&target, avg_work, &config_work) - 100.0).abs() < 1e-9);
+
+        // CriticalPath mode
+        let config_cp = CriticalPathConfig::new(
+            2.0,
+            0.5,
+            0.1,
+            0,
+            true,
+            1.0,
+            Some(30),
+            "power",
+            1.0,
+            true,
+            "critical_path",
+        )
+        .unwrap();
+        assert!((get_urgency_denominator(&target, avg_work, &config_cp) - 25.0).abs() < 1e-9);
+    }
+
+    // Tests for score_task_unified
+
+    #[test]
+    fn test_score_task_unified_single_target() {
+        let config = CriticalPathConfig::default();
+        let target_scores = vec![0.0, 10.0, 5.0]; // target 1 has score 10, target 2 has score 5
+        let target_denominators = vec![10.0, 10.0, 10.0];
+
+        // Task on critical path of target 1 (slack=0)
+        let task_slacks = vec![(1u32, 0.0)];
+        let score = score_task_unified(
+            task_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+        assert!((score - 10.0).abs() < 1e-9); // target_score * urgency(0) = 10 * 1.0 = 10
+
+        // Task with slack of 10 on target 1
+        let task_slacks = vec![(1u32, 10.0)];
+        let score = score_task_unified(
+            task_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+        let expected = 10.0 * (-0.5_f64).exp(); // k=2, denom=10: exp(-10/(2*10))
+        assert!((score - expected).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_score_task_unified_multi_target_uses_max() {
+        let config = CriticalPathConfig::default();
+        let target_scores = vec![0.0, 10.0, 8.0]; // target 1: 10, target 2: 8
+        let target_denominators = vec![10.0, 10.0, 10.0];
+
+        // Task with slack on target 1 but critical for target 2
+        // Target 1: 10 * exp(-10 / 20) ≈ 10 * 0.606 = 6.06
+        // Target 2: 8 * 1.0 = 8.0
+        // Max = 8.0
+        let task_slacks = vec![(1u32, 10.0), (2u32, 0.0)];
+        let score = score_task_unified(
+            task_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+        assert!((score - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_score_task_unified_empty_targets() {
+        let config = CriticalPathConfig::default();
+        let target_scores = vec![10.0, 5.0];
+        let target_denominators = vec![10.0, 10.0];
+
+        // Task with no targets
+        let task_slacks: Vec<(TaskId, f64)> = vec![];
+        let score = score_task_unified(
+            task_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+        assert!((score - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_score_task_unified_critical_path_always_wins() {
+        // Verify the key invariant: critical path task of top target beats all others
+        let config = CriticalPathConfig::default();
+        let target_scores = vec![0.0, 10.0, 9.0]; // target 1: 10 (top), target 2: 9
+        let target_denominators = vec![10.0, 10.0, 10.0];
+
+        // Task A: critical for target 1 (top target)
+        let task_a_slacks = vec![(1u32, 0.0)];
+        let score_a = score_task_unified(
+            task_a_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+
+        // Task B: critical for target 2
+        let task_b_slacks = vec![(2u32, 0.0)];
+        let score_b = score_task_unified(
+            task_b_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+
+        // Task C: critical for both target 2 and has some slack on target 1
+        let task_c_slacks = vec![(1u32, 5.0), (2u32, 0.0)];
+        let score_c = score_task_unified(
+            task_c_slacks.iter(),
+            &target_scores,
+            &target_denominators,
+            &config,
+        );
+
+        // Task A (critical for top target) should beat all others
+        assert!(
+            score_a > score_b,
+            "Critical task for top target should beat critical task for lower target"
+        );
+        assert!(
+            score_a > score_c,
+            "Critical task for top target should beat multi-target task"
+        );
     }
 }

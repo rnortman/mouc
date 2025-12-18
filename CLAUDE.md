@@ -37,12 +37,15 @@ Use `uv sync` after updating pyproject.toml to install packages.
 Always run the following before considering an iteration done:
 ```bash
 # Rust (if modified)
-cargo fmt && cargo clippy -- -D warnings && cargo test
+cargo fmt && cargo clippy -- -D warnings && ./rust/run_tests.sh
 uv run maturin develop --release  # Rebuild Python extension after Rust changes
 
 # Python
 uv run ruff format && uv run ruff check --fix && uv run pyright && uv run pytest
 ```
+
+Note: `./rust/run_tests.sh` sets up the Python library path required for PyO3 tests.
+The script runs `cargo test --lib` with proper LD_LIBRARY_PATH configuration.
 
 Target is Python 3.10+, Rust stable.
 

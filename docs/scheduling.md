@@ -705,8 +705,8 @@ The critical path scheduler takes a different approach:
 
 1. **Every task is a potential target** - not just leaves, every unscheduled task
 2. **Targets are scored by attractiveness**: `(priority / total_work) × urgency`
-3. **Only critical path tasks are considered** - tasks with zero slack to the target
-4. **Recalculate after each decision** - critical paths change as tasks complete
+3. **All subgraph tasks are considered** - not just critical path, but weighted by slack
+4. **Recalculate after each decision** - critical paths and slack values change as tasks complete
 
 **Target Scoring:**
 ```
@@ -726,10 +726,22 @@ urgency = exp(-max(0, slack) / (K × avg_work))
 - Tasks with slack get exponentially decreasing urgency
 - No-deadline tasks get: `min(deadline_urgency) × multiplier`, with a floor
 
-**Task Scoring (within critical path):**
+**Unified Task Scoring:**
+
+Each eligible task gets a score based on its contribution to ALL targets in whose dependency subgraph it appears:
+
 ```
-task_score = priority / duration  # WSPT (Weighted Shortest Processing Time)
+task_score(T) = max over all targets G: [target_score(G) × exp(-slack(T,G) / (K × denominator))]
 ```
+
+- **Critical path tasks** (slack = 0): Get urgency = 1.0, inherit target's full score
+- **Near-critical tasks** (small slack): Get slightly reduced urgency via exponential decay
+- **Slack tasks** (large slack): Get low urgency, unlikely to be scheduled until needed
+- **Multi-target tasks**: Scored by their best contribution (max across targets)
+
+The `denominator` for slack decay is configurable (see Configuration below).
+
+This approach is similar to ATC (Apparent Tardiness Cost) but applied at the target level, ensuring that near-critical tasks are considered alongside critical path tasks when resources are constrained.
 
 ### Configuration
 
@@ -750,12 +762,17 @@ scheduler:
     k: 2.0                         # Urgency decay parameter
     no_deadline_urgency_multiplier: 0.5  # Multiplier for no-deadline tasks
     urgency_floor: 0.1             # Minimum urgency (prevents zero)
+    urgency_denominator: global_avg  # Denominator for task urgency decay
 ```
 
 **Parameters:**
 - `k` (default: 2.0): Controls urgency ramp-up. Lower = more aggressive (1.5), higher = relaxed (3.0)
 - `no_deadline_urgency_multiplier` (default: 0.5): No-deadline tasks get `min_urgency × multiplier`
 - `urgency_floor` (default: 0.1): Minimum urgency to prevent tasks from never scheduling
+- `urgency_denominator` (default: `global_avg`): Controls how task urgency decays with slack:
+  - `global_avg`: Use average work across all targets (default, similar to ATC)
+  - `target_work`: Use each target's total_work (larger projects decay more slowly)
+  - `critical_path`: Use each target's critical_path_length (tighter decay for long critical paths)
 
 Note: The critical path scheduler uses the global `default_priority` from `SchedulingConfig`.
 

@@ -28,6 +28,8 @@ pub struct CompetingTarget {
     pub target_score: f64,
     /// The critical path task that needs the contested resource.
     pub critical_task_id: String,
+    /// Integer ID of the critical path task (for fast comparison).
+    pub critical_task_int: super::types::TaskId,
     /// When the critical path task becomes eligible.
     pub eligible_date: NaiveDate,
     /// Estimated completion date for the critical path task.
@@ -67,6 +69,8 @@ pub struct ResourceReservation {
     pub target_id: String,
     /// The specific task on the target's critical path that needs this resource.
     pub task_id: String,
+    /// Integer ID of the task (for fast comparison).
+    pub task_int: super::types::TaskId,
     /// Score of the target (higher = more important).
     pub target_score: f64,
     /// The date from which this reservation is valid.

@@ -2,7 +2,7 @@
 //!
 //! This module provides caching of critical path computations to avoid
 //! recomputing all targets every iteration. When a task is scheduled,
-//! only the targets that had that task on their critical path are recomputed.
+//! only the targets that had that task in their dependency subgraph are recomputed.
 
 use chrono::NaiveDate;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -10,13 +10,17 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use crate::models::Task;
 
 use super::calculation::{calculate_critical_path_interned, TaskData as InternedContext};
-use super::scoring::{compute_deadline_urgency, compute_no_deadline_urgency, transform_work};
-use super::types::{CriticalPathConfig, TargetInfo};
+use super::scoring::{
+    compute_deadline_urgency, compute_no_deadline_urgency, compute_task_urgency,
+    get_urgency_denominator, score_task_unified, transform_work,
+};
+use super::types::{CriticalPathConfig, TargetInfo, TaskId};
 
 /// Cache for critical path target information.
 ///
 /// Maintains a reverse index to enable efficient incremental updates when
-/// tasks are scheduled.
+/// tasks are scheduled. Also tracks slack values for all tasks in each target's
+/// dependency subgraph (not just critical path tasks) to enable unified task scoring.
 pub struct CriticalPathCache {
     /// Cached target info by target_id.
     targets: FxHashMap<String, TargetInfo>,
@@ -24,12 +28,31 @@ pub struct CriticalPathCache {
     /// Reverse index: task_id -> set of target_ids that have this task on their critical path.
     /// Used for efficient invalidation when a task is scheduled.
     task_to_targets: FxHashMap<String, FxHashSet<String>>,
+
+    /// Extended reverse index: task_int -> Vec<(target_int, slack)>.
+    /// Tracks ALL tasks in each target's subgraph with their slack values.
+    /// Used for unified task scoring across all targets.
+    task_to_targets_int: Vec<Vec<(TaskId, f64)>>,
+
+    /// Precomputed target scores indexed by target_int.
+    /// Updated by get_ranked_targets().
+    target_scores: Vec<f64>,
+
+    /// Precomputed urgency denominators per target indexed by target_int.
+    /// Updated by get_ranked_targets().
+    target_denominators: Vec<f64>,
+
+    /// Precomputed average work across all targets.
+    /// Updated by get_ranked_targets().
+    avg_work: f64,
 }
 
 impl CriticalPathCache {
     /// Build a new cache from all unscheduled tasks.
     ///
-    /// Computes critical paths for all targets and builds the reverse index.
+    /// Computes critical paths for all targets and builds the reverse indices.
+    /// The extended index (`task_to_targets_int`) tracks ALL tasks in each target's
+    /// dependency subgraph with their slack values.
     pub fn new(
         unscheduled: &FxHashSet<String>,
         tasks: &FxHashMap<String, Task>,
@@ -42,6 +65,10 @@ impl CriticalPathCache {
             FxHashMap::with_capacity_and_hasher(unscheduled.len(), Default::default());
         let mut task_to_targets: FxHashMap<String, FxHashSet<String>> =
             FxHashMap::with_capacity_and_hasher(unscheduled.len(), Default::default());
+
+        // Initialize Vec-based extended index
+        let num_tasks = ctx.index.len();
+        let mut task_to_targets_int: Vec<Vec<(TaskId, f64)>> = vec![Vec::new(); num_tasks];
 
         for task_id in unscheduled {
             let task = match tasks.get(task_id) {
@@ -74,12 +101,20 @@ impl CriticalPathCache {
                 .collect();
 
             // Build reverse index: for each task on this target's critical path,
-            // add this target to that task's set
+            // add this target to that task's set (used for cache invalidation)
             for cp_task_id in &cp_result.critical_path_tasks {
                 task_to_targets
                     .entry(cp_task_id.clone())
                     .or_default()
                     .insert(task_id.clone());
+            }
+
+            // Build extended reverse index: for ALL tasks in subgraph,
+            // add (target_int, slack) to that task's vector
+            for (subgraph_task_id, timing) in &cp_result.task_timings {
+                if let Some(task_int) = ctx.index.get_id(subgraph_task_id) {
+                    task_to_targets_int[task_int as usize].push((target_int, timing.slack));
+                }
             }
 
             targets.insert(task_id.clone(), info);
@@ -88,11 +123,15 @@ impl CriticalPathCache {
         Ok(Self {
             targets,
             task_to_targets,
+            task_to_targets_int,
+            target_scores: vec![0.0; num_tasks],
+            target_denominators: vec![1.0; num_tasks],
+            avg_work: 1.0,
         })
     }
 
     /// Called when a task is scheduled. Removes it as a target and recomputes
-    /// only the affected targets (those that had this task on their critical path).
+    /// only the affected targets (those that had this task in their subgraph).
     ///
     /// Returns the number of targets recomputed.
     pub fn on_task_scheduled(
@@ -107,43 +146,64 @@ impl CriticalPathCache {
         // Remove this task as a target (it's now scheduled)
         self.targets.remove(scheduled_task_id);
 
+        // Get the scheduled task's integer ID for extended index updates
+        let scheduled_task_int = ctx.index.get_id(scheduled_task_id);
+
         // Find all targets affected by this task being scheduled
-        let affected_targets: Vec<String> = self
-            .task_to_targets
-            .get(scheduled_task_id)
-            .map(|set| set.iter().cloned().collect())
+        // We use the extended index to find all targets that had this task in their subgraph
+        let affected_target_ints: Vec<TaskId> = scheduled_task_int
+            .map(|task_int| {
+                self.task_to_targets_int[task_int as usize]
+                    .iter()
+                    .map(|(target_int, _)| *target_int)
+                    .collect()
+            })
             .unwrap_or_default();
 
-        // Remove this task from the reverse index
+        // Remove this task from the string-based reverse index
         self.task_to_targets.remove(scheduled_task_id);
 
-        // Also remove it from all other entries in the reverse index
+        // Also remove it from all other entries in the string reverse index
         for targets in self.task_to_targets.values_mut() {
             targets.remove(scheduled_task_id);
         }
 
+        // Clear this task's entry in the extended index
+        if let Some(task_int) = scheduled_task_int {
+            self.task_to_targets_int[task_int as usize].clear();
+        }
+
+        // Remove this target from all extended index entries
+        for target_int in &affected_target_ints {
+            // Remove entries pointing to this target from all tasks' entries
+            for task_entry in &mut self.task_to_targets_int {
+                task_entry.retain(|(t_int, _)| t_int != target_int);
+            }
+        }
+
         let mut recomputed = 0;
 
-        // Recompute only affected targets
-        for target_id in &affected_targets {
-            // Skip if this target was the scheduled task itself
-            if target_id == scheduled_task_id {
+        // Recompute only affected targets (use integer IDs to include all subgraph tasks,
+        // not just critical path tasks)
+        for &target_int in &affected_target_ints {
+            // Skip if this was the scheduled task itself
+            if scheduled_task_int == Some(target_int) {
                 continue;
             }
 
-            // Skip if this target is no longer in our cache (already scheduled)
-            if !self.targets.contains_key(target_id) {
-                continue;
-            }
-
-            let task = match tasks.get(target_id) {
-                Some(t) => t,
+            // Get the target ID from the integer
+            let target_id = match ctx.index.get_name(target_int) {
+                Some(name) => name.to_string(),
                 None => continue,
             };
 
-            // Get integer ID for this task
-            let target_int = match ctx.index.get_id(target_id) {
-                Some(id) => id,
+            // Skip if this target is no longer in our cache (already scheduled)
+            if !self.targets.contains_key(&target_id) {
+                continue;
+            }
+
+            let task = match tasks.get(&target_id) {
+                Some(t) => t,
                 None => continue,
             };
 
@@ -152,7 +212,7 @@ impl CriticalPathCache {
 
             // Recompute critical path
             let cp_result =
-                calculate_critical_path_interned(target_id, ctx, scheduled_vec, completed_vec)?;
+                calculate_critical_path_interned(&target_id, ctx, scheduled_vec, completed_vec)?;
 
             // Update the target info
             let mut info = TargetInfo::new(target_id.clone(), target_int, priority, deadline);
@@ -167,10 +227,10 @@ impl CriticalPathCache {
                 .filter_map(|id| ctx.index.get_id(id))
                 .collect();
 
-            // Update reverse index: remove old entries, add new ones
+            // Update string-based reverse index: remove old entries, add new ones
             // First, remove this target from all task entries (from the old critical path)
             for targets in self.task_to_targets.values_mut() {
-                targets.remove(target_id);
+                targets.remove(&target_id);
             }
 
             // Then add new entries based on the new critical path
@@ -179,6 +239,13 @@ impl CriticalPathCache {
                     .entry(cp_task_id.clone())
                     .or_default()
                     .insert(target_id.clone());
+            }
+
+            // Update extended index: add new entries for all tasks in subgraph
+            for (subgraph_task_id, timing) in &cp_result.task_timings {
+                if let Some(task_int) = ctx.index.get_id(subgraph_task_id) {
+                    self.task_to_targets_int[task_int as usize].push((target_int, timing.slack));
+                }
             }
 
             self.targets.insert(target_id.clone(), info);
@@ -191,6 +258,8 @@ impl CriticalPathCache {
     /// Get all targets as a slice, scored and ranked.
     ///
     /// Computes urgency and score for each target, then sorts by score descending.
+    /// Also populates the precomputed arrays (target_scores, target_denominators)
+    /// for use by score_eligible_task().
     /// Returns references to avoid expensive clones of FxHashSet<String>.
     pub fn get_ranked_targets(
         &mut self,
@@ -204,6 +273,7 @@ impl CriticalPathCache {
         // Calculate average work for urgency computation
         let avg_work =
             self.targets.values().map(|t| t.total_work).sum::<f64>() / self.targets.len() as f64;
+        self.avg_work = avg_work;
 
         // Compute scores and update in place
         // First pass: compute min urgency among deadline targets for context
@@ -239,6 +309,13 @@ impl CriticalPathCache {
             let transformed_work = transform_work(target.total_work, config);
             target.urgency = urgency;
             target.score = (priority / transformed_work) * urgency;
+
+            // Populate precomputed arrays for unified task scoring
+            let idx = target.target_int as usize;
+            if idx < self.target_scores.len() {
+                self.target_scores[idx] = target.score;
+                self.target_denominators[idx] = get_urgency_denominator(target, avg_work, config);
+            }
         }
 
         // Collect references and sort
@@ -250,6 +327,68 @@ impl CriticalPathCache {
         });
 
         scored
+    }
+
+    /// Score an eligible task using the unified scoring formula.
+    ///
+    /// Formula: `max over all targets G: [ target_score(G) * urgency(slack(T, G)) ]`
+    ///
+    /// This method must be called AFTER get_ranked_targets() which populates the
+    /// precomputed target_scores and target_denominators arrays.
+    pub fn score_eligible_task(&self, task_int: TaskId, config: &CriticalPathConfig) -> f64 {
+        let task_slacks = &self.task_to_targets_int[task_int as usize];
+        score_task_unified(
+            task_slacks.iter(),
+            &self.target_scores,
+            &self.target_denominators,
+            config,
+        )
+    }
+
+    /// Get the score breakdown for a task showing which target contributes max score.
+    ///
+    /// Returns (best_target_int, slack, denominator, task_urgency, target_score, final_score).
+    pub fn score_eligible_task_breakdown(
+        &self,
+        task_int: TaskId,
+        config: &CriticalPathConfig,
+    ) -> (TaskId, f64, f64, f64, f64, f64) {
+        let task_slacks = &self.task_to_targets_int[task_int as usize];
+        let mut best: Option<(TaskId, f64, f64, f64, f64, f64)> = None;
+
+        for (target_int, slack) in task_slacks {
+            let idx = *target_int as usize;
+            let target_score = self.target_scores.get(idx).copied().unwrap_or(0.0);
+            let denominator = self.target_denominators.get(idx).copied().unwrap_or(1.0);
+            let task_urgency = compute_task_urgency(*slack, config, denominator);
+            let contribution = target_score * task_urgency;
+
+            if best.is_none() || contribution > best.unwrap().5 {
+                best = Some((
+                    *target_int,
+                    *slack,
+                    denominator,
+                    task_urgency,
+                    target_score,
+                    contribution,
+                ));
+            }
+        }
+
+        best.unwrap_or((0, 0.0, 0.0, 0.0, 0.0, 0.0))
+    }
+
+    /// Get the task-to-targets mapping for a task.
+    ///
+    /// Returns a slice of (target_int, slack) pairs.
+    pub fn get_task_targets(&self, task_int: TaskId) -> &[(TaskId, f64)] {
+        &self.task_to_targets_int[task_int as usize]
+    }
+
+    /// Get the average work across all targets.
+    #[allow(dead_code)]
+    pub fn avg_work(&self) -> f64 {
+        self.avg_work
     }
 
     /// Check if the cache is empty (all tasks scheduled).
@@ -474,7 +613,8 @@ mod tests {
             Some(60),
             "power",
             1.0,
-            true, // prefer_fungible_resources
+            true,         // prefer_fungible_resources
+            "global_avg", // urgency_denominator
         )
         .unwrap();
         let current_time = chrono::NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();

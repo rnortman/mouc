@@ -5,10 +5,14 @@ edition = "2021"
 
 [lib]
 name = "mouc_rust"
-crate-type = ["cdylib"]
+crate-type = ["cdylib", "rlib"]
+
+[features]
+# extension-module is NOT default - enable via maturin build
+extension-module = ["pyo3/extension-module"]
 
 [dependencies]
-pyo3 = { version = "0.22", features = ["extension-module", "chrono"] }
+pyo3 = { version = "0.22", features = ["chrono"] }
 chrono = "0.4"
 thiserror = "1.0"
 rustc-hash = "2"

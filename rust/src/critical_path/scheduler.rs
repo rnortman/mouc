@@ -208,26 +208,57 @@ impl CriticalPathScheduler {
             );
         }
 
-        // Collect all resource names
-        let mut all_resources: FxHashSet<String> = FxHashSet::default();
-        for task in self.tasks.values() {
-            for (resource_name, _) in &task.resources {
-                all_resources.insert(resource_name.clone());
-            }
-        }
-        for fixed_task in fixed_tasks {
-            for resource in &fixed_task.resources {
-                all_resources.insert(resource.clone());
-            }
-        }
-        if let Some(rc) = &self.resource_config {
-            for r in &rc.resource_order {
-                all_resources.insert(r.clone());
-            }
-        }
+        // Build ResourceIndex.
+        // If resource_config exists: use resource_order (in order) and validate assignments.
+        // If no resource_config: collect resources from tasks (legacy mode, no validation).
+        let resource_names: Vec<String> = if let Some(rc) = &self.resource_config {
+            // With config: use resource_order and validate
+            let known_resources: FxHashSet<&str> =
+                rc.resource_order.iter().map(|s| s.as_str()).collect();
 
-        // Build ResourceIndex (assigns consecutive integer IDs to resources)
-        let resource_names: Vec<String> = all_resources.into_iter().collect();
+            // Validate that all explicit resource assignments reference known resources
+            for task in self.tasks.values() {
+                for (resource_name, _) in &task.resources {
+                    if !known_resources.contains(resource_name.as_str()) {
+                        panic!(
+                            "Task '{}' references unknown resource '{}'. Add it to resource_order in config.",
+                            task.id, resource_name
+                        );
+                    }
+                }
+            }
+            for fixed_task in fixed_tasks {
+                for resource_name in &fixed_task.resources {
+                    if !known_resources.contains(resource_name.as_str()) {
+                        panic!(
+                            "Fixed task '{}' references unknown resource '{}'. Add it to resource_order in config.",
+                            fixed_task.task_id, resource_name
+                        );
+                    }
+                }
+            }
+
+            rc.resource_order.clone()
+        } else {
+            // Legacy mode: collect resources from tasks (order not guaranteed)
+            let mut seen: FxHashSet<String> = FxHashSet::default();
+            let mut names: Vec<String> = Vec::new();
+            for task in self.tasks.values() {
+                for (resource_name, _) in &task.resources {
+                    if seen.insert(resource_name.clone()) {
+                        names.push(resource_name.clone());
+                    }
+                }
+            }
+            for fixed_task in fixed_tasks {
+                for resource_name in &fixed_task.resources {
+                    if seen.insert(resource_name.clone()) {
+                        names.push(resource_name.clone());
+                    }
+                }
+            }
+            names
+        };
         self.resource_index = ResourceIndex::new(resource_names.iter().cloned());
 
         // Build resource schedules as Vec indexed by resource ID
@@ -452,91 +483,100 @@ impl CriticalPathScheduler {
             // (if no resources exist at all, we may still have milestones to schedule)
             let has_resources = !state.resource_schedules.is_empty();
             if !has_resources || !available_mask.is_empty() {
-                // Get ranked targets from cache (already scored)
-                let ranked_targets = cache.get_ranked_targets(&self.config, state.current_time);
+                // Get ranked targets from cache (populates target_scores and target_denominators)
+                // Clone to release the borrow on cache so we can use other cache methods
+                let ranked_targets: Vec<TargetInfo> = cache
+                    .get_ranked_targets(&self.config, state.current_time)
+                    .into_iter()
+                    .cloned()
+                    .collect();
 
-                log_debug!(
-                    verbosity,
-                    "  Ranked targets: {}",
-                    ranked_targets
-                        .iter()
-                        .take(3)
-                        .map(|t| format!("{}(score={:.2})", t.target_id, t.score))
-                        .collect::<Vec<_>>()
-                        .join(", ")
+                if verbosity >= crate::logging::VERBOSITY_DEBUG {
+                    eprintln!("  Ranked targets:");
+                    for t in ranked_targets.iter().take(5) {
+                        eprintln!(
+                            "    {} pri={} work={:.1} urg={:.3} => score={:.3}",
+                            t.target_id, t.priority, t.total_work, t.urgency, t.score
+                        );
+                    }
+                }
+
+                // Get all eligible tasks from any target's subgraph
+                let eligible_tasks = self.get_all_eligible_subgraph_tasks_int(
+                    &cache,
+                    ctx,
+                    &scheduled_end_vec,
+                    &state.unscheduled_vec,
+                    &completed_vec,
+                    initial_time,
+                    state.current_time,
                 );
 
-                'target_loop: for target in &ranked_targets {
-                    log_checks!(
-                        verbosity,
-                        "  Trying target {} (score={:.2} = pri {} / work {:.1} * urg {:.3}, deadline={:?})",
-                        target.target_id,
-                        target.score,
-                        target.priority,
-                        target.total_work,
-                        target.urgency,
-                        target.deadline
-                    );
+                // Score each eligible task and collect those with resources available
+                let mut scored_tasks: Vec<(TaskId, f64)> = eligible_tasks
+                    .iter()
+                    .filter_map(|&task_int| {
+                        // Skip if requested at initial time (for rollout simulation)
+                        if state.current_time == initial_time {
+                            if let Some(skip_int) = skip_task_int_at_initial_time {
+                                if task_int == skip_int {
+                                    return None;
+                                }
+                            }
+                        }
 
-                    // Get eligible tasks on this target's critical path using integer IDs
-                    let eligible_ints = self.get_eligible_critical_path_tasks_int(
-                        target,
-                        ctx,
-                        &scheduled_end_vec,
-                        &state.unscheduled_vec,
-                        &completed_vec,
-                        initial_time,
-                        state.current_time,
-                    );
+                        // Check if task has any available resource
+                        if !self.task_has_available_resource_int(task_int, ctx, available_mask) {
+                            return None;
+                        }
 
-                    if eligible_ints.is_empty() {
-                        continue;
+                        let score = cache.score_eligible_task(task_int, &self.config);
+                        Some((task_int, score))
+                    })
+                    .collect();
+
+                // Sort by score descending (highest score first)
+                scored_tasks
+                    .sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+                if verbosity >= crate::logging::VERBOSITY_DEBUG {
+                    eprintln!("  Eligible tasks:");
+                    for (task_int, _score) in scored_tasks.iter().take(5) {
+                        let task_name = ctx.index.get_name(*task_int).unwrap_or("?");
+                        let (best_target, slack, denom, task_urg, target_score, final_score) =
+                            cache.score_eligible_task_breakdown(*task_int, &self.config);
+                        let target_name = ctx.index.get_name(best_target).unwrap_or("?");
+                        eprintln!(
+                            "    {} via {} slack={:.1} denom={:.1} urg={:.3} tgt={:.3} => {:.3}",
+                            task_name, target_name, slack, denom, task_urg, target_score, final_score
+                        );
                     }
+                }
 
-                    // Pick best task by WSPT using integer IDs
-                    let best_task_int = self.pick_best_task_int(&eligible_ints, ctx);
-
+                // Try to schedule tasks in score order
+                'task_loop: for (best_task_int, task_score) in scored_tasks {
                     // Convert to string ID for operations that still need it
                     let best_task_id = match ctx.index.get_name(best_task_int) {
                         Some(name) => name.to_string(),
                         None => continue,
                     };
 
-                    // Skip this task at initial time if requested (for rollout simulation)
-                    if state.current_time == initial_time {
-                        if let Some(skip_int) = skip_task_int_at_initial_time {
-                            if best_task_int == skip_int {
-                                continue; // Skip this task at initial time, try next target
-                            }
-                        }
-                    }
-
                     let priority = ctx.priorities[best_task_int as usize];
 
                     log_checks!(
                         verbosity,
-                        "  Considering task {} (priority={}, target={})",
+                        "  Considering task {} (priority={}, score={:.3})",
                         best_task_id,
                         priority,
-                        target.target_id
+                        task_score
                     );
-
-                    // Check if task has any available resource using integer ID
-                    if !self.task_has_available_resource_int(best_task_int, ctx, available_mask) {
-                        log_checks!(
-                            verbosity,
-                            "    Skipping {}: Resources not available now",
-                            best_task_id
-                        );
-                        continue;
-                    }
 
                     // Check rollout: should we skip this task for a better upcoming task?
                     if enable_rollout && self.config.rollout_enabled {
                         if let Some((skip_reason, reservation)) = self.check_rollout_skip_int(
                             best_task_int,
                             &best_task_id,
-                            target,
+                            task_score,
                             &ranked_targets,
                             &state,
                             ctx,
@@ -613,7 +653,7 @@ impl CriticalPathScheduler {
 
                         state.result.push(scheduled_task);
                         scheduled_any = true;
-                        break 'target_loop; // Single-target focus per iteration
+                        break 'task_loop; // One task per iteration (single-target focus preserved)
                     } else {
                         log_checks!(
                             verbosity,
@@ -754,7 +794,11 @@ impl CriticalPathScheduler {
     /// Uses integer IDs and Vec-based lookups for maximum performance.
     ///
     /// scheduled_vec contains ABSOLUTE offsets from initial_time (not current_time).
+    ///
+    /// DEPRECATED: This method is kept for backwards compatibility but is no longer
+    /// used in the main scheduling loop. Use `get_all_eligible_subgraph_tasks_int` instead.
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     fn get_eligible_critical_path_tasks_int(
         &self,
         target: &TargetInfo,
@@ -815,8 +859,88 @@ impl CriticalPathScheduler {
         eligible
     }
 
+    /// Get all eligible tasks from any target's dependency subgraph.
+    ///
+    /// Unlike `get_eligible_critical_path_tasks_int`, this method returns tasks from
+    /// the full dependency subgraph (not just critical path), filtering by:
+    /// - Task is unscheduled
+    /// - All dependencies are satisfied
+    /// - Start_after constraint is met
+    /// - Task appears in at least one target's subgraph
+    ///
+    /// Used for unified task scoring where tasks are ranked by their contribution
+    /// to targets (via slack-weighted urgency) rather than WSPT.
+    #[allow(clippy::too_many_arguments)]
+    fn get_all_eligible_subgraph_tasks_int(
+        &self,
+        cache: &CriticalPathCache,
+        ctx: &TaskData,
+        scheduled_vec: &[f64],
+        unscheduled_vec: &[bool],
+        completed_vec: &[bool],
+        initial_time: NaiveDate,
+        current_time: NaiveDate,
+    ) -> Vec<TaskId> {
+        let mut eligible = Vec::new();
+        let current_offset = (current_time - initial_time).num_days() as f64;
+
+        // Iterate through all tasks and find those that are eligible and in a subgraph
+        for task_int in 0..ctx.index.len() as TaskId {
+            let idx = task_int as usize;
+
+            // Must be unscheduled
+            if !unscheduled_vec[idx] {
+                continue;
+            }
+
+            // Must be in at least one target's subgraph
+            let task_targets = cache.get_task_targets(task_int);
+            if task_targets.is_empty() {
+                continue;
+            }
+
+            // Check if all dependencies are satisfied
+            let all_deps_ready = ctx.deps[idx].iter().all(|&(dep_int, lag)| {
+                let dep_idx = dep_int as usize;
+
+                // Completed tasks are always ready
+                if completed_vec[dep_idx] {
+                    return true;
+                }
+
+                // Check if dependency is scheduled
+                let dep_end = scheduled_vec[dep_idx];
+                if dep_end < f64::MAX {
+                    let eligible_after = dep_end + lag;
+                    eligible_after < current_offset
+                } else {
+                    false
+                }
+            });
+
+            if !all_deps_ready {
+                continue;
+            }
+
+            // Check start_after constraint
+            if let Some(start_after) = ctx.start_afters[idx] {
+                if start_after > current_time {
+                    continue;
+                }
+            }
+
+            eligible.push(task_int);
+        }
+
+        eligible
+    }
+
     /// Pick the best task from eligible list using WSPT (priority / duration).
     /// Uses integer IDs and Vec-based lookups for maximum performance.
+    ///
+    /// DEPRECATED: This method is kept for backwards compatibility but is no longer
+    /// used in the main scheduling loop. Unified task scoring now replaces WSPT.
+    #[allow(dead_code)]
     fn pick_best_task_int(&self, eligible: &[TaskId], ctx: &TaskData) -> TaskId {
         let mut best_int = eligible[0];
         let mut best_score = f64::NEG_INFINITY;
@@ -1009,121 +1133,100 @@ impl CriticalPathScheduler {
         unscheduled_vec: &[bool],
         initial_time: NaiveDate,
     ) -> Option<ScheduledTask> {
-        let resource_config = self.resource_config.as_ref()?;
-        let spec = task.resource_spec.as_ref()?;
+        // Get precomputed resource mask for this task
+        let task_req = ctx.resource_reqs[task_int as usize].as_ref()?;
 
-        let candidates = resource_config.expand_resource_spec(spec);
-        let verbosity = self.config.verbosity;
+        // Compute candidate mask: task's valid resources AND currently available
+        let mut candidates_mask = task_req.mask.intersection(available_mask);
 
-        log_debug!(
-            verbosity,
-            "    Auto-assignment for {}: spec='{}', prefer_fungible={}",
-            task_id,
-            spec,
-            self.config.prefer_fungible_resources
-        );
-
-        // Collect all valid candidates with their completion times
-        let mut valid_candidates: Vec<(u32, String, NaiveDate)> = Vec::new();
-
-        for resource_name in candidates {
-            let resource_id = match self.resource_index.get_id(&resource_name) {
-                Some(id) => id,
-                None => continue,
-            };
-
-            // Skip if not available (already checked via bitmask, but verify)
-            if !available_mask.is_set(resource_id) {
-                continue;
+        // Filter out reserved resources (using integer task ID comparison)
+        for (&res_id, reservation) in reservations {
+            if reservation.task_int != task_int {
+                candidates_mask.clear(res_id);
             }
-
-            // Check if resource is reserved for a different task
-            if let Some(reservation) = reservations.get(&resource_id) {
-                if reservation.task_id != task_id {
-                    continue;
-                }
-            }
-
-            let schedule = &mut resource_schedules[resource_id as usize];
-            let completion = schedule.calculate_completion_time(current_time, task.duration_days);
-            valid_candidates.push((resource_id, resource_name, completion));
         }
 
-        if valid_candidates.is_empty() {
+        if candidates_mask.is_empty() {
             return None;
         }
 
+        let verbosity = self.config.verbosity;
+
+        // Collect all valid candidates with their completion times
+        // (resource_id, completion_time) - no strings in the hot path
+        let mut valid_candidates: Vec<(u32, NaiveDate)> = Vec::new();
+
+        for resource_id in candidates_mask.iter() {
+            let schedule = &mut resource_schedules[resource_id as usize];
+            let completion = schedule.calculate_completion_time(current_time, task.duration_days);
+            valid_candidates.push((resource_id, completion));
+        }
+
         // Find the best completion time
-        let best_completion = valid_candidates.iter().map(|(_, _, c)| *c).min().unwrap();
+        let best_completion = valid_candidates.iter().map(|(_, c)| *c).min().unwrap();
 
         // Filter to candidates with the best completion time (ties)
         let tied_candidates: Vec<_> = valid_candidates
             .into_iter()
-            .filter(|(_, _, c)| *c == best_completion)
+            .filter(|(_, c)| *c == best_completion)
             .collect();
 
         let num_tied = tied_candidates.len();
-        log_debug!(
-            verbosity,
-            "    {} tied candidates for completion {}",
-            num_tied,
-            best_completion
-        );
 
-        // Select the best resource
-        let (best_resource_id, best_resource_name) =
-            if num_tied == 1 || !self.config.prefer_fungible_resources {
-                // Only one option, or fungibility optimization disabled - take first
-                let (id, name, _) = tied_candidates.into_iter().next().unwrap();
-                log_debug!(
-                    verbosity,
-                    "    Single candidate or fungibility disabled, picking {}",
-                    name
-                );
-                (id, name)
-            } else {
-                // Multiple tied candidates - use smart resource selection
-                // (fast path for fungible, rollout for scarce)
-                log_debug!(
-                    verbosity,
-                    "    Checking fungibility for {} candidates:",
-                    num_tied
-                );
-                for (res_id, res_name, _) in &tied_candidates {
-                    let (blocking, blocking_details) = self.get_exclusive_blocking_details(
-                        *res_id,
-                        best_completion,
-                        ctx,
-                        scheduled_vec,
-                        unscheduled_vec,
-                        initial_time,
-                        current_time,
-                    );
-                    let exclusive_count = self.resource_exclusive_tasks[*res_id as usize].len();
-                    log_debug!(
-                        verbosity,
-                        "      {}: {} exclusive tasks total, {} blocking before {}",
-                        res_name,
-                        exclusive_count,
-                        blocking,
-                        best_completion
-                    );
-                    for detail in blocking_details {
-                        log_debug!(verbosity, "        - {}", detail);
-                    }
-                }
-                self.select_best_resource(
-                    tied_candidates,
-                    task_int,
+        // Select the best resource (integer ID only)
+        let best_resource_id = if num_tied == 1 || !self.config.prefer_fungible_resources {
+            // Only one option, or fungibility optimization disabled - take first
+            let (id, _) = tied_candidates.into_iter().next().unwrap();
+            id
+        } else {
+            // Multiple tied candidates - use smart resource selection
+            // (fast path for fungible, rollout for scarce)
+            log_debug!(
+                verbosity,
+                "    Checking fungibility for {} candidates:",
+                num_tied
+            );
+            for (res_id, _) in &tied_candidates {
+                let (blocking, blocking_details) = self.get_exclusive_blocking_details(
+                    *res_id,
+                    best_completion,
                     ctx,
                     scheduled_vec,
                     unscheduled_vec,
-                    resource_schedules,
-                    reservations,
                     initial_time,
                     current_time,
-                )
-            };
+                );
+                if verbosity >= crate::logging::VERBOSITY_DEBUG {
+                    let exclusive_count = self.resource_exclusive_tasks[*res_id as usize].len();
+                    let res_name = self.resource_index.get_name(*res_id).unwrap_or("?");
+                    eprintln!(
+                        "      {}: {} exclusive tasks total, {} blocking before {}",
+                        res_name, exclusive_count, blocking, best_completion
+                    );
+                    for detail in blocking_details {
+                        eprintln!("        - {}", detail);
+                    }
+                }
+            }
+            self.select_best_resource_int(
+                &tied_candidates,
+                task_int,
+                ctx,
+                scheduled_vec,
+                unscheduled_vec,
+                resource_schedules,
+                reservations,
+                initial_time,
+                current_time,
+            )
+        };
+
+        // Look up resource name only at the end for the result
+        let best_resource_name = self
+            .resource_index
+            .get_name(best_resource_id)
+            .unwrap_or("unknown")
+            .to_string();
 
         // Log at checks level (2) so it shows in normal debug output
         log_checks!(
@@ -1147,7 +1250,7 @@ impl CriticalPathScheduler {
         })
     }
 
-    /// Select the best resource from tied candidates.
+    /// Select the best resource from tied candidates (integer-only version).
     ///
     /// Strategy:
     /// 1. Fast path: If any candidate has 0 blocking exclusive tasks, pick it immediately
@@ -1155,9 +1258,9 @@ impl CriticalPathScheduler {
     ///    choice and pick the one with the best schedule score
     /// 3. Fallback: Pick the candidate with fewest blocking tasks
     #[allow(clippy::too_many_arguments)]
-    fn select_best_resource(
+    fn select_best_resource_int(
         &self,
-        tied_candidates: Vec<(u32, String, NaiveDate)>,
+        tied_candidates: &[(u32, NaiveDate)],
         task_int: TaskId,
         ctx: &TaskData,
         scheduled_vec: &[(f64, f64)],
@@ -1166,37 +1269,37 @@ impl CriticalPathScheduler {
         reservations: &FxHashMap<u32, ResourceReservation>,
         initial_time: NaiveDate,
         current_time: NaiveDate,
-    ) -> (u32, String) {
+    ) -> u32 {
         let verbosity = self.config.verbosity;
 
         // Compute blocking count for each candidate
-        let candidates_with_counts: Vec<(u32, String, NaiveDate, usize)> = tied_candidates
-            .into_iter()
-            .map(|(id, name, completion)| {
+        let candidates_with_counts: Vec<(u32, NaiveDate, usize)> = tied_candidates
+            .iter()
+            .map(|(id, completion)| {
                 let blocking = self.count_exclusive_blocking_tasks(
-                    id,
-                    completion,
+                    *id,
+                    *completion,
                     ctx,
                     scheduled_vec,
                     unscheduled_vec,
                     initial_time,
                     current_time,
                 );
-                (id, name, completion, blocking)
+                (*id, *completion, blocking)
             })
             .collect();
 
         // Fast path: any truly fungible candidate (0 blocking)?
-        if let Some((id, name, _, _)) = candidates_with_counts
+        if let Some((id, _, _)) = candidates_with_counts
             .iter()
-            .find(|(_, _, _, count)| *count == 0)
+            .find(|(_, _, count)| *count == 0)
         {
             log_debug!(
                 verbosity,
                 "    Fast path: picking fungible resource {} (0 blocking tasks)",
-                name
+                id
             );
-            return (*id, name.clone());
+            return *id;
         }
 
         // All candidates are scarce - use rollout if enabled
@@ -1206,8 +1309,8 @@ impl CriticalPathScheduler {
                 "    All {} candidates are scarce, using rollout to decide",
                 candidates_with_counts.len()
             );
-            return self.select_resource_via_rollout(
-                candidates_with_counts,
+            return self.select_resource_via_rollout_int(
+                &candidates_with_counts,
                 task_int,
                 ctx,
                 scheduled_vec,
@@ -1222,25 +1325,23 @@ impl CriticalPathScheduler {
         // Fallback: pick candidate with lowest blocking count
         let best = candidates_with_counts
             .iter()
-            .min_by_key(|(_, _, _, count)| *count)
+            .min_by_key(|(_, _, count)| *count)
             .unwrap();
-        log_debug!(
-            verbosity,
-            "    Fallback: picking {} with {} blocking tasks",
-            best.1,
-            best.3
-        );
-        (best.0, best.1.clone())
+        if verbosity >= crate::logging::VERBOSITY_DEBUG {
+            let best_name = self.resource_index.get_name(best.0).unwrap_or("?");
+            eprintln!(
+                "    Fallback: picking {} with {} blocking tasks",
+                best_name, best.2
+            );
+        }
+        best.0
     }
 
-    /// Select the best resource using rollout simulation.
-    ///
-    /// Simulates scheduling the task on each candidate resource and picks
-    /// the one that produces the best overall schedule score.
+    /// Select the best resource using rollout simulation (integer-only version).
     #[allow(clippy::too_many_arguments)]
-    fn select_resource_via_rollout(
+    fn select_resource_via_rollout_int(
         &self,
-        candidates: Vec<(u32, String, NaiveDate, usize)>,
+        candidates: &[(u32, NaiveDate, usize)],
         task_int: TaskId,
         ctx: &TaskData,
         scheduled_vec: &[(f64, f64)],
@@ -1249,23 +1350,35 @@ impl CriticalPathScheduler {
         reservations: &FxHashMap<u32, ResourceReservation>,
         initial_time: NaiveDate,
         current_time: NaiveDate,
-    ) -> (u32, String) {
+    ) -> u32 {
         let verbosity = self.config.verbosity;
 
         // Calculate horizon for simulation
-        let horizon = self.calculate_resource_choice_horizon(&candidates, current_time, ctx);
+        let horizon = self.calculate_resource_choice_horizon_int(candidates, current_time, ctx);
 
-        log_debug!(
-            verbosity,
-            "    Resource choice rollout: {} candidates, horizon={}",
-            candidates.len(),
-            horizon
-        );
+        if verbosity >= crate::logging::VERBOSITY_DEBUG {
+            let task_name = ctx.index.get_name(task_int).unwrap_or("?");
+            eprintln!(
+                "    Resource choice rollout for {}: {} candidates, horizon={}",
+                task_name,
+                candidates.len(),
+                horizon
+            );
+        }
 
-        // Collect all scores for summary
-        let mut scores: Vec<(u32, String, usize, f64)> = Vec::with_capacity(candidates.len());
+        let mut best_id = candidates[0].0;
+        let mut best_score = f64::MAX;
 
-        for (resource_id, resource_name, completion, blocking_count) in &candidates {
+        for (resource_id, completion, _blocking_count) in candidates {
+            if verbosity >= crate::logging::VERBOSITY_DEBUG {
+                let task_name = ctx.index.get_name(task_int).unwrap_or("?");
+                let res_name = self.resource_index.get_name(*resource_id).unwrap_or("?");
+                eprintln!(
+                    "    --- Rollout scenario: {} -> {} (completes {}) ---",
+                    task_name, res_name, completion
+                );
+            }
+
             // Construct a temporary state for simulation
             let temp_state = CriticalPathSchedulerState::new(
                 scheduled_vec.to_vec(),
@@ -1301,80 +1414,55 @@ impl CriticalPathScheduler {
                 });
             let score = self.score_state_int(&final_state, ctx, horizon);
 
-            log_debug!(
-                verbosity,
-                "      {}: blocking={}, rollout_score={:.4}",
-                resource_name,
-                blocking_count,
-                score
-            );
+            if verbosity >= crate::logging::VERBOSITY_DEBUG {
+                let res_name = self.resource_index.get_name(*resource_id).unwrap_or("?");
+                eprintln!("      {}: score={:.2}", res_name, score);
+            }
 
-            scores.push((*resource_id, resource_name.clone(), *blocking_count, score));
+            if score < best_score {
+                best_score = score;
+                best_id = *resource_id;
+            }
         }
 
-        // Find the best score
-        let (best_resource_id, best_resource_name, _, _best_score) = scores
-            .iter()
-            .min_by(|a, b| a.3.partial_cmp(&b.3).unwrap_or(std::cmp::Ordering::Equal))
-            .cloned()
-            .unwrap();
-
-        // Print summary block with all scores
-        log_checks!(
-            verbosity,
-            "    Resource choice rollout summary (horizon={}):",
-            horizon
-        );
-        for (_, name, blocking, score) in &scores {
-            let marker = if *name == best_resource_name {
-                " <-- BEST"
-            } else {
-                ""
-            };
-            log_checks!(
-                verbosity,
-                "      {}: score={:.4}, blocking={}{}",
-                name,
-                score,
-                blocking,
-                marker
+        if verbosity >= crate::logging::VERBOSITY_DEBUG {
+            let best_name = self.resource_index.get_name(best_id).unwrap_or("?");
+            eprintln!(
+                "    Best resource: {} with score={:.2}",
+                best_name, best_score
             );
         }
-
-        (best_resource_id, best_resource_name)
+        best_id
     }
 
-    /// Calculate horizon for resource choice rollout.
-    ///
-    /// Uses the max estimated completion of exclusive tasks across all candidate resources,
-    /// capped by the configured max horizon.
-    fn calculate_resource_choice_horizon(
+    /// Calculate horizon for resource choice rollout (integer-only version).
+    fn calculate_resource_choice_horizon_int(
         &self,
-        candidates: &[(u32, String, NaiveDate, usize)],
+        candidates: &[(u32, NaiveDate, usize)],
         current_time: NaiveDate,
         ctx: &TaskData,
     ) -> NaiveDate {
-        let mut max_completion = current_time;
+        // Find max completion among candidates
+        let max_completion = candidates.iter().map(|(_, c, _)| *c).max().unwrap();
 
-        // Find max estimated completion across all candidate resources' exclusive tasks
-        for (resource_id, _, _, _) in candidates {
+        // Also consider when exclusive tasks become eligible
+        let mut horizon = max_completion;
+        for (resource_id, _, _) in candidates {
             for &task_int in &self.resource_exclusive_tasks[*resource_id as usize] {
-                // Simple estimate: current_time + task duration
-                let task_duration = ctx.durations[task_int as usize];
-                let estimated = current_time + chrono::Duration::days(task_duration.ceil() as i64);
-                if estimated > max_completion {
-                    max_completion = estimated;
+                // Estimate when this task becomes eligible
+                if let Some(start_after) = ctx.start_afters[task_int as usize] {
+                    if start_after > current_time
+                        && start_after < horizon + chrono::Duration::days(30)
+                    {
+                        horizon = horizon.max(start_after);
+                    }
                 }
             }
         }
 
-        // Cap to configured max
-        if let Some(max_days) = self.config.rollout_max_horizon_days {
-            let cap = current_time + chrono::Duration::days(max_days as i64);
-            max_completion = max_completion.min(cap);
-        }
-
-        max_completion
+        // Cap at reasonable horizon
+        let max_horizon = current_time + chrono::Duration::days(90);
+        horizon.min(max_horizon)
     }
 
     /// Count exclusive tasks for a resource that would become eligible before task_end.
@@ -1592,8 +1680,8 @@ impl CriticalPathScheduler {
         &self,
         task_int: TaskId,
         task_id: &str,
-        current_target: &TargetInfo,
-        all_targets: &[&TargetInfo],
+        current_score: f64,
+        all_targets: &[TargetInfo],
         state: &CriticalPathSchedulerState,
         ctx: &TaskData,
         available_mask: ResourceMask,
@@ -1616,7 +1704,7 @@ impl CriticalPathScheduler {
 
         // Find competing targets with higher-scored tasks that need this resource
         let competing = find_competing_targets_int(
-            current_target.score,
+            current_score,
             completion,
             &resource,
             self.config.rollout_score_ratio_threshold,
@@ -1696,12 +1784,13 @@ impl CriticalPathScheduler {
             let best_competing = &competing[0];
             let reason = format!(
                 "better to wait for {} (target score {:.2} vs {:.2})",
-                best_competing.critical_task_id, best_competing.target_score, current_target.score
+                best_competing.critical_task_id, best_competing.target_score, current_score
             );
             let reservation = ResourceReservation {
                 resource: resource.clone(),
                 target_id: best_competing.target_id.clone(),
                 task_id: best_competing.critical_task_id.clone(),
+                task_int: best_competing.critical_task_int,
                 target_score: best_competing.target_score,
                 reserved_from: current_time,
             };
@@ -1775,6 +1864,14 @@ mod tests {
         }
     }
 
+    fn simple_resource_config(resources: Vec<&str>) -> ResourceConfig {
+        ResourceConfig {
+            resource_order: resources.into_iter().map(|s| s.to_string()).collect(),
+            dns_periods: std::collections::HashMap::new(),
+            spec_expansion: std::collections::HashMap::new(),
+        }
+    }
+
     #[test]
     fn test_simple_chain() {
         let tasks = vec![
@@ -1788,7 +1885,7 @@ mod tests {
             FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
-            None,
+            Some(simple_resource_config(vec!["r1"])),
             vec![],
         );
 
@@ -1824,7 +1921,7 @@ mod tests {
             FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
-            None,
+            Some(simple_resource_config(vec!["r1", "r2"])),
             vec![],
         );
 
@@ -1852,7 +1949,7 @@ mod tests {
             FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
-            None,
+            Some(simple_resource_config(vec!["r1"])),
             vec![],
         );
 
@@ -1888,7 +1985,7 @@ mod tests {
             FxHashSet::default(),
             50,
             CriticalPathConfig::default(),
-            None,
+            Some(simple_resource_config(vec!["r1"])),
             vec![],
         );
 
@@ -2030,7 +2127,7 @@ mod tests {
     #[test]
     fn test_prefer_fungible_resources_disabled() {
         // Same scenario but with prefer_fungible_resources=false.
-        // Task A should use alice (first in resource_order),
+        // Task A (shorter, so scheduled first) should use alice (first in resource_order),
         // which will block Task B.
 
         let resource_config = ResourceConfig {
@@ -2039,8 +2136,11 @@ mod tests {
             spec_expansion: std::collections::HashMap::new(),
         };
 
+        // task_a is shorter (2 days) than task_b (3 days), so it has better P/W and
+        // gets scheduled first. With prefer_fungible_resources=false, it will pick
+        // alice (first in resource_order), blocking task_b.
         let tasks = vec![
-            make_auto_assign_task("task_a", 5.0, vec![], Some(50), "*"),
+            make_auto_assign_task("task_a", 2.0, vec![], Some(50), "*"),
             make_task("task_b", 3.0, vec![], Some(50), vec!["alice"]),
         ];
 

@@ -166,8 +166,35 @@ impl ResourceMask {
     }
 
     /// Iterate over the resource IDs that are set in this mask.
-    pub fn iter_set(&self) -> impl Iterator<Item = u32> + '_ {
-        (0u32..128).filter(|&id| self.is_set(id))
+    /// Uses trailing_zeros for O(popcount) iteration instead of O(128).
+    #[inline]
+    pub fn iter(&self) -> ResourceMaskIter {
+        ResourceMaskIter(self.0)
+    }
+
+    /// Clear a resource from the mask.
+    #[inline]
+    pub fn clear(&mut self, id: u32) {
+        debug_assert!(id < 128, "ResourceMask supports up to 128 resources");
+        self.0 &= !(1u128 << id);
+    }
+}
+
+/// Iterator over set bits in a ResourceMask using trailing_zeros.
+pub struct ResourceMaskIter(u128);
+
+impl Iterator for ResourceMaskIter {
+    type Item = u32;
+
+    #[inline]
+    fn next(&mut self) -> Option<u32> {
+        if self.0 == 0 {
+            None
+        } else {
+            let bit = self.0.trailing_zeros();
+            self.0 &= !(1u128 << bit);
+            Some(bit)
+        }
     }
 }
 
@@ -229,6 +256,45 @@ impl WorkTransform {
     }
 }
 
+/// How to compute the denominator for task urgency calculation.
+///
+/// The task urgency formula is: `exp(-slack / (K * denominator))`
+/// where this enum controls what value is used for `denominator`.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum UrgencyDenominator {
+    /// Use global average work across all targets.
+    #[default]
+    GlobalAvg,
+    /// Use each target's total_work (sum of all dependency durations).
+    TargetWork,
+    /// Use each target's critical_path_length (longest path duration).
+    CriticalPath,
+}
+
+impl UrgencyDenominator {
+    /// Parse from string (for Python interop).
+    pub fn from_str(s: &str) -> Result<Self, String> {
+        match s.to_lowercase().replace('_', "").as_str() {
+            "globalavg" | "global" | "avg" => Ok(Self::GlobalAvg),
+            "targetwork" | "work" => Ok(Self::TargetWork),
+            "criticalpath" | "critical" | "cp" => Ok(Self::CriticalPath),
+            _ => Err(format!(
+                "Invalid urgency_denominator '{}', expected 'global_avg', 'target_work', or 'critical_path'",
+                s
+            )),
+        }
+    }
+
+    /// Convert to string (for Python interop).
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::GlobalAvg => "global_avg",
+            Self::TargetWork => "target_work",
+            Self::CriticalPath => "critical_path",
+        }
+    }
+}
+
 /// Configuration for the critical path scheduler.
 #[pyclass]
 #[derive(Clone, Debug)]
@@ -274,6 +340,10 @@ pub struct CriticalPathConfig {
     /// task if that resource is specifically needed by another pending task.
     #[pyo3(get, set)]
     pub prefer_fungible_resources: bool,
+
+    /// How to compute the denominator for task urgency calculation.
+    /// Not directly exposed to Python; use urgency_denominator_str getter/setter.
+    pub urgency_denominator: UrgencyDenominator,
 }
 
 #[pymethods]
@@ -289,7 +359,8 @@ impl CriticalPathConfig {
         rollout_max_horizon_days=30,
         work_transform="power",
         work_exponent=1.0,
-        prefer_fungible_resources=true
+        prefer_fungible_resources=true,
+        urgency_denominator="global_avg"
     ))]
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -303,8 +374,11 @@ impl CriticalPathConfig {
         work_transform: &str,
         work_exponent: f64,
         prefer_fungible_resources: bool,
+        urgency_denominator: &str,
     ) -> PyResult<Self> {
         let work_transform = WorkTransform::from_str(work_transform)
+            .map_err(pyo3::exceptions::PyValueError::new_err)?;
+        let urgency_denominator = UrgencyDenominator::from_str(urgency_denominator)
             .map_err(pyo3::exceptions::PyValueError::new_err)?;
         Ok(Self {
             k,
@@ -317,6 +391,7 @@ impl CriticalPathConfig {
             work_transform,
             work_exponent,
             prefer_fungible_resources,
+            urgency_denominator,
         })
     }
 
@@ -331,6 +406,20 @@ impl CriticalPathConfig {
     fn set_work_transform_str(&mut self, value: &str) -> PyResult<()> {
         self.work_transform =
             WorkTransform::from_str(value).map_err(pyo3::exceptions::PyValueError::new_err)?;
+        Ok(())
+    }
+
+    /// Get the urgency denominator as a string.
+    #[getter]
+    fn urgency_denominator_str(&self) -> &'static str {
+        self.urgency_denominator.as_str()
+    }
+
+    /// Set the urgency denominator from a string.
+    #[setter]
+    fn set_urgency_denominator_str(&mut self, value: &str) -> PyResult<()> {
+        self.urgency_denominator =
+            UrgencyDenominator::from_str(value).map_err(pyo3::exceptions::PyValueError::new_err)?;
         Ok(())
     }
 
@@ -358,6 +447,7 @@ impl Default for CriticalPathConfig {
             work_transform: WorkTransform::Power,
             work_exponent: 1.0,
             prefer_fungible_resources: true,
+            urgency_denominator: UrgencyDenominator::GlobalAvg,
         }
     }
 }
