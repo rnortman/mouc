@@ -161,8 +161,8 @@ class TestEffortReportCommand:
         # cap-3 spans Dec 28 - Jan 4 (7 days)
         # Q1 starts Jan 1, so 3 days overlap (Jan 1-3)
         # effort = 1w = 7 calendar days, proportion = 3/7
-        # effort_in_range = 7 * 3/7 = 3 days
-        # effort_weeks = 3 / 5 = 0.6 work weeks
+        # effort_in_range = 7 * 3/7 = 3 calendar days
+        # effort_weeks = 3 / 7 = 0.43 weeks
         result = runner.invoke(
             app,
             [
@@ -184,8 +184,8 @@ class TestEffortReportCommand:
         cap3_line = [line for line in lines if "cap-3" in line][0]
         effort_weeks = float(cap3_line.split(",")[2])
 
-        # 3 days proportional effort / 5 work days per week = 0.6 work weeks
-        assert 0.55 <= effort_weeks <= 0.65
+        # 3 days overlap / 7 days total = 0.43 weeks
+        assert 0.4 <= effort_weeks <= 0.5
 
     def test_effort_report_task_outside_range(self, tmp_path: Path):
         """Test that tasks outside the range are excluded."""
@@ -448,16 +448,13 @@ class TestEffortReportPhaseCombining:
         # Should have 2 rows: auth (combined) + standalone
         assert len(rows) == 2
 
-        # Find auth row - should have combined effort
-        # auth: 2w = 14 days → 14/5 = 2.8 work weeks
-        # auth_design: 1w = 7 days → 7/5 = 1.4 work weeks
-        # Combined: 4.2 work weeks
+        # Find auth row - should have combined effort (1w + 2w = 3w)
         auth_row = next(r for r in rows if r[0] == "auth")
-        assert auth_row[2] == 4.2
+        assert auth_row[2] == 3.0
 
-        # Find standalone row: 3w = 21 days → 21/5 = 4.2 work weeks
+        # Find standalone row - unaffected (3w)
         standalone_row = next(r for r in rows if r[0] == "standalone")
-        assert standalone_row[2] == 4.2
+        assert standalone_row[2] == 3.0
 
     def test_phases_separate_with_flag(self, tmp_path: Path):
         """Test that combine_phases=False shows phases separately."""
@@ -574,11 +571,8 @@ class TestEffortReportPhaseCombining:
         # Should have 1 combined row
         assert len(rows) == 1
         assert rows[0][0] == "auth"
-        # Both tasks fully in January:
-        # auth: 2w = 14 days → 14/5 = 2.8 work weeks
-        # auth_design: 1w = 7 days → 7/5 = 1.4 work weeks
-        # Combined: 4.2 work weeks
-        assert rows[0][2] == 4.2
+        # Both tasks fully in January: 1w + 2w = 3w
+        assert rows[0][2] == 3.0
 
     def test_cli_no_combine_phases_flag(
         self, tmp_path: Path, sample_yaml: Path, sample_lock_file: Path

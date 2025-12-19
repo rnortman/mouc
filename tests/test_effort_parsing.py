@@ -63,10 +63,10 @@ class TestNonZeroEffortParsing:
     """Tests for parsing non-zero effort strings (for comparison)."""
 
     def test_days(self, validator: SchedulerInputValidator) -> None:
-        """Test that days parse correctly."""
-        assert validator.parse_effort("1d") == 1.0
-        assert validator.parse_effort("5d") == 5.0
-        assert validator.parse_effort("0.5d") == 0.5
+        """Test that work days convert to calendar days (5 work days = 7 calendar days)."""
+        assert validator.parse_effort("1d") == 1.4  # 1 work day = 1.4 calendar days
+        assert validator.parse_effort("5d") == 7.0  # 5 work days = 7 calendar days (1 week)
+        assert validator.parse_effort("0.5d") == 0.7
 
     def test_weeks(self, validator: SchedulerInputValidator) -> None:
         """Test that weeks convert to days (7 days per week)."""
@@ -97,7 +97,7 @@ class TestVerySmallEffort:
     """Tests for very small (near-zero) effort values."""
 
     def test_small_fractions(self, validator: SchedulerInputValidator) -> None:
-        """Test that small fractional values parse correctly."""
-        assert validator.parse_effort("0.1d") == 0.1
-        assert validator.parse_effort("0.01d") == 0.01
-        assert validator.parse_effort("0.001d") == 0.001
+        """Test that small fractional values parse correctly (work days to calendar days)."""
+        assert abs(validator.parse_effort("0.1d") - 0.14) < 1e-9
+        assert abs(validator.parse_effort("0.01d") - 0.014) < 1e-9
+        assert abs(validator.parse_effort("0.001d") - 0.0014) < 1e-9

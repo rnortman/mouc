@@ -112,8 +112,8 @@ class TestManualSchedulingDNSOverride:
         scheduled_task = result.tasks[0]
         # Manual end_date MUST be respected, even during DNS period
         assert scheduled_task.end_date == date(2025, 1, 18)
-        # With 5d effort, should start on Jan 13 (18 - 5 days)
-        assert scheduled_task.start_date == date(2025, 1, 13)
+        # With 5d effort = 7 calendar days, should start on Jan 11 (18 - 7 days)
+        assert scheduled_task.start_date == date(2025, 1, 11)
         assert scheduled_task.resources == ["alice"]
 
     def test_manual_start_and_end_dates_override_dns_period(

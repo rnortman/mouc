@@ -557,9 +557,9 @@ entities:
             f"overlaps with impl ({impl_item.start_date} - {impl_item.end_date})"
         )
 
-        # Verify design has correct duration (3d default, not parent's 2w)
-        assert design_item.duration_days == 3.0, (
-            f"Design should be 3d, not {design_item.duration_days}d"
+        # Verify design has correct duration (3 work days = 4.2 calendar days)
+        assert abs(design_item.duration_days - 4.2) < 0.1, (
+            f"Design should be ~4.2d (3 work days), not {design_item.duration_days}d"
         )
         # Verify impl has correct duration (parent's 2w = 14d)
         assert impl_item.duration_days == 14.0, (
@@ -617,12 +617,12 @@ entities:
         assert design_line is not None, f"Design task not found in: {task_lines}"
         assert impl_line is not None, f"Impl task not found in: {task_lines}"
 
-        # Verify design: starts Jan 1, duration 3d
+        # Verify design: starts Jan 1, duration 4d (3 work days = 4.2 calendar days, rounded)
         assert "2025-01-01" in design_line, f"Design should start 2025-01-01: {design_line}"
-        assert "3d" in design_line, f"Design should be 3d duration: {design_line}"
+        assert "4d" in design_line, f"Design should be 4d duration: {design_line}"
 
-        # Verify impl: starts Jan 12 (after design ends Jan 4 + 1w lag), duration 14d
-        assert "2025-01-12" in impl_line, f"Impl should start 2025-01-12: {impl_line}"
+        # Verify impl: starts Jan 13 (after design ends Jan 5 + 1w lag + 1d signoff), duration 14d
+        assert "2025-01-13" in impl_line, f"Impl should start 2025-01-13: {impl_line}"
         assert "14d" in impl_line, f"Impl should be 14d duration: {impl_line}"
 
 

@@ -120,9 +120,9 @@ class TestGanttScheduler:
         task_2w_result = next(t for t in result.tasks if t.entity_id == "task_2w")
         task_1m_result = next(t for t in result.tasks if t.entity_id == "task_1m")
 
-        assert task_5d_result.duration_days == 5.0
-        assert task_2w_result.duration_days == 14.0  # 2 weeks * 7 calendar days
-        assert task_1m_result.duration_days == 30.0  # 1 month * 30 calendar days
+        assert task_5d_result.duration_days == 7.0  # 5 work days = 7 calendar days
+        assert task_2w_result.duration_days == 14.0  # 2 weeks = 14 calendar days
+        assert task_1m_result.duration_days == 30.0  # 1 month = 30 calendar days
 
     def test_resource_capacity_calculation(self, base_date: date) -> None:
         """Test duration calculation with multiple resources."""

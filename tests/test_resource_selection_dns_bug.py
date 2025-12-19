@@ -114,9 +114,11 @@ def test_scheduler_chooses_resource_available_before_dns():
         susan_task_result = next(t for t in result.tasks if t.entity_id == "susan_initial_work")
 
         # Verify susan's initial work scheduled correctly
+        # 4 work days = 5.6 calendar days, spans DNS period (Jan 5-30)
+        # Jan 1-4: 4 days worked, DNS Jan 5-30, Jan 31: 1.6 days = Feb 1
         assert susan_task_result.resources[0] == "susan"
         assert susan_task_result.start_date == current_date
-        assert susan_task_result.end_date == date(2025, 1, 5)
+        assert susan_task_result.end_date == date(2025, 2, 1)
 
         # Verify that joe was chosen (correct behavior)
         assert main_task_result.resources[0] == "joe", (
@@ -133,9 +135,10 @@ def test_scheduler_chooses_resource_available_before_dns():
         )
 
         # Verify completion is after DNS period
-        # joe works Jan 1-4 (4 days), skips DNS Jan 5-30, works Jan 31-Feb 20 (21 days)
-        # Total: 4 + 21 = 25 days, completion is Feb 21 (exclusive end)
-        expected_completion = date(2025, 2, 21)
+        # 25 work days = 35 calendar days
+        # joe works Jan 1-4 (4 days), skips DNS Jan 5-30, works Jan 31 for 31 days
+        # Jan 31 + 31 days = Mar 3
+        expected_completion = date(2025, 3, 3)
         assert main_task_result.end_date == expected_completion, (
             f"joe should complete on {expected_completion}, but completes on {main_task_result.end_date}"
         )
@@ -210,14 +213,15 @@ def test_scheduler_with_reverse_resource_preference():
 
         main_task_result = next(t for t in result.tasks if t.entity_id == "main_task")
 
-        # joe should still be chosen because he completes earlier (Feb 21 vs Feb 25)
+        # joe should still be chosen because he completes earlier
         assert main_task_result.resources[0] == "joe", (
             f"Even with joe|susan preference, joe should be chosen because he completes earlier. "
             f"Got {main_task_result.resources[0]}"
         )
 
         assert main_task_result.start_date == current_date
-        assert main_task_result.end_date == date(2025, 2, 21)
+        # 25 work days = 35 calendar days, joe completes Mar 3
+        assert main_task_result.end_date == date(2025, 3, 3)
 
     finally:
         resource_config_path.unlink()

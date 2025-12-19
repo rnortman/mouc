@@ -209,6 +209,6 @@ class TestSchedulingGaps:
         # 2. Low priority should start after high priority finishes
         # 3. Future start should start at its constraint date
         assert high_scheduled.start_date == base_date
-        # High priority is 5 days: Jan 1-6, so low priority starts Jan 7
-        assert low_scheduled.start_date == date(2025, 1, 7)  # Day after high priority ends
+        # High priority is 5 work days = 7 calendar days: Jan 1-8, so low priority starts Jan 9
+        assert low_scheduled.start_date == date(2025, 1, 9)  # Day after high priority ends
         assert future_scheduled.start_date >= date(2025, 4, 1)  # At or after constraint

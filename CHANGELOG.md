@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 - Config auto-discovery now checks the feature map directory before falling back to current directory
+- Effort parsing: `5d` now correctly means 5 work days (= 7 calendar days), not 5 calendar days
 
 ## [0.7.1] - 2025-12-18
 

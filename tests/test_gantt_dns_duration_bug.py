@@ -34,10 +34,10 @@ def test_gantt_duration_with_dns_gap_single_task() -> None:
     """Test that Gantt output uses correct duration when task spans DNS period.
 
     Scenario:
-    - Task: 10 days effort on Alice
+    - Task: 10 work days effort on Alice = 14 calendar days
     - Alice has DNS period days 6-10 (5 days off)
-    - Task should start day 1, end day 16 (work 5d, off 5d, work 5d)
-    - Gantt should output 15d duration (calendar span), not 10d (work days)
+    - Task should start day 1, end day 20 (work 5d, off 5d, work 9d)
+    - Gantt should output 19d duration (calendar span)
     """
     # Create resource config with DNS periods
     resource_config_data = {
@@ -92,8 +92,8 @@ def test_gantt_duration_with_dns_gap_single_task() -> None:
             f"Task should start on {current_date}, but started on {task_result.start_date}"
         )
 
-        # Task should end on day 16 (10 work days + 5 DNS days)
-        expected_end = current_date + timedelta(days=15)
+        # Task should end on day 20 (14 calendar days + 5 DNS days)
+        expected_end = current_date + timedelta(days=19)
         assert task_result.end_date == expected_end, (
             f"Task should end on {expected_end} (accounting for 5-day DNS gap), "
             f"but ended on {task_result.end_date}"
@@ -103,8 +103,7 @@ def test_gantt_duration_with_dns_gap_single_task() -> None:
         mermaid = scheduler.generate_mermaid(result)
 
         # BUG DETECTION: Check if Gantt uses correct duration
-        # The bug would output "10d" (raw duration_days from scheduler)
-        # The fix should output "15d" (calculated from end_date - start_date)
+        # The fix should output "19d" (calculated from end_date - start_date)
 
         # Find the task line in Mermaid output
         lines = mermaid.split("\n")
@@ -112,22 +111,20 @@ def test_gantt_duration_with_dns_gap_single_task() -> None:
         assert task_line is not None, "Task line not found in Mermaid output"
 
         # Extract the duration from the line (format: "Name :tags, id, date, XdY")
-        # Example: "Task with DNS gap (alice) :task1, 2025-01-01, 15d"
         duration_match = task_line.split(",")[-1].strip()
 
-        # The duration should be 15d (calendar span including DNS gap), NOT 10d (work days)
-        assert duration_match == "15d", (
-            f"BUG DETECTED: Gantt output shows duration '{duration_match}' but should show '15d'. "
+        # The duration should be 19d (calendar span including DNS gap)
+        assert duration_match == "19d", (
+            f"BUG DETECTED: Gantt output shows duration '{duration_match}' but should show '19d'. "
             f"Task spans {(task_result.end_date - task_result.start_date).days} calendar days "
             f"(start={task_result.start_date}, end={task_result.end_date}), "
             f"but Gantt is using raw duration_days={task_result.duration_days} instead. "
             f"Full task line: {task_line}"
         )
 
-        # Also verify the task's stored duration_days for reference
-        # (This will be 10, which is correct for the ScheduledTask, but wrong for Gantt output)
-        assert task_result.duration_days == 10.0, (
-            f"Sanity check: task.duration_days should be 10.0 (the work days), "
+        # Also verify the task's stored duration_days (14 calendar days for 10 work days)
+        assert task_result.duration_days == 14.0, (
+            f"Sanity check: task.duration_days should be 14.0 (10 work days = 14 calendar days), "
             f"got {task_result.duration_days}"
         )
 
@@ -139,10 +136,10 @@ def test_gantt_duration_with_multiple_dns_gaps() -> None:
     """Test Gantt output with multiple DNS periods interrupting a task.
 
     Scenario:
-    - Task: 20 days effort on Bob
+    - Task: 20 work days effort on Bob = 28 calendar days
     - Bob has two DNS periods: days 5-7 (3 days) and days 15-17 (3 days)
-    - Task should span 26 calendar days total (20 work + 6 DNS)
-    - Gantt should output 26d duration, not 20d
+    - Task should span 34 calendar days total (28 work + 6 DNS)
+    - Gantt should output 34d duration
     """
     resource_config_data = {
         "resources": [
@@ -190,10 +187,10 @@ def test_gantt_duration_with_multiple_dns_gaps() -> None:
         assert len(result.tasks) == 1
         task_result = result.tasks[0]
 
-        # Task should span 26 days (20 work + 6 DNS)
+        # Task should span 34 days (28 calendar + 6 DNS)
         calendar_span = (task_result.end_date - task_result.start_date).days
-        assert calendar_span == 26, (
-            f"Task should span 26 calendar days (20 work + 6 DNS), but spans {calendar_span}"
+        assert calendar_span == 34, (
+            f"Task should span 34 calendar days (28 work + 6 DNS), but spans {calendar_span}"
         )
 
         # Generate Gantt and check duration
@@ -203,9 +200,9 @@ def test_gantt_duration_with_multiple_dns_gaps() -> None:
         assert task_line is not None
 
         duration_match = task_line.split(",")[-1].strip()
-        assert duration_match == "26d", (
-            f"BUG: Gantt shows '{duration_match}' but should show '26d' for task spanning "
-            f"{calendar_span} calendar days with {task_result.duration_days} work days"
+        assert duration_match == "34d", (
+            f"BUG: Gantt shows '{duration_match}' but should show '34d' for task spanning "
+            f"{calendar_span} calendar days with {task_result.duration_days} calendar days effort"
         )
 
     finally:
@@ -216,6 +213,7 @@ def test_gantt_duration_without_dns_unchanged() -> None:
     """Test that tasks without DNS periods are unaffected (control test).
 
     This ensures the fix doesn't break normal tasks without DNS gaps.
+    10 work days = 14 calendar days.
     """
     metadata = FeatureMapMetadata()
     current_date = date(2025, 1, 1)
@@ -242,28 +240,28 @@ def test_gantt_duration_without_dns_unchanged() -> None:
     assert len(result.tasks) == 1
     task_result = result.tasks[0]
 
-    # Normal task should span exactly 10 days
+    # Normal task should span exactly 14 calendar days (10 work days)
     calendar_span = (task_result.end_date - task_result.start_date).days
-    assert calendar_span == 10
+    assert calendar_span == 14
 
-    # Gantt should show 10d
+    # Gantt should show 14d
     mermaid = scheduler.generate_mermaid(result)
     lines = mermaid.split("\n")
     task_line = next((line for line in lines if "task3," in line), None)
     assert task_line is not None
 
     duration_match = task_line.split(",")[-1].strip()
-    assert duration_match == "10d", f"Normal task should show 10d, got {duration_match}"
+    assert duration_match == "14d", f"Normal task should show 14d, got {duration_match}"
 
 
 def test_gantt_duration_with_dns_before_task_unchanged() -> None:
     """Test that DNS periods before task starts don't affect duration display.
 
     Scenario:
-    - Task: 10 days on Dave, starts on day 10
+    - Task: 10 work days on Dave = 14 calendar days, starts on day 10
     - Dave has DNS days 1-5 (before task starts)
-    - Task should span 10 calendar days (no DNS during execution)
-    - Gantt should show 10d
+    - Task should span 14 calendar days (no DNS during execution)
+    - Gantt should show 14d
     """
     resource_config_data = {
         "resources": [
@@ -314,21 +312,21 @@ def test_gantt_duration_with_dns_before_task_unchanged() -> None:
         # Task should start after DNS (on or after Jan 10)
         assert task_result.start_date >= date(2025, 1, 10)
 
-        # Task should span exactly 10 days (no DNS during execution)
+        # Task should span exactly 14 calendar days (no DNS during execution)
         calendar_span = (task_result.end_date - task_result.start_date).days
-        assert calendar_span == 10, (
-            f"Task should span 10 days (no DNS during execution), but spans {calendar_span}"
+        assert calendar_span == 14, (
+            f"Task should span 14 days (no DNS during execution), but spans {calendar_span}"
         )
 
-        # Gantt should show 10d
+        # Gantt should show 14d
         mermaid = scheduler.generate_mermaid(result)
         lines = mermaid.split("\n")
         task_line = next((line for line in lines if "task4," in line), None)
         assert task_line is not None
 
         duration_match = task_line.split(",")[-1].strip()
-        assert duration_match == "10d", (
-            f"Task should show 10d (no DNS during task), got {duration_match}"
+        assert duration_match == "14d", (
+            f"Task should show 14d (no DNS during task), got {duration_match}"
         )
 
     finally:

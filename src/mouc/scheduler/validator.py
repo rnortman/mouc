@@ -43,9 +43,9 @@ class SchedulerInputValidator:
         """Parse effort string to calendar days.
 
         Supported formats:
-        - "5d" = 5 calendar days
-        - "2w" = 14 calendar days
-        - "1.5m" = 45 calendar days
+        - "5d" = 5 work days = 7 calendar days
+        - "2w" = 2 weeks = 14 calendar days
+        - "1.5m" = 1.5 months = 45 calendar days
         - "L" = Large (60 days)
         """
         effort_str = effort_str.strip().lower()
@@ -60,7 +60,7 @@ class SchedulerInputValidator:
         num = float(value)
 
         if unit == "d":
-            return num
+            return num * 7 / 5  # Work days to calendar days
         if unit == "w":
             return num * 7
         if unit == "m":

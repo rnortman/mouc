@@ -26,18 +26,18 @@ def test_fixed_task_end_date_respects_dns() -> None:
 
     Scenario:
     - Task has start_on: 2025-01-01 (fixed start date, no end_on)
-    - Task duration is 10 days
+    - Task effort is 10 work days = 14 calendar days
     - DNS period is 2025-01-05 to 2025-01-15 (11 days)
-    - Without DNS: task would end on 2025-01-11 (exclusive)
-    - With DNS: task should end on 2025-01-22
+    - Without DNS: task would end on 2025-01-15 (exclusive)
+    - With DNS: task should end on 2025-01-26
 
     Expected behavior:
     - Start: 2025-01-01 (from start_on metadata)
     - Work 4 days (01-01 to 01-05, exclusive)
     - DNS period: 01-05 to 01-15 (inclusive, 11 days)
     - Resume: 01-16
-    - Work remaining 6 days (01-16 to 01-22, exclusive)
-    - End: 2025-01-22
+    - Work remaining 10 days (01-16 to 01-26, exclusive)
+    - End: 2025-01-26
     """
     # Create unified config with resources and DNS period
     config_data = {
@@ -97,9 +97,9 @@ def test_fixed_task_end_date_respects_dns() -> None:
         )
 
         # Verify end date accounts for DNS period
-        # With DNS: 4 days work + 11 days DNS + 6 days work = ends on 2025-01-22
-        # Without DNS (buggy): 2025-01-01 + 10 days = 2025-01-11
-        expected_end = date(2025, 1, 22)
+        # With DNS: 4 days work + 11 days DNS + 10 days work = ends on 2025-01-26
+        # (10d effort = 14 calendar days, 4 before DNS, 10 after)
+        expected_end = date(2025, 1, 26)
         assert scheduled_task.end_date == expected_end, (
             f"Expected end {expected_end} (accounting for DNS gap), "
             f"got {scheduled_task.end_date}. "
@@ -177,9 +177,9 @@ def test_fixed_task_end_date_respects_dns_via_scheduling_service() -> None:
         )
 
         # Verify end date accounts for DNS period
-        # With DNS: 4 days work + 11 days DNS + 6 days work = ends on 2025-01-22
-        # Without DNS (buggy): 2025-01-01 + 10 days = 2025-01-11
-        expected_end = date(2025, 1, 22)
+        # With DNS: 4 days work + 11 days DNS + 10 days work = ends on 2025-01-26
+        # (10d effort = 14 calendar days, 4 before DNS, 10 after)
+        expected_end = date(2025, 1, 26)
         assert scheduled_task.end_date == expected_end, (
             f"Expected end {expected_end} (accounting for DNS gap), "
             f"got {scheduled_task.end_date}. "
