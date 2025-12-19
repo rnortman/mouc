@@ -149,36 +149,46 @@ class TestReadLockFile:
 
     def test_read_valid_lock_file(self, tmp_path: Path):
         """Read a valid lock file."""
-        lock_content = """version: 1
+        lock_content = """version: 2
 locks:
   task_a:
     start_date: "2025-01-15"
     end_date: "2025-01-22"
     resources: ["alice:1.0"]
+    was_fixed: false
+    resources_were_computed: true
   task_b:
     start_date: "2025-01-20"
     end_date: "2025-01-25"
     resources: ["bob:0.5", "charlie:0.5"]
+    was_fixed: true
+    resources_were_computed: false
 """
         lock_path = tmp_path / "test.lock.yaml"
         lock_path.write_text(lock_content)
 
         lock = read_lock_file(lock_path)
 
-        assert lock.version == 1
+        assert lock.version == 2
         assert len(lock.locks) == 2
         assert lock.locks["task_a"].start_date == date(2025, 1, 15)
         assert lock.locks["task_a"].resources == [("alice", 1.0)]
+        assert lock.locks["task_a"].was_fixed is False
+        assert lock.locks["task_a"].resources_were_computed is True
         assert lock.locks["task_b"].resources == [("bob", 0.5), ("charlie", 0.5)]
+        assert lock.locks["task_b"].was_fixed is True
+        assert lock.locks["task_b"].resources_were_computed is False
 
     def test_read_resources_without_allocation(self, tmp_path: Path):
         """Resources without explicit allocation default to 1.0."""
-        lock_content = """version: 1
+        lock_content = """version: 2
 locks:
   task_a:
     start_date: "2025-01-15"
     end_date: "2025-01-22"
     resources: ["alice", "bob"]
+    was_fixed: false
+    resources_were_computed: false
 """
         lock_path = tmp_path / "test.lock.yaml"
         lock_path.write_text(lock_content)
@@ -189,14 +199,14 @@ locks:
 
     def test_read_empty_locks(self, tmp_path: Path):
         """Empty locks section is valid."""
-        lock_content = """version: 1
+        lock_content = """version: 2
 locks: {}
 """
         lock_path = tmp_path / "empty.lock.yaml"
         lock_path.write_text(lock_content)
 
         lock = read_lock_file(lock_path)
-        assert lock.version == 1
+        assert lock.version == 2
         assert len(lock.locks) == 0
 
     def test_read_invalid_version(self, tmp_path: Path):
@@ -226,12 +236,14 @@ locks: {}
 
     def test_read_invalid_date(self, tmp_path: Path):
         """Invalid date format raises error."""
-        lock_content = """version: 1
+        lock_content = """version: 2
 locks:
   task_a:
     start_date: "not-a-date"
     end_date: "2025-01-22"
     resources: []
+    was_fixed: false
+    resources_were_computed: false
 """
         lock_path = tmp_path / "baddate.lock.yaml"
         lock_path.write_text(lock_content)
@@ -241,15 +253,64 @@ locks:
 
     def test_read_missing_dates(self, tmp_path: Path):
         """Missing dates raise error."""
-        lock_content = """version: 1
+        lock_content = """version: 2
 locks:
   task_a:
     resources: ["alice:1.0"]
+    was_fixed: false
+    resources_were_computed: false
 """
         lock_path = tmp_path / "nodates.lock.yaml"
         lock_path.write_text(lock_content)
 
         with pytest.raises(ValueError, match="missing start_date or end_date"):
+            read_lock_file(lock_path)
+
+    def test_read_missing_was_fixed(self, tmp_path: Path):
+        """Missing was_fixed field raises error."""
+        lock_content = """version: 2
+locks:
+  task_a:
+    start_date: "2025-01-15"
+    end_date: "2025-01-22"
+    resources: ["alice:1.0"]
+    resources_were_computed: false
+"""
+        lock_path = tmp_path / "no_was_fixed.lock.yaml"
+        lock_path.write_text(lock_content)
+
+        with pytest.raises(ValueError, match="missing was_fixed field"):
+            read_lock_file(lock_path)
+
+    def test_read_missing_resources_were_computed(self, tmp_path: Path):
+        """Missing resources_were_computed field raises error."""
+        lock_content = """version: 2
+locks:
+  task_a:
+    start_date: "2025-01-15"
+    end_date: "2025-01-22"
+    resources: ["alice:1.0"]
+    was_fixed: false
+"""
+        lock_path = tmp_path / "no_resources_were_computed.lock.yaml"
+        lock_path.write_text(lock_content)
+
+        with pytest.raises(ValueError, match="missing resources_were_computed field"):
+            read_lock_file(lock_path)
+
+    def test_read_version_1_rejected(self, tmp_path: Path):
+        """Version 1 lock files are rejected."""
+        lock_content = """version: 1
+locks:
+  task_a:
+    start_date: "2025-01-15"
+    end_date: "2025-01-22"
+    resources: ["alice:1.0"]
+"""
+        lock_path = tmp_path / "v1.lock.yaml"
+        lock_path.write_text(lock_content)
+
+        with pytest.raises(ValueError, match="Unsupported lock file version 1"):
             read_lock_file(lock_path)
 
 
@@ -284,12 +345,14 @@ class TestSchedulingServiceWithLock:
 
         # Create a lock that places the task later than it would normally be scheduled
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "task_a": TaskLock(
                     start_date=date(2025, 2, 1),  # Much later than current_date
                     end_date=date(2025, 2, 8),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )
@@ -306,7 +369,8 @@ class TestSchedulingServiceWithLock:
         # Task should use locked dates, not be scheduled from current_date
         assert annot.estimated_start == date(2025, 2, 1)
         assert annot.estimated_end == date(2025, 2, 8)
-        assert annot.was_fixed is True  # Locked tasks appear as fixed
+        # was_fixed preserves the value from the lock file
+        assert annot.was_fixed is False
 
     def test_locked_task_uses_locked_resources(self):
         """Locked tasks should use their locked resources."""
@@ -329,12 +393,14 @@ class TestSchedulingServiceWithLock:
 
         # Lock with specific resource
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "task_a": TaskLock(
                     start_date=date(2025, 1, 15),
                     end_date=date(2025, 1, 22),
                     resources=[("bob", 0.5)],  # Different from wildcard
+                    was_fixed=False,
+                    resources_were_computed=True,
                 ),
             },
         )
@@ -387,12 +453,14 @@ class TestSchedulingServiceWithLock:
 
         # Only lock task_a
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "task_a": TaskLock(
                     start_date=date(2025, 2, 1),
                     end_date=date(2025, 2, 8),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )
@@ -431,17 +499,21 @@ class TestSchedulingServiceWithLock:
 
         # Lock includes non-existent task
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "task_a": TaskLock(
                     start_date=date(2025, 2, 1),
                     end_date=date(2025, 2, 8),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "nonexistent_task": TaskLock(
                     start_date=date(2025, 3, 1),
                     end_date=date(2025, 3, 8),
                     resources=[("bob", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )
@@ -506,3 +578,9 @@ class TestRoundTrip:
         # Verify resources (with allocations)
         assert loaded.locks["task_1"].resources == [("alice", 1.0), ("bob", 0.5)]
         assert loaded.locks["task_2"].resources == [("charlie", 0.75)]
+
+        # Verify was_fixed and resources_were_computed are preserved
+        assert loaded.locks["task_1"].was_fixed is False
+        assert loaded.locks["task_1"].resources_were_computed is True
+        assert loaded.locks["task_2"].was_fixed is True
+        assert loaded.locks["task_2"].resources_were_computed is False

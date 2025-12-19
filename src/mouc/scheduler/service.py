@@ -64,7 +64,7 @@ class SchedulingService:
             return PreProcessorType.BACKWARD_PASS
         return preprocessor_type
 
-    def schedule(self) -> SchedulingResult:  # noqa: PLR0912 - complex scheduling logic
+    def schedule(self) -> SchedulingResult:  # noqa: PLR0912, PLR0915 - complex scheduling logic
         """Schedule all entities and create annotations.
 
         Returns:
@@ -141,7 +141,14 @@ class SchedulingService:
             if not scheduled:
                 continue
 
-            was_fixed = task.start_on is not None or task.end_on is not None
+            # Determine annotation values - use lock file values if available
+            if self.schedule_lock and entity_id in self.schedule_lock.locks:
+                lock = self.schedule_lock.locks[entity_id]
+                was_fixed = lock.was_fixed
+                resources_were_computed = lock.resources_were_computed
+            else:
+                was_fixed = task.start_on is not None or task.end_on is not None
+                resources_were_computed = resources_computed_map.get(entity_id, False)
 
             computed_deadline = computed_deadlines.get(entity_id)
             computed_priority = computed_priorities.get(entity_id)
@@ -159,7 +166,7 @@ class SchedulingService:
                 computed_priority=computed_priority,
                 deadline_violated=deadline_violated,
                 resource_assignments=resource_assignments,
-                resources_were_computed=resources_computed_map.get(entity_id, False),
+                resources_were_computed=resources_were_computed,
                 was_fixed=was_fixed,
             )
 

@@ -15,7 +15,7 @@ import yaml
 if TYPE_CHECKING:
     from .core import SchedulingResult
 
-LOCK_FILE_VERSION = 1
+LOCK_FILE_VERSION = 2
 
 
 @dataclass
@@ -25,6 +25,8 @@ class TaskLock:
     start_date: date
     end_date: date
     resources: list[tuple[str, float]]  # [(name, allocation), ...]
+    was_fixed: bool
+    resources_were_computed: bool
 
 
 @dataclass
@@ -65,6 +67,8 @@ def write_lock_file(
             "start_date": annot.estimated_start.isoformat(),
             "end_date": annot.estimated_end.isoformat(),
             "resources": resources,
+            "was_fixed": annot.was_fixed,
+            "resources_were_computed": annot.resources_were_computed,
         }
 
     output: dict[str, Any] = {
@@ -123,6 +127,14 @@ def read_lock_file(path: Path) -> ScheduleLock:  # noqa: PLR0912 - validation ne
         if not start_str or not end_str:
             raise ValueError(f"Lock for '{task_id}' missing start_date or end_date")
 
+        if "was_fixed" not in task_data:
+            raise ValueError(f"Lock for '{task_id}' missing was_fixed field")
+        if "resources_were_computed" not in task_data:
+            raise ValueError(f"Lock for '{task_id}' missing resources_were_computed field")
+
+        was_fixed = bool(task_data["was_fixed"])
+        resources_were_computed = bool(task_data["resources_were_computed"])
+
         # Parse dates
         try:
             start_date = date.fromisoformat(str(start_str))
@@ -149,6 +161,8 @@ def read_lock_file(path: Path) -> ScheduleLock:  # noqa: PLR0912 - validation ne
             start_date=start_date,
             end_date=end_date,
             resources=resources,
+            was_fixed=was_fixed,
+            resources_were_computed=resources_were_computed,
         )
 
     return ScheduleLock(version=version, locks=locks)

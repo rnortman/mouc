@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2025-12-19
+
+### Changed
+- Lock file format updated to version 2 with `was_fixed` and `resources_were_computed` fields
+
 ## [0.7.2] - 2025-12-19
 
 ### Added

@@ -1214,22 +1214,28 @@ mouc schedule feature_map.yaml --lock-file phase1.lock.yaml
 The `--output-lock` option exports scheduled dates and resource assignments to a YAML file:
 
 ```yaml
-version: 1
+version: 2
 locks:
   task_a:
     start_date: '2025-01-01'
     end_date: '2025-01-06'
     resources:
     - alice:1.0
+    was_fixed: false
+    resources_were_computed: true
   task_b:
     start_date: '2025-01-01'
     end_date: '2025-01-04'
     resources:
     - bob:1.0
+    was_fixed: true
+    resources_were_computed: false
 ```
 
+The `was_fixed` and `resources_were_computed` fields preserve original scheduling annotations through lock file round-trips.
+
 The `--lock-file` option loads these locks before scheduling. Locked tasks:
-- Use their locked start/end dates (shown as "fixed dates, not scheduled")
+- Use their locked start/end dates
 - Use their locked resource assignments
 - Block resources during their scheduled time, constraining other tasks
 

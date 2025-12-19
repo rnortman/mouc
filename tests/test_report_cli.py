@@ -420,22 +420,28 @@ class TestEffortReportPhaseCombining:
         )
 
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "auth": TaskLock(
                     start_date=date(2025, 1, 15),
                     end_date=date(2025, 1, 29),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "auth_design": TaskLock(
                     start_date=date(2025, 1, 1),
                     end_date=date(2025, 1, 8),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "standalone": TaskLock(
                     start_date=date(2025, 2, 1),
                     end_date=date(2025, 2, 22),
                     resources=[("bob", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )
@@ -491,22 +497,28 @@ class TestEffortReportPhaseCombining:
         )
 
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "auth": TaskLock(
                     start_date=date(2025, 1, 15),
                     end_date=date(2025, 1, 29),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "auth_design": TaskLock(
                     start_date=date(2025, 1, 1),
                     end_date=date(2025, 1, 8),
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "standalone": TaskLock(
                     start_date=date(2025, 2, 1),
                     end_date=date(2025, 2, 22),
                     resources=[("bob", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )
@@ -548,17 +560,21 @@ class TestEffortReportPhaseCombining:
         )
 
         schedule_lock = ScheduleLock(
-            version=1,
+            version=2,
             locks={
                 "auth": TaskLock(
                     start_date=date(2025, 1, 15),
                     end_date=date(2025, 1, 29),  # 14 days, fully in January
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
                 "auth_design": TaskLock(
                     start_date=date(2025, 1, 1),
                     end_date=date(2025, 1, 8),  # 7 days, fully in January
                     resources=[("alice", 1.0)],
+                    was_fixed=False,
+                    resources_were_computed=False,
                 ),
             },
         )

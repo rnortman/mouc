@@ -623,8 +623,8 @@ def gantt(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple optio
                 computed_priority=None,
                 deadline_violated=False,
                 resource_assignments=lock.resources,
-                resources_were_computed=False,
-                was_fixed=True,
+                resources_were_computed=lock.resources_were_computed,
+                was_fixed=lock.was_fixed,
             )
         result = ScheduleResult(tasks=tasks)
         scheduler._scheduling_annotations = annotations  # pyright: ignore[reportPrivateUsage]
