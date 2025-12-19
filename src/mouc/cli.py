@@ -11,9 +11,10 @@ from contextlib import suppress
 from dataclasses import replace
 from datetime import date
 from pathlib import Path
-from typing import Annotated, cast
+from typing import Annotated, Any, cast
 
 import typer
+from ruamel.yaml import YAML
 
 from . import context, styling
 from .backends import DocxBackend, MarkdownBackend
@@ -1040,14 +1041,15 @@ def convert_format(
 
         mouc convert-format feature_map.yaml > feature_map_new.yaml
     """
-    import yaml  # noqa: PLC0415
-
     if not file.exists():
         typer.echo(f"Error: File not found: {file}", err=True)
         raise typer.Exit(1)
 
+    yaml_rt = YAML()
+    yaml_rt.preserve_quotes = True  # type: ignore[assignment]
+
     with file.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+        data = yaml_rt.load(f)  # type: ignore[no-untyped-call]
 
     if not isinstance(data, dict):
         typer.echo("Error: YAML must contain a dictionary at the root level", err=True)
@@ -1066,10 +1068,6 @@ def convert_format(
         "user_stories": "user_story",
         "outcomes": "outcome",
     }
-
-    from typing import Any, cast  # noqa: PLC0415
-
-    from .unified_config import load_unified_config  # noqa: PLC0415
 
     # Get default type from config (if available)
     default_type: str | None = None
@@ -1109,10 +1107,8 @@ def convert_format(
     # Add unified entities
     output_data["entities"] = entities
 
-    # Output YAML
-    typer.echo(
-        yaml.dump(output_data, default_flow_style=False, sort_keys=False, allow_unicode=True)
-    )
+    # Output YAML (ruamel.yaml preserves block scalars and list formatting)
+    yaml_rt.dump(output_data, sys.stdout)  # type: ignore[no-untyped-call]
 
 
 # Register Jira subcommands (defined in jira_cli.py)

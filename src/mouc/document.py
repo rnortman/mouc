@@ -9,7 +9,12 @@ from typing import TYPE_CHECKING, Any, cast
 from mouc import styling
 from mouc.backends.base import EntityReference
 from mouc.models import Entity
-from mouc.unified_config import OrganizationConfig, UnifiedConfig, get_display_name
+from mouc.unified_config import (
+    OrganizationConfig,
+    UnifiedConfig,
+    get_display_name,
+    get_entity_type_order,
+)
 
 if TYPE_CHECKING:
     from mouc.backends.base import DocumentBackend
@@ -93,8 +98,6 @@ class DocumentGenerator:
         if self.organization.entity_type_order:
             return self.organization.entity_type_order
         # Fall back to config-defined order or default types
-        from .unified_config import get_entity_type_order  # noqa: PLC0415
-
         return get_entity_type_order(self.config)
 
     def generate(self) -> str | bytes:
