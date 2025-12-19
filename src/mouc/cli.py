@@ -202,6 +202,13 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
             help="Current/as-of date for scheduling (YYYY-MM-DD). Only used with --schedule",
         ),
     ] = None,
+    lock_file: Annotated[
+        Path | None,
+        typer.Option(
+            "--lock-file",
+            help="Use pre-computed schedule from lock file",
+        ),
+    ] = None,
     style_module: Annotated[
         str | None,
         typer.Option("--style-module", help="Python module path for styling functions"),
@@ -244,8 +251,20 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
     if config_path:
         unified_config = load_unified_config(config_path)
 
+    # Load schedule lock file if specified
+    schedule_lock = None
+    if lock_file:
+        if not lock_file.exists():
+            typer.echo(f"Error: Lock file not found: {lock_file}", err=True)
+            raise typer.Exit(1)
+        try:
+            schedule_lock = read_lock_file(lock_file)
+        except ValueError as e:
+            typer.echo(f"Error reading lock file: {e}", err=True)
+            raise typer.Exit(1) from None
+
     # Optionally run scheduler to populate annotations
-    if schedule:
+    if schedule or lock_file:
         # Parse current date if provided
         parsed_current_date: date | None = None
         if current_date:
@@ -274,6 +293,7 @@ def doc(  # noqa: PLR0913, PLR0912, PLR0915 - CLI command needs multiple options
             resource_config,
             scheduler_config,
             global_dns_periods,
+            schedule_lock=schedule_lock,
         )
         service.populate_feature_map_annotations()
 

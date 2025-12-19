@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2025-12-19
+
 ### Added
-- `mouc report effort` command: Generate CSV reports of task effort within a time range (supports `--timeframe` or `--start`/`--end`, `--combine-phases`/`--no-combine-phases`)
+- `mouc doc --lock-file` option to use pre-computed schedule from lock file
+- `mouc report effort` command: Generate CSV reports of task effort within a time range
 
 ### Fixed
 - Config auto-discovery now checks the feature map directory before falling back to current directory

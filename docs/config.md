@@ -563,7 +563,7 @@ markdown:
     sort_unscheduled_by_completion: true
 ```
 
-**`toc_timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, infers timeframe from scheduler completion dates for entities without manual `timeframe` metadata.
+**`toc_timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule` or `--lock-file`, infers timeframe from scheduler completion dates for entities without manual `timeframe` metadata.
 
 **`toc_timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes. Valid values: `weekly`, `monthly`, `quarterly`, `half_year`, `yearly`.
 
@@ -583,7 +583,7 @@ markdown:
       inferred_granularity: quarterly
 ```
 
-**`organization.timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule`, uses inferred timeframes from scheduler completion dates in addition to manual `timeframe` metadata.
+**`organization.timeline.infer_from_schedule`** (optional, default: `false`): When enabled with `mouc doc --schedule` or `--lock-file`, uses inferred timeframes from scheduler completion dates in addition to manual `timeframe` metadata.
 
 **`organization.timeline.inferred_granularity`** (required when `infer_from_schedule: true`): Granularity for grouping inferred timeframes. Valid values: `weekly`, `monthly`, `quarterly`, `half_year`, `yearly`.
 
@@ -595,7 +595,7 @@ markdown:
 
 **Behavior:**
 - Manual `timeframe` metadata always takes precedence over inferred timeframes
-- Inference only applies when `--schedule` flag is used with `mouc doc`
+- Inference only applies when `--schedule` or `--lock-file` is used with `mouc doc`
 - Configuration fails fast if `infer_from_schedule: true` without `inferred_granularity`
 - Entities without completion dates sort to end when `sort_unscheduled_by_completion` is enabled
 

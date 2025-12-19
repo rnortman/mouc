@@ -493,7 +493,7 @@ if 'detailed' in context.style_tags:
 
 #### Schedule Annotations
 
-When using `mouc doc --schedule`, entities are populated with schedule annotations from the scheduler:
+When using `mouc doc --schedule` or `mouc doc --lock-file`, entities are populated with schedule annotations:
 
 ```python
 # Access schedule annotations in your styling functions
@@ -520,7 +520,7 @@ if schedule:
     fixed: bool = schedule.was_fixed
 ```
 
-**Important:** Schedule annotations are **only available** when running `mouc doc --schedule` or `mouc gantt`. They are not available in the YAML metadata by default.
+**Important:** Schedule annotations are **only available** when running `mouc doc --schedule`, `mouc doc --lock-file`, or `mouc gantt`. They are not available in the YAML metadata by default.
 
 #### Injecting Schedule Data into Markdown
 
@@ -825,6 +825,7 @@ def add_schedule_to_markdown(entity, context, metadata):
     """Inject schedule annotations into markdown metadata table.
 
     Run with: mouc doc --schedule --style-file my_styles.py
+    Or with:  mouc doc --lock-file schedule.lock --style-file my_styles.py
     """
     schedule = entity.annotations.get('schedule')
     if not schedule or schedule.was_fixed:
