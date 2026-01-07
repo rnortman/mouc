@@ -11,10 +11,14 @@ entity is preserved as the main work task (typically implementation).
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mouc.models import Dependency, Entity
+
+if TYPE_CHECKING:
+    from mouc.workflows import WorkflowContext
 
 # List of workflow names exported by stdlib
 STDLIB_WORKFLOWS = [
@@ -23,6 +27,15 @@ STDLIB_WORKFLOWS = [
     "full",
     "phased_rollout",
 ]
+
+# Phase discovery functions for stdlib workflows (fallback for two-pass expansion)
+# Returns list of phase IDs that will be created for a given entity ID
+STDLIB_PHASE_DISCOVERY: dict[str, Callable[[str], list[str]]] = {
+    "design_impl": lambda eid: [f"{eid}_design", eid],
+    "impl_pr": lambda eid: [eid, f"{eid}_pr"],
+    "full": lambda eid: [f"{eid}_design", eid, f"{eid}_pr"],
+    "phased_rollout": lambda eid: [eid, f"{eid}_canary", f"{eid}_rollout"],
+}
 
 
 def _merge_meta(
@@ -108,6 +121,8 @@ def design_impl(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext | None = None,
+    discovery_state: Any = None,
 ) -> list[Entity]:
     """Expand entity into: design (floats) -> [signoff lag] -> parent (impl).
 
@@ -151,6 +166,8 @@ def impl_pr(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext | None = None,
+    discovery_state: Any = None,
 ) -> list[Entity]:
     """Expand entity into: parent (impl) -> [review lag] -> pr.
 
@@ -196,6 +213,8 @@ def full(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext | None = None,
+    discovery_state: Any = None,
 ) -> list[Entity]:
     """Expand entity into: design (floats) -> [signoff] -> parent (impl) -> [review] -> pr.
 
@@ -259,6 +278,8 @@ def phased_rollout(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext | None = None,
+    discovery_state: Any = None,
 ) -> list[Entity]:
     """Expand entity into: parent (impl) -> canary -> [bake] -> rollout.
 

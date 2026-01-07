@@ -14,9 +14,10 @@ from mouc.loader import load_feature_map
 from mouc.models import Dependency, Entity
 from mouc.resources import ResourceConfig
 from mouc.unified_config import WorkflowDefinition, WorkflowsConfig
-from mouc.workflows import expand_workflows, load_workflow
+from mouc.workflows import WorkflowContext, expand_workflows, load_workflow
 from mouc.workflows import stdlib as stdlib_module
 from mouc.workflows.stdlib import (
+    STDLIB_PHASE_DISCOVERY,
     STDLIB_WORKFLOWS,
     design_impl,
     full,
@@ -873,6 +874,138 @@ class TestStdlibDiscovery:
         """STDLIB_WORKFLOWS should list all workflows."""
         expected = {"design_impl", "impl_pr", "full", "phased_rollout"}
         assert set(STDLIB_WORKFLOWS) == expected
+
+
+class TestWorkflowContext:
+    """Tests for workflow context and two-pass expansion."""
+
+    def test_context_has_phase_method(self) -> None:
+        """WorkflowContext.has_phase() should correctly check phase existence."""
+        context = WorkflowContext(
+            all_entities=[],
+            entity_map={},
+            entity_workflows={"auth": "design_impl"},
+            phase_map={"auth": ["auth_design", "auth"]},
+        )
+
+        assert context.has_phase("auth", "design")
+        assert not context.has_phase("auth", "pr")
+        assert not context.has_phase("nonexistent", "design")
+
+    def test_context_get_phases_for(self) -> None:
+        """WorkflowContext.get_phases_for() should return phase IDs."""
+        context = WorkflowContext(
+            all_entities=[],
+            entity_map={},
+            entity_workflows={},
+            phase_map={
+                "auth": ["auth_design", "auth"],
+                "deploy": ["deploy", "deploy_canary", "deploy_rollout"],
+            },
+        )
+
+        assert context.get_phases_for("auth") == ["auth_design", "auth"]
+        assert context.get_phases_for("deploy") == ["deploy", "deploy_canary", "deploy_rollout"]
+        # Unknown entity returns just itself
+        assert context.get_phases_for("unknown") == ["unknown"]
+
+    def test_stdlib_phase_discovery_registry(self) -> None:
+        """STDLIB_PHASE_DISCOVERY should correctly predict phase IDs."""
+        assert STDLIB_PHASE_DISCOVERY["design_impl"]("foo") == ["foo_design", "foo"]
+        assert STDLIB_PHASE_DISCOVERY["impl_pr"]("foo") == ["foo", "foo_pr"]
+        assert STDLIB_PHASE_DISCOVERY["full"]("foo") == ["foo_design", "foo", "foo_pr"]
+        assert STDLIB_PHASE_DISCOVERY["phased_rollout"]("foo") == [
+            "foo",
+            "foo_canary",
+            "foo_rollout",
+        ]
+
+    def test_context_passed_to_stdlib_workflows(self) -> None:
+        """Stdlib workflows should receive context parameter."""
+        # Create entities that will be expanded
+        config = WorkflowsConfig(stdlib=True)
+        entities = [
+            make_entity("auth", workflow="design_impl"),
+            make_entity("deploy", workflow="phased_rollout"),
+        ]
+
+        # Expand - this tests that context is passed without error
+        result = expand_workflows(entities, config)
+
+        # Should have 5 entities: auth_design, auth, deploy, deploy_canary, deploy_rollout
+        assert len(result) == 5
+        ids = {e.id for e in result}
+        assert ids == {"auth_design", "auth", "deploy", "deploy_canary", "deploy_rollout"}
+
+    def test_custom_workflow_with_context_for_smart_wiring(self, tmp_path: Path) -> None:
+        """Custom workflow can use context for cross-entity phase wiring."""
+        workflow_file = tmp_path / "smart_workflow.py"
+        workflow_file.write_text("""
+from copy import deepcopy
+from mouc.models import Dependency, Entity
+
+def smart_design_impl(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    '''Like design_impl, but design phase auto-requires design phases of dependencies.'''
+    signoff_lag = defaults.get("signoff_lag", "1w")
+
+    # Create design phase
+    design = Entity(
+        type=entity.type,
+        id=f"{entity.id}_design",
+        name=f"{entity.name} - Design",
+        description=entity.description,
+        requires=set(),
+        enables=set(),
+        links=[],
+        tags=list(entity.tags) + ["phase:design"],
+        meta={"effort": defaults.get("design_effort", "3d")},
+        phase_of=(entity.id, "design"),
+    )
+
+    # Smart wiring: if dependency has a design phase, wire design->design
+    if context:
+        for dep in entity.requires:
+            if context.has_phase(dep.entity_id, "design"):
+                design.requires.add(Dependency(f"{dep.entity_id}_design", dep.lag_days))
+
+    # Create parent (impl) that requires design
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + {signoff_lag}")}
+
+    return [design, parent]
+
+def smart_design_impl_discover(entity, defaults):
+    from mouc.workflows import PhaseDiscovery
+    return PhaseDiscovery(phase_ids=[f"{entity.id}_design", entity.id])
+
+smart_design_impl.discover_phases = smart_design_impl_discover
+""")
+
+        config = WorkflowsConfig(
+            stdlib=True,
+            definitions={
+                "smart_design_impl": WorkflowDefinition(
+                    handler=f"{workflow_file}:smart_design_impl"
+                )
+            },
+        )
+
+        # entity_a uses smart workflow, entity_b requires entity_a and also uses smart workflow
+        entities = [
+            make_entity("entity_a", workflow="smart_design_impl"),
+            make_entity("entity_b", workflow="smart_design_impl", requires=["entity_a"]),
+        ]
+
+        result = expand_workflows(entities, config)
+
+        # Should have 4 entities
+        assert len(result) == 4
+        ids = {e.id for e in result}
+        assert ids == {"entity_a_design", "entity_a", "entity_b_design", "entity_b"}
+
+        # entity_b_design should require entity_a_design (smart wiring!)
+        b_design = next(e for e in result if e.id == "entity_b_design")
+        assert "entity_a_design" in b_design.requires_ids
 
 
 class TestDefaultWorkflows:

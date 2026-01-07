@@ -150,11 +150,14 @@ workflows:
 
 ```python
 from mouc.models import Entity
+from mouc.workflows import WorkflowContext
 
 def my_workflow(
     entity: Entity,
     defaults: dict[str, Any],
     phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext | None = None,      # Optional: graph context
+    discovery_state: Any = None,                  # Optional: pre-computed state
 ) -> list[Entity]:
     """Expand entity into phase entities.
 
@@ -163,6 +166,79 @@ def my_workflow(
     """
     ...
 ```
+
+### Graph-Aware Workflows (WorkflowContext)
+
+Workflows can access the full entity graph via the optional `context` parameter. This enables intelligent dependency wiring across entities.
+
+**WorkflowContext API:**
+
+```python
+@dataclass
+class WorkflowContext:
+    all_entities: list[Entity]           # All entities before expansion
+    entity_map: dict[str, Entity]        # id -> entity lookup
+    entity_workflows: dict[str, str]     # id -> workflow name
+    phase_map: dict[str, list[str]]      # id -> phase IDs it will create
+
+    def has_phase(self, entity_id: str, phase_suffix: str) -> bool:
+        """Check if entity will have a specific phase (e.g., 'design')."""
+
+    def get_phases_for(self, entity_id: str) -> list[str]:
+        """Get phase IDs that will be created for an entity."""
+
+    def get_entity(self, entity_id: str) -> Entity | None:
+        """Get an entity by ID."""
+
+    def get_workflow(self, entity_id: str) -> str | None:
+        """Get the workflow name for an entity."""
+```
+
+**Example: Smart Dependency Wiring**
+
+```python
+def smart_design_impl(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    """If B requires A, then B_design requires A_design (if A has one)."""
+    design = _create_design_phase(entity, ...)
+
+    # Wire design->design dependencies using context
+    if context:
+        for dep in entity.requires:
+            if context.has_phase(dep.entity_id, "design"):
+                design.requires.add(Dependency(f"{dep.entity_id}_design"))
+
+    return [design, parent]
+```
+
+### Phase Discovery (Two-Pass Expansion)
+
+Workflows are expanded in two passes:
+
+1. **Discovery**: Determine what phase IDs each workflow will create
+2. **Expansion**: Call workflows with full context (including all phase IDs)
+
+Custom workflows can implement `discover_phases()` to declare phases and pre-compute state:
+
+```python
+from mouc.workflows import PhaseDiscovery
+
+def my_workflow_discover(entity, defaults):
+    """Discover phases and optionally pre-compute state."""
+    return PhaseDiscovery(
+        phase_ids=[f"{entity.id}_phase1", entity.id],
+        state={"computed_value": some_expensive_calculation()},
+    )
+
+def my_workflow(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    # Use pre-computed state from discovery
+    computed = discovery_state.get("computed_value") if discovery_state else None
+    ...
+
+# Attach discovery to workflow function
+my_workflow.discover_phases = my_workflow_discover
+```
+
+If `discover_phases()` is not implemented, the system uses fallback phase ID prediction.
 
 ## Per-Entity Configuration
 

@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import inspect
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -19,6 +21,48 @@ from mouc.workflows import stdlib as stdlib_module
 
 if TYPE_CHECKING:
     from mouc.unified_config import WorkflowsConfig
+
+
+@dataclass
+class PhaseDiscovery:
+    """Result of workflow discovery phase.
+
+    Workflows return this from discover_phases() to declare what phases they'll create
+    and optionally provide pre-computed state to avoid duplicating logic during expansion.
+    """
+
+    phase_ids: list[str]
+    state: Any = None
+
+
+@dataclass
+class WorkflowContext:
+    """Context passed to workflow functions for graph-aware expansion.
+
+    Provides access to the full entity graph so workflows can make intelligent
+    dependency wiring decisions (e.g., if B requires A, wire B_design to require A_design).
+    """
+
+    all_entities: list[Entity]
+    entity_map: dict[str, Entity] = field(default_factory=lambda: {})
+    entity_workflows: dict[str, str | None] = field(default_factory=lambda: {})
+    phase_map: dict[str, list[str]] = field(default_factory=lambda: {})
+
+    def get_phases_for(self, entity_id: str) -> list[str]:
+        """Get phase IDs that will be created for an entity."""
+        return self.phase_map.get(entity_id, [entity_id])
+
+    def has_phase(self, entity_id: str, phase_suffix: str) -> bool:
+        """Check if entity will have a specific phase (e.g., 'design')."""
+        return f"{entity_id}_{phase_suffix}" in self.phase_map.get(entity_id, [])
+
+    def get_entity(self, entity_id: str) -> Entity | None:
+        """Get an entity by ID."""
+        return self.entity_map.get(entity_id)
+
+    def get_workflow(self, entity_id: str) -> str | None:
+        """Get the workflow name for an entity."""
+        return self.entity_workflows.get(entity_id)
 
 
 class WorkflowFactory(Protocol):
@@ -101,11 +145,73 @@ def load_workflow(handler: str) -> WorkflowFactory:
         raise ValidationError(f"Failed to import workflow module '{handler}': {e}") from e
 
 
-def expand_workflows(  # noqa: PLR0912 - complex validation logic
+def _get_workflow_name(
+    entity: Entity,
+    workflows_config: WorkflowsConfig,
+) -> str | None:
+    """Get the effective workflow name for an entity."""
+    workflow_name = entity.workflow
+    if workflow_name is None:
+        workflow_name = workflows_config.defaults.get(entity.type)
+    if workflow_name == "none":
+        return None
+    return workflow_name
+
+
+def _discover_phases_for_workflow(
+    entity: Entity,
+    workflow_name: str,
+    factory: WorkflowFactory,
+    defaults: dict[str, Any],
+) -> PhaseDiscovery:
+    """Run discovery for a workflow, with fallback for old-style workflows."""
+    # Check if factory has discover_phases method (not part of Protocol, so use getattr)
+    discover_fn = getattr(factory, "discover_phases", None)
+    if discover_fn is not None:
+        result: PhaseDiscovery = discover_fn(entity, defaults)
+        return result
+
+    # Check for stdlib fallback
+    if workflow_name in stdlib_module.STDLIB_PHASE_DISCOVERY:
+        phase_ids = stdlib_module.STDLIB_PHASE_DISCOVERY[workflow_name](entity.id)
+        return PhaseDiscovery(phase_ids=phase_ids, state=None)
+
+    # Default: assume workflow creates entity with same ID (no expansion)
+    return PhaseDiscovery(phase_ids=[entity.id], state=None)
+
+
+def _call_workflow_factory(  # noqa: PLR0913 - matches workflow protocol
+    factory: WorkflowFactory,
+    entity: Entity,
+    defaults: dict[str, Any],
+    phase_overrides: dict[str, Any] | None,
+    context: WorkflowContext,
+    discovery_state: Any,
+) -> list[Entity]:
+    """Call workflow factory with appropriate signature (backward compatible)."""
+    # Get the signature to determine which parameters the factory accepts
+    sig = inspect.signature(factory)
+    params = sig.parameters
+
+    # Build kwargs based on what the factory accepts
+    kwargs: dict[str, Any] = {}
+    if "context" in params:
+        kwargs["context"] = context
+    if "discovery_state" in params:
+        kwargs["discovery_state"] = discovery_state
+
+    return factory(entity, defaults, phase_overrides, **kwargs)
+
+
+def expand_workflows(  # noqa: PLR0912, PLR0915 - complex validation logic
     entities: list[Entity],
     workflows_config: WorkflowsConfig | None,
 ) -> list[Entity]:
     """Expand all entities with workflow field into phase entities.
+
+    Uses two-pass expansion:
+    1. Discovery pass: Determine what phases each workflow will create
+    2. Expansion pass: Call workflows with full context (including phase_map)
 
     Args:
         entities: List of entities to process
@@ -134,21 +240,19 @@ def expand_workflows(  # noqa: PLR0912 - complex validation logic
         func = load_workflow(config.handler)
         workflow_lookup[name] = (func, config.defaults)
 
-    # Track existing IDs to detect collisions
-    existing_ids = {e.id for e in entities}
-
-    result: list[Entity] = []
+    # === PASS 1: Discovery ===
+    # Determine workflow for each entity and discover phases
+    entity_workflows: dict[str, str | None] = {}
+    phase_map: dict[str, list[str]] = {}
+    discovery_states: dict[str, Any] = {}
 
     for entity in entities:
-        workflow_name = entity.workflow
+        workflow_name = _get_workflow_name(entity, workflows_config)
+        entity_workflows[entity.id] = workflow_name
 
-        # Apply type-specific default if no explicit workflow
         if workflow_name is None:
-            workflow_name = workflows_config.defaults.get(entity.type)
-
-        # Skip if no workflow or explicitly disabled
-        if workflow_name is None or workflow_name == "none":
-            result.append(entity)
+            # No workflow - entity stays as-is
+            phase_map[entity.id] = [entity.id]
             continue
 
         # Validate workflow exists
@@ -160,10 +264,38 @@ def expand_workflows(  # noqa: PLR0912 - complex validation logic
             )
 
         factory, defaults = workflow_lookup[workflow_name]
+        discovery = _discover_phases_for_workflow(entity, workflow_name, factory, defaults)
+        phase_map[entity.id] = discovery.phase_ids
+        discovery_states[entity.id] = discovery.state
+
+    # === Build Context ===
+    context = WorkflowContext(
+        all_entities=entities,
+        entity_map={e.id: e for e in entities},
+        entity_workflows=entity_workflows,
+        phase_map=phase_map,
+    )
+
+    # === PASS 2: Expansion ===
+    existing_ids = {e.id for e in entities}
+    result: list[Entity] = []
+
+    for entity in entities:
+        workflow_name = entity_workflows[entity.id]
+
+        # Skip if no workflow
+        if workflow_name is None:
+            result.append(entity)
+            continue
+
+        factory, defaults = workflow_lookup[workflow_name]
+        discovery_state = discovery_states.get(entity.id)
 
         # Expand the entity
         try:
-            expanded = factory(entity, defaults, entity.phases)
+            expanded = _call_workflow_factory(
+                factory, entity, defaults, entity.phases, context, discovery_state
+            )
         except Exception as e:
             raise ValidationError(
                 f"Workflow '{workflow_name}' failed to expand entity '{entity.id}': {e}"
