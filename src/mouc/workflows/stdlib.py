@@ -86,12 +86,16 @@ def _create_phase_entity(  # noqa: PLR0913 - many optional params for flexibilit
     if extra_tags:
         tags.extend(extra_tags)
 
+    # Parse requires from override (if any)
+    requires_override = override.get("requires", [])
+    requires_set = {Dependency.parse(s) for s in requires_override}
+
     return Entity(
         type=parent.type,
         id=f"{parent.id}_{phase_key}",
         name=name,
         description=override.get("description", parent.description),
-        requires=set(),  # Will be set by workflow
+        requires=requires_set,  # From override; workflow may add more via |=
         enables=set(),  # Will be set by workflow
         links=override.get("links", []),
         tags=tags,
@@ -179,7 +183,7 @@ def impl_pr(
         defaults={"effort": defaults.get("pr_effort", "2d")},
         name_suffix="PR Review",
     )
-    pr.requires = {Dependency.parse(f"{entity.id} + {review_lag}")}
+    pr.requires |= {Dependency.parse(f"{entity.id} + {review_lag}")}
     pr.enables = entity.enables  # PR phase takes over parent's enables
 
     # Parent no longer enables downstream - PR does
@@ -245,7 +249,7 @@ def full(
         defaults={"effort": defaults.get("pr_effort", "2d")},
         name_suffix="PR Review",
     )
-    pr.requires = {Dependency.parse(f"{entity.id} + {review_lag}")}
+    pr.requires |= {Dependency.parse(f"{entity.id} + {review_lag}")}
     pr.enables = entity.enables  # PR phase takes over parent's enables
 
     return [design, parent, pr]
@@ -289,7 +293,7 @@ def phased_rollout(
         defaults={"effort": defaults.get("canary_effort", "1d")},
         name_suffix="Canary Deploy",
     )
-    canary.requires = {Dependency(entity_id=entity.id)}
+    canary.requires |= {Dependency(entity_id=entity.id)}
 
     # Create rollout phase
     rollout = _create_phase_entity(
@@ -299,7 +303,7 @@ def phased_rollout(
         defaults={"effort": defaults.get("rollout_effort", "1d")},
         name_suffix="Full Rollout",
     )
-    rollout.requires = {Dependency.parse(f"{canary.id} + {bake_time}")}
+    rollout.requires |= {Dependency.parse(f"{canary.id} + {bake_time}")}
     rollout.enables = entity.enables  # Rollout takes over parent's enables
 
     return [parent, canary, rollout]

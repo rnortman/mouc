@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Phase `requires` override: workflow phases can specify additional dependencies via `phases.<phase>.requires`
+
 ### Changed
 - `mouc convert-format` now preserves YAML block scalars and list formatting
 

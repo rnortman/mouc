@@ -390,6 +390,31 @@ class TestDesignImplWorkflow:
 
         assert "phase:design" in result[0].tags
 
+    def test_phase_override_requires(self) -> None:
+        """Phase override should allow setting requires for a phase.
+
+        By default, design phase floats (has no requires). This test verifies
+        that we can add explicit requirements to a phase via the phases config.
+        """
+        entity = make_entity("auth")
+        phases = {"design": {"requires": ["prereq_task"]}}
+        result = design_impl(entity, {}, phases)
+        design = result[0]
+
+        # Design phase should now require prereq_task instead of floating
+        assert "prereq_task" in design.requires_ids
+
+    def test_phase_override_requires_with_lag(self) -> None:
+        """Phase requires should support lag syntax."""
+        entity = make_entity("auth")
+        phases = {"design": {"requires": ["prereq_task + 1w"]}}
+        result = design_impl(entity, {}, phases)
+        design = result[0]
+
+        assert "prereq_task" in design.requires_ids
+        dep = next(d for d in design.requires if d.entity_id == "prereq_task")
+        assert dep.lag_days == 7  # 1 week
+
 
 class TestImplPrWorkflow:
     """Tests for impl_pr stdlib workflow."""
@@ -423,6 +448,21 @@ class TestImplPrWorkflow:
 
         assert parent.enables_ids == set()  # Parent no longer enables
         assert pr.enables_ids == {"next_task"}  # PR takes over
+
+    def test_phase_override_requires_merges_with_workflow_requires(self) -> None:
+        """Phase override requires should merge (union) with workflow-determined requires.
+
+        PR phase normally requires the parent entity. Adding override requires
+        should result in PR requiring BOTH the parent AND the override items.
+        """
+        entity = make_entity("feature")
+        phases = {"pr": {"requires": ["other_task"]}}
+        result = impl_pr(entity, {}, phases)
+        pr = result[1]
+
+        # PR should require both parent (from workflow) AND other_task (from override)
+        assert "feature" in pr.requires_ids
+        assert "other_task" in pr.requires_ids
 
 
 class TestFullWorkflow:
@@ -719,6 +759,104 @@ entities:
         prereq = fm.get_entity_by_id("prereq")
         assert prereq is not None
         assert "feature" in prereq.enables_ids
+
+    def test_cross_entity_workflow_phase_reference(self, tmp_path: Path) -> None:
+        """Phase can reference another entity's workflow-created phase ID.
+
+        Entity B's design phase should be able to require entity A's design phase.
+        This tests that workflow-created IDs are available for reference since
+        validation happens after all workflows are expanded.
+        """
+        feature_map = tmp_path / "feature_map.yaml"
+        feature_map.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  entity_a:
+    type: capability
+    name: Entity A
+    description: First entity
+    workflow: design_impl
+
+  entity_b:
+    type: capability
+    name: Entity B
+    description: Second entity, its design depends on A's design
+    workflow: design_impl
+    phases:
+      design:
+        requires: [entity_a_design]
+""")
+
+        config = WorkflowsConfig(stdlib=True)
+        fm = load_feature_map(feature_map, workflows_config=config)
+
+        # Both entities should be expanded
+        assert len(fm.entities) == 4  # 2 designs + 2 parents
+
+        # B's design should require A's design
+        b_design = fm.get_entity_by_id("entity_b_design")
+        assert b_design is not None
+        assert "entity_a_design" in b_design.requires_ids
+
+    def test_phase_requires_honored_in_scheduling(self, tmp_path: Path) -> None:
+        """Phase requires should be honored by the scheduler.
+
+        When a design phase has explicit requires, it should no longer float
+        but instead be scheduled after its dependency.
+        """
+        feature_map = tmp_path / "feature_map.yaml"
+        feature_map.write_text("""
+metadata:
+  version: "1.0"
+
+entities:
+  prereq:
+    type: capability
+    name: Prereq Task
+    description: A prerequisite task
+    meta:
+      effort: "1w"
+
+  feature:
+    type: capability
+    name: Feature
+    description: Feature with design that depends on prereq
+    workflow: design_impl
+    meta:
+      effort: "2w"
+    phases:
+      design:
+        requires: [prereq]
+""")
+
+        config = WorkflowsConfig(stdlib=True)
+        fm = load_feature_map(feature_map, workflows_config=config)
+
+        resource_config = ResourceConfig.model_validate(
+            {
+                "resources": [{"name": "alice", "capacity": 1.0}],
+                "groups": {},
+                "default_resource": "alice",
+            }
+        )
+
+        scheduler = GanttScheduler(
+            feature_map=fm,
+            resource_config=resource_config,
+            current_date=date(2025, 1, 1),
+        )
+        schedule = scheduler.schedule()
+
+        prereq_item = next(s for s in schedule.tasks if s.entity_id == "prereq")
+        design_item = next(s for s in schedule.tasks if s.entity_id == "feature_design")
+
+        # Design should start AFTER prereq ends (not floating freely)
+        assert design_item.start_date >= prereq_item.end_date, (
+            f"Design ({design_item.start_date}) should start after "
+            f"prereq ends ({prereq_item.end_date})"
+        )
 
 
 class TestStdlibDiscovery:

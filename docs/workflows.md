@@ -181,6 +181,7 @@ entities:
     phases:
       design:
         name: Auth Design Document  # Custom name
+        requires: [prereq_task]     # Add dependencies (merged with workflow defaults)
         meta:
           effort: "5d"              # Override effort
           status: done              # Mark phase done
@@ -189,21 +190,46 @@ entities:
           lag: "2w"                 # Override signoff lag
 ```
 
+### Phase Requirements
+
+By default, design phases float freely (no `requires`). You can add explicit dependencies to any phase using the `requires` field:
+
+```yaml
+entities:
+  entity_a:
+    type: capability
+    workflow: design_impl
+    # ...
+
+  entity_b:
+    type: capability
+    workflow: design_impl
+    phases:
+      design:
+        requires: [entity_a_design]  # B's design depends on A's design
+```
+
+Phase `requires` support:
+- **Merge behavior**: Override requires are merged (union) with workflow-determined requires
+- **Lag syntax**: Supports lag like entity-level requires: `requires: ["prereq + 1w"]`
+- **Cross-entity references**: Can reference workflow-created phase IDs from other entities (e.g., `entity_a_design`)
+
 ### What Gets Inherited
 
 - Phase entities inherit parent's `type`, `description`, `tags`, and `meta`
-- Design phases float freely (no `requires`)
+- Design phases float freely by default (no `requires`), but can have requires added via overrides
 - Parent entity keeps its original `requires` plus gains design dependency
 - Last phase (e.g., pr, rollout) takes over parent's `enables`
 - Phase overrides take precedence over inherited values
+- Phase `requires` from overrides are merged with workflow-determined requires
 
 ## Dependency Wiring
 
 When an entity uses a workflow:
 
-1. **Design phases** → Float freely, can start immediately
+1. **Design phases** → Float freely by default, but can have explicit `requires` via phase overrides
 2. **Parent entity** → Keeps original `requires` AND gains design dependency (with lag)
-3. **Later phases** (pr, rollout) → Require parent/preceding phase
+3. **Later phases** (pr, rollout) → Require parent/preceding phase (plus any phase override `requires`)
 4. **Last phase** → Takes over parent's `enables`
 
 Other entities can still reference the original entity ID, and the workflow ensures proper sequencing.
