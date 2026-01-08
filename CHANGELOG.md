@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - `mouc convert-format` now preserves YAML block scalars and list formatting
+- Require manylinux_2_28 (glibc 2.28+) for Linux wheels
 
 ## [0.7.3] - 2025-12-19
 

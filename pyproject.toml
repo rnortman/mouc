@@ -109,7 +109,7 @@ build-backend = "maturin"
 features = ["pyo3/extension-module"]
 module-name = "mouc.rust"
 python-source = "src"
-manylinux = "2_17"
+manylinux = "2_28"
 container-runner = "podman"
 include = ["LICENSE"]
 
