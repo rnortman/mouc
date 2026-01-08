@@ -146,6 +146,21 @@ workflows:
       handler: ./my_workflows.py:custom_flow
 ```
 
+**With phase discovery (recommended for graph-aware workflows):**
+```yaml
+workflows:
+  definitions:
+    custom:
+      handler: ./my_workflows.py:custom_flow
+      phases: ["{id}_design", "{id}"]  # Phase ID templates
+```
+
+The `phases` field declares what phase IDs your workflow creates using `{id}` as a placeholder for the entity ID. This enables:
+- **Graph-aware workflows**: The `WorkflowContext.phase_map` is populated correctly, so your workflow can check what phases other entities have
+- **Cross-entity wiring**: Use `context.has_phase()` to intelligently wire dependencies between phases
+
+Without `phases`, custom workflows fall back to assuming no expansion (just `[entity.id]`), which means `WorkflowContext.phase_map` won't accurately reflect what phases your workflow creates.
+
 ### Workflow Function Signature
 
 ```python
@@ -217,7 +232,24 @@ Workflows are expanded in two passes:
 1. **Discovery**: Determine what phase IDs each workflow will create
 2. **Expansion**: Call workflows with full context (including all phase IDs)
 
-Custom workflows can implement `discover_phases()` to declare phases and pre-compute state:
+**Phase discovery priority (highest to lowest):**
+
+1. **`discover_phases()` method** - If your workflow function has a `discover_phases` attribute, it's called for maximum control
+2. **`phases` config** - Declarative phase ID templates in workflow definition (recommended for most custom workflows)
+3. **Stdlib fallback** - Built-in knowledge of standard library workflow phase IDs
+4. **Default** - Assumes workflow creates only `[entity.id]` (no expansion)
+
+**Option 1: Declarative `phases` config (recommended)**
+
+```yaml
+workflows:
+  definitions:
+    my_workflow:
+      handler: ./my_workflows.py:my_workflow
+      phases: ["{id}_design", "{id}"]  # Simple template substitution
+```
+
+**Option 2: `discover_phases()` method (for complex logic)**
 
 ```python
 from mouc.workflows import PhaseDiscovery
@@ -237,8 +269,6 @@ def my_workflow(entity, defaults, phase_overrides, context=None, discovery_state
 # Attach discovery to workflow function
 my_workflow.discover_phases = my_workflow_discover
 ```
-
-If `discover_phases()` is not implemented, the system uses fallback phase ID prediction.
 
 ## Per-Entity Configuration
 

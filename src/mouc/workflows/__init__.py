@@ -163,6 +163,7 @@ def _discover_phases_for_workflow(
     workflow_name: str,
     factory: WorkflowFactory,
     defaults: dict[str, Any],
+    workflow_phases: list[str] | None = None,
 ) -> PhaseDiscovery:
     """Run discovery for a workflow, with fallback for old-style workflows."""
     # Check if factory has discover_phases method (not part of Protocol, so use getattr)
@@ -170,6 +171,11 @@ def _discover_phases_for_workflow(
     if discover_fn is not None:
         result: PhaseDiscovery = discover_fn(entity, defaults)
         return result
+
+    # Check for phases in workflow config (declarative discovery)
+    if workflow_phases:
+        phase_ids = [p.format(id=entity.id) for p in workflow_phases]
+        return PhaseDiscovery(phase_ids=phase_ids, state=None)
 
     # Check for stdlib fallback
     if workflow_name in stdlib_module.STDLIB_PHASE_DISCOVERY:
@@ -264,7 +270,11 @@ def expand_workflows(  # noqa: PLR0912, PLR0915 - complex validation logic
             )
 
         factory, defaults = workflow_lookup[workflow_name]
-        discovery = _discover_phases_for_workflow(entity, workflow_name, factory, defaults)
+        workflow_def = workflows_config.definitions.get(workflow_name)
+        phases_config = workflow_def.phases if workflow_def else None
+        discovery = _discover_phases_for_workflow(
+            entity, workflow_name, factory, defaults, phases_config
+        )
         phase_map[entity.id] = discovery.phase_ids
         discovery_states[entity.id] = discovery.state
 

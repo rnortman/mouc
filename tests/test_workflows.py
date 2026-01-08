@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -1084,3 +1085,236 @@ class TestDefaultWorkflows:
         entities = [make_entity("test", entity_type="capability")]
         with pytest.raises(ValidationError, match="unknown workflow"):
             expand_workflows(entities, config)
+
+
+class TestWorkflowPhasesConfig:
+    """Tests for declarative phases config in workflow definitions."""
+
+    def test_phases_config_enables_phase_discovery(self, tmp_path: Path) -> None:
+        """User workflows with phases config should get proper phase discovery."""
+        # Create a simple workflow that creates design + impl phases
+        workflow_file = tmp_path / "my_workflow.py"
+        workflow_file.write_text("""
+from copy import deepcopy
+from mouc.models import Dependency, Entity
+
+def my_design_impl(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    '''Simple design_impl clone for testing.'''
+    design = Entity(
+        type=entity.type,
+        id=f"{entity.id}_design",
+        name=f"{entity.name} - Design",
+        description=entity.description,
+        requires=set(),
+        enables=set(),
+        links=[],
+        tags=list(entity.tags) + ["phase:design"],
+        meta={"effort": "3d"},
+        phase_of=(entity.id, "design"),
+    )
+
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + 1w")}
+
+    return [design, parent]
+""")
+
+        # Configure with phases declaration - no discover_phases needed!
+        config = WorkflowsConfig(
+            stdlib=False,
+            definitions={
+                "my_design_impl": WorkflowDefinition(
+                    handler=f"{workflow_file}:my_design_impl",
+                    phases=["{id}_design", "{id}"],  # Declarative phase discovery
+                )
+            },
+        )
+
+        entities = [make_entity("auth", workflow="my_design_impl")]
+        result = expand_workflows(entities, config)
+
+        # Should have expanded correctly
+        assert len(result) == 2
+        ids = {e.id for e in result}
+        assert ids == {"auth_design", "auth"}
+
+    def test_phases_config_populates_context_phase_map(self, tmp_path: Path) -> None:
+        """Phases config should populate WorkflowContext.phase_map correctly."""
+        workflow_file = tmp_path / "context_checker.py"
+        workflow_file.write_text("""
+from copy import deepcopy
+from mouc.models import Dependency, Entity
+
+captured_context = None
+
+def context_checker(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    '''Workflow that captures context for test verification.'''
+    global captured_context
+    captured_context = context
+
+    design = Entity(
+        type=entity.type,
+        id=f"{entity.id}_design",
+        name=f"{entity.name} - Design",
+        description=entity.description,
+        requires=set(),
+        enables=set(),
+        links=[],
+        tags=["phase:design"],
+        meta={},
+        phase_of=(entity.id, "design"),
+    )
+
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + 1d")}
+
+    return [design, parent]
+""")
+
+        config = WorkflowsConfig(
+            stdlib=False,
+            definitions={
+                "context_checker": WorkflowDefinition(
+                    handler=f"{workflow_file}:context_checker",
+                    phases=["{id}_design", "{id}"],
+                )
+            },
+        )
+
+        entities = [
+            make_entity("auth", workflow="context_checker"),
+            make_entity("deploy", workflow="context_checker"),
+        ]
+        expand_workflows(entities, config)
+
+        # Access the module that was loaded by expand_workflows
+        # load_workflow uses "workflow_{stem}" as the module name
+        module_name = f"workflow_{workflow_file.stem}"
+        assert module_name in sys.modules, f"Module {module_name} not found in sys.modules"
+        module = sys.modules[module_name]
+
+        context = module.captured_context
+        assert context is not None
+
+        # phase_map should be populated from phases config
+        assert "auth" in context.phase_map
+        assert context.phase_map["auth"] == ["auth_design", "auth"]
+        assert "deploy" in context.phase_map
+        assert context.phase_map["deploy"] == ["deploy_design", "deploy"]
+
+        # Context methods should work
+        assert context.has_phase("auth", "design")
+        assert not context.has_phase("auth", "pr")
+        assert context.get_phases_for("auth") == ["auth_design", "auth"]
+
+    def test_phases_config_enables_cross_entity_wiring(self, tmp_path: Path) -> None:
+        """User workflow with phases config can do smart cross-entity wiring."""
+        workflow_file = tmp_path / "smart_workflow.py"
+        workflow_file.write_text("""
+from copy import deepcopy
+from mouc.models import Dependency, Entity
+
+def smart_workflow(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    '''Workflow that wires design->design dependencies using context.'''
+    design = Entity(
+        type=entity.type,
+        id=f"{entity.id}_design",
+        name=f"{entity.name} - Design",
+        description=entity.description,
+        requires=set(),
+        enables=set(),
+        links=[],
+        tags=["phase:design"],
+        meta={"effort": "3d"},
+        phase_of=(entity.id, "design"),
+    )
+
+    # Smart wiring: if a dependency has a design phase, wire design->design
+    if context:
+        for dep in entity.requires:
+            if context.has_phase(dep.entity_id, "design"):
+                design.requires.add(Dependency(f"{dep.entity_id}_design", dep.lag_days))
+
+    parent = deepcopy(entity)
+    parent.requires = entity.requires | {Dependency.parse(f"{design.id} + 1w")}
+
+    return [design, parent]
+""")
+
+        config = WorkflowsConfig(
+            stdlib=False,
+            definitions={
+                "smart_workflow": WorkflowDefinition(
+                    handler=f"{workflow_file}:smart_workflow",
+                    phases=["{id}_design", "{id}"],  # No discover_phases needed
+                )
+            },
+        )
+
+        entities = [
+            make_entity("entity_a", workflow="smart_workflow"),
+            make_entity("entity_b", workflow="smart_workflow", requires=["entity_a"]),
+        ]
+        result = expand_workflows(entities, config)
+
+        # entity_b_design should require entity_a_design (smart wiring!)
+        b_design = next(e for e in result if e.id == "entity_b_design")
+        assert "entity_a_design" in b_design.requires_ids
+
+    def test_discover_phases_method_takes_precedence(self, tmp_path: Path) -> None:
+        """discover_phases method takes precedence over phases config."""
+        workflow_file = tmp_path / "with_discover.py"
+        workflow_file.write_text("""
+from copy import deepcopy
+from mouc.models import Dependency, Entity
+
+def workflow_with_discover(entity, defaults, phase_overrides, context=None, discovery_state=None):
+    '''Workflow that uses discover_phases state.'''
+    # Use state from discover_phases
+    extra_suffix = discovery_state.get("extra_suffix", "") if discovery_state else ""
+
+    design = Entity(
+        type=entity.type,
+        id=f"{entity.id}_design{extra_suffix}",
+        name=f"{entity.name} - Design",
+        description=entity.description,
+        requires=set(),
+        enables=set(),
+        links=[],
+        tags=["phase:design"],
+        meta={},
+        phase_of=(entity.id, "design"),
+    )
+
+    parent = deepcopy(entity)
+    parent.requires = {Dependency.parse(f"{design.id} + 1d")}
+
+    return [design, parent]
+
+def discover(entity, defaults):
+    from mouc.workflows import PhaseDiscovery
+    # Return different phase IDs than what config says
+    return PhaseDiscovery(
+        phase_ids=[f"{entity.id}_design_v2", entity.id],
+        state={"extra_suffix": "_v2"}
+    )
+
+workflow_with_discover.discover_phases = discover
+""")
+
+        config = WorkflowsConfig(
+            stdlib=False,
+            definitions={
+                "workflow_with_discover": WorkflowDefinition(
+                    handler=f"{workflow_file}:workflow_with_discover",
+                    phases=["{id}_design", "{id}"],  # This should be ignored
+                )
+            },
+        )
+
+        entities = [make_entity("auth", workflow="workflow_with_discover")]
+        result = expand_workflows(entities, config)
+
+        # Should use discover_phases result, not phases config
+        ids = {e.id for e in result}
+        assert ids == {"auth_design_v2", "auth"}  # _v2 suffix from discover_phases

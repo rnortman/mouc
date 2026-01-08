@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Phase `requires` override: workflow phases can specify additional dependencies via `phases.<phase>.requires`
 - Graph-aware workflows: `WorkflowContext` provides access to full entity graph for intelligent dependency wiring
 - Two-pass workflow expansion with `PhaseDiscovery` for pre-computing phase IDs and state
+- Declarative `phases` config for custom workflows: specify phase ID templates (e.g., `["{id}_design", "{id}"]`) instead of implementing `discover_phases()`
 
 ### Changed
 - `mouc convert-format` now preserves YAML block scalars and list formatting

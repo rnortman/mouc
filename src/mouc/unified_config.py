@@ -42,6 +42,7 @@ class WorkflowDefinition(BaseModel):
 
     handler: str  # "module.path.function" or "file/path.py:function"
     defaults: dict[str, Any] = Field(default_factory=dict)
+    phases: list[str] | None = None  # Phase ID templates, e.g., ["{id}_design", "{id}"]
 
 
 class WorkflowsConfig(BaseModel):
