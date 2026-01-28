@@ -68,6 +68,7 @@ pub fn find_competing_targets(
 /// Find competing targets using Vec-based state and integer IDs.
 ///
 /// This is the optimized version that avoids HashMap lookups.
+/// `skip_task_int` is the current task being scheduled - we should not consider it as a competitor.
 #[allow(clippy::too_many_arguments)]
 pub fn find_competing_targets_int(
     current_target_score: f64,
@@ -79,6 +80,7 @@ pub fn find_competing_targets_int(
     state: &CriticalPathSchedulerState,
     resource_config: Option<&ResourceConfig>,
     resource_index: &ResourceIndex,
+    skip_task_int: TaskId,
 ) -> Vec<CompetingTarget> {
     let mut competing = Vec::new();
     let score_threshold = current_target_score * score_ratio_threshold;
@@ -101,6 +103,7 @@ pub fn find_competing_targets_int(
             ctx,
             state,
             resource_config,
+            skip_task_int,
         ) {
             competing.push(competing_target);
         }
@@ -117,6 +120,7 @@ pub fn find_competing_targets_int(
 }
 
 /// Find an eligible critical path task using integer IDs and Vec state.
+/// `skip_task_int` is the current task being scheduled - we must not return it as a competitor.
 #[allow(clippy::too_many_arguments)]
 fn find_eligible_cp_task_for_resource_int(
     target: &TargetInfo,
@@ -126,9 +130,15 @@ fn find_eligible_cp_task_for_resource_int(
     ctx: &TaskData,
     state: &CriticalPathSchedulerState,
     resource_config: Option<&ResourceConfig>,
+    skip_task_int: TaskId,
 ) -> Option<CompetingTarget> {
     // Check each task on the critical path to this target (using integer IDs)
     for &task_int in &target.critical_path_ints {
+        // Skip the task we're currently trying to schedule - it can't compete with itself
+        if task_int == skip_task_int {
+            continue;
+        }
+
         let idx = task_int as usize;
 
         // Skip if already scheduled
@@ -480,5 +490,200 @@ mod tests {
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].target_id, "t1");
         assert_eq!(result[0].critical_task_id, "task1");
+    }
+
+    // Tests for find_competing_targets_int - the optimized version used in production
+    use crate::critical_path::calculation::TaskData;
+    use crate::critical_path::state::CriticalPathSchedulerState;
+    use crate::critical_path::types::ResourceIndex;
+    use crate::models::Dependency;
+
+    fn make_target_with_ints(id: &str, score: f64, cp_task_ints: Vec<u32>) -> TargetInfo {
+        TargetInfo {
+            target_id: id.to_string(),
+            target_int: 0,
+            critical_path_ints: cp_task_ints,
+            critical_path_tasks: rustc_hash::FxHashSet::default(),
+            total_work: 10.0,
+            critical_path_length: 10.0,
+            priority: 50,
+            deadline: None,
+            urgency: 1.0,
+            score,
+        }
+    }
+
+    #[test]
+    fn test_find_competing_targets_int_excludes_current_task() {
+        // When a task is being scheduled, it should not find itself as a competing
+        // task even if it's on the critical path to a high-score target.
+
+        let mut tasks: FxHashMap<String, Task> = FxHashMap::default();
+        tasks.insert(
+            "current_task".to_string(),
+            make_task("current_task", 10.0, Some("dev")),
+        );
+        tasks.insert(
+            "milestone".to_string(),
+            Task {
+                id: "milestone".to_string(),
+                duration_days: 0.0,
+                resources: vec![],
+                dependencies: vec![Dependency {
+                    entity_id: "current_task".to_string(),
+                    lag_days: 0.0,
+                }],
+                start_after: None,
+                end_before: None,
+                start_on: None,
+                end_on: None,
+                resource_spec: None,
+                priority: Some(90),
+            },
+        );
+
+        let ctx = TaskData::new(&tasks, 50);
+        let current_task_int = ctx.index.get_id("current_task").unwrap();
+
+        let n = ctx.index.len();
+        let state = CriticalPathSchedulerState::new(
+            vec![(f64::MAX, f64::MAX); n],
+            vec![true; n], // All unscheduled
+            d(2025, 1, 1),
+            Vec::new(),
+            d(2025, 1, 1),
+        );
+
+        // Target has current_task on its critical path with a high score
+        let target = make_target_with_ints("high_score_target", 100.0, vec![current_task_int]);
+        let all_targets = vec![target];
+
+        let resource_config = ResourceConfig {
+            resource_order: vec!["dev".to_string()],
+            dns_periods: HashMap::new(),
+            spec_expansion: {
+                let mut m = HashMap::new();
+                m.insert("dev".to_string(), vec!["alice".to_string()]);
+                m
+            },
+        };
+
+        let resource_index = ResourceIndex::new(["alice".to_string()].into_iter());
+
+        // Call with current_task being scheduled - it should be excluded from results
+        let result = find_competing_targets_int(
+            50.0,
+            d(2025, 1, 20),
+            "alice",
+            1.0,
+            &all_targets,
+            &ctx,
+            &state,
+            Some(&resource_config),
+            &resource_index,
+            current_task_int,
+        );
+
+        // current_task should be excluded; since it's the only task on the path, no competitors
+        assert!(
+            result.is_empty(),
+            "Task should not find itself as a competing task. Found: {:?}",
+            result
+                .iter()
+                .map(|c| &c.critical_task_id)
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn test_find_competing_targets_int_finds_other_tasks() {
+        // Verify that skip_task_int only excludes the current task, not other tasks
+
+        let mut tasks: FxHashMap<String, Task> = FxHashMap::default();
+        tasks.insert(
+            "current_task".to_string(),
+            make_task("current_task", 10.0, Some("dev")),
+        );
+        tasks.insert(
+            "other_task".to_string(),
+            make_task("other_task", 5.0, Some("dev")),
+        );
+        tasks.insert(
+            "milestone".to_string(),
+            Task {
+                id: "milestone".to_string(),
+                duration_days: 0.0,
+                resources: vec![],
+                dependencies: vec![
+                    Dependency {
+                        entity_id: "current_task".to_string(),
+                        lag_days: 0.0,
+                    },
+                    Dependency {
+                        entity_id: "other_task".to_string(),
+                        lag_days: 0.0,
+                    },
+                ],
+                start_after: None,
+                end_before: None,
+                start_on: None,
+                end_on: None,
+                resource_spec: None,
+                priority: Some(90),
+            },
+        );
+
+        let ctx = TaskData::new(&tasks, 50);
+        let current_task_int = ctx.index.get_id("current_task").unwrap();
+        let other_task_int = ctx.index.get_id("other_task").unwrap();
+
+        let n = ctx.index.len();
+        let state = CriticalPathSchedulerState::new(
+            vec![(f64::MAX, f64::MAX); n],
+            vec![true; n],
+            d(2025, 1, 1),
+            Vec::new(),
+            d(2025, 1, 1),
+        );
+
+        // Target has BOTH current_task and other_task on critical path
+        let target = make_target_with_ints(
+            "high_score_target",
+            100.0,
+            vec![current_task_int, other_task_int],
+        );
+        let all_targets = vec![target];
+
+        let resource_config = ResourceConfig {
+            resource_order: vec!["dev".to_string()],
+            dns_periods: HashMap::new(),
+            spec_expansion: {
+                let mut m = HashMap::new();
+                m.insert("dev".to_string(), vec!["alice".to_string()]);
+                m
+            },
+        };
+
+        let resource_index = ResourceIndex::new(["alice".to_string()].into_iter());
+
+        let result = find_competing_targets_int(
+            50.0,
+            d(2025, 1, 20),
+            "alice",
+            1.0,
+            &all_targets,
+            &ctx,
+            &state,
+            Some(&resource_config),
+            &resource_index,
+            current_task_int, // Skip current_task but NOT other_task
+        );
+
+        // Should find other_task as a competing task (not current_task)
+        assert_eq!(result.len(), 1, "Should find one competing task");
+        assert_eq!(
+            result[0].critical_task_id, "other_task",
+            "Should find other_task, not current_task"
+        );
     }
 }

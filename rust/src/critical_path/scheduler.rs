@@ -1719,6 +1719,7 @@ impl CriticalPathScheduler {
             state,
             self.resource_config.as_ref(),
             &self.resource_index,
+            task_int,
         );
 
         if competing.is_empty() {
