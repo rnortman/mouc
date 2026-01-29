@@ -12,7 +12,7 @@
 mod detection;
 mod evaluation;
 
-pub use detection::{find_competing_targets, find_competing_targets_int};
+pub use detection::find_competing_targets;
 pub use evaluation::score_schedule;
 
 use chrono::NaiveDate;

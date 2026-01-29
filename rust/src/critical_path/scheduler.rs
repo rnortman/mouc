@@ -11,7 +11,6 @@ use crate::{log_changes, log_checks, log_debug};
 use super::cache::CriticalPathCache;
 use super::calculation::{CriticalPathError, TaskData};
 use super::rollout::{score_schedule, ResourceReservation};
-use super::scoring::score_task;
 use super::state::CriticalPathSchedulerState;
 use super::types::{
     CriticalPathConfig, ResourceIndex, ResourceMask, TargetInfo, TaskId, TaskResourceReq,
@@ -502,7 +501,7 @@ impl CriticalPathScheduler {
                 }
 
                 // Get all eligible tasks from any target's subgraph
-                let eligible_tasks = self.get_all_eligible_subgraph_tasks_int(
+                let eligible_tasks = self.get_all_eligible_subgraph_tasks(
                     &cache,
                     ctx,
                     &scheduled_end_vec,
@@ -526,7 +525,7 @@ impl CriticalPathScheduler {
                         }
 
                         // Check if task has any available resource
-                        if !self.task_has_available_resource_int(task_int, ctx, available_mask) {
+                        if !self.task_has_available_resource(task_int, ctx, available_mask) {
                             return None;
                         }
 
@@ -579,7 +578,7 @@ impl CriticalPathScheduler {
 
                     // Check rollout: should we skip this task for a better upcoming task?
                     if enable_rollout && self.config.rollout_enabled {
-                        if let Some((skip_reason, reservation)) = self.check_rollout_skip_int(
+                        if let Some((skip_reason, reservation)) = self.check_rollout_skip(
                             best_task_int,
                             &best_task_id,
                             task_score,
@@ -674,7 +673,7 @@ impl CriticalPathScheduler {
 
             if !scheduled_any {
                 // No eligible tasks - advance time
-                match self.find_next_event_time_int(
+                match self.find_next_event_time(
                     ctx,
                     &scheduled_end_vec,
                     &state.unscheduled_vec,
@@ -732,7 +731,7 @@ impl CriticalPathScheduler {
     }
 
     /// Score a scheduler state for rollout comparison (lower is better).
-    fn score_state_int(
+    fn score_state(
         &self,
         state: &CriticalPathSchedulerState,
         ctx: &TaskData,
@@ -795,80 +794,9 @@ impl CriticalPathScheduler {
             self.default_priority,
         )
     }
-
-    /// Get tasks on the target's critical path that are eligible to be scheduled.
-    /// Uses integer IDs and Vec-based lookups for maximum performance.
-    ///
-    /// scheduled_vec contains ABSOLUTE offsets from initial_time (not current_time).
-    ///
-    /// DEPRECATED: This method is kept for backwards compatibility but is no longer
-    /// used in the main scheduling loop. Use `get_all_eligible_subgraph_tasks_int` instead.
-    #[allow(clippy::too_many_arguments)]
-    #[allow(dead_code)]
-    fn get_eligible_critical_path_tasks_int(
-        &self,
-        target: &TargetInfo,
-        ctx: &TaskData,
-        scheduled_vec: &[f64],
-        unscheduled_vec: &[bool],
-        completed_vec: &[bool],
-        initial_time: NaiveDate,
-        current_time: NaiveDate,
-    ) -> Vec<TaskId> {
-        let mut eligible = Vec::new();
-        // Current time as offset from initial_time
-        let current_offset = (current_time - initial_time).num_days() as f64;
-
-        for &task_int in &target.critical_path_ints {
-            let idx = task_int as usize;
-
-            // Must be unscheduled
-            if !unscheduled_vec[idx] {
-                continue;
-            }
-
-            // Check if all dependencies are satisfied
-            let all_deps_ready = ctx.deps[idx].iter().all(|&(dep_int, lag)| {
-                let dep_idx = dep_int as usize;
-
-                // Completed tasks are always ready
-                if completed_vec[dep_idx] {
-                    return true;
-                }
-
-                // Check if dependency is scheduled
-                let dep_end = scheduled_vec[dep_idx];
-                if dep_end < f64::MAX {
-                    // dep_end is days from initial_time, lag is days
-                    // Task is eligible when dep_end + lag < current_offset
-                    let eligible_after = dep_end + lag;
-                    eligible_after < current_offset
-                } else {
-                    false
-                }
-            });
-
-            if !all_deps_ready {
-                continue;
-            }
-
-            // Check start_after constraint
-            if let Some(start_after) = ctx.start_afters[idx] {
-                if start_after > current_time {
-                    continue;
-                }
-            }
-
-            eligible.push(task_int);
-        }
-
-        eligible
-    }
-
     /// Get all eligible tasks from any target's dependency subgraph.
     ///
-    /// Unlike `get_eligible_critical_path_tasks_int`, this method returns tasks from
-    /// the full dependency subgraph (not just critical path), filtering by:
+    /// Returns tasks from the full dependency subgraph (not just critical path), filtering by:
     /// - Task is unscheduled
     /// - All dependencies are satisfied
     /// - Start_after constraint is met
@@ -877,7 +805,7 @@ impl CriticalPathScheduler {
     /// Used for unified task scoring where tasks are ranked by their contribution
     /// to targets (via slack-weighted urgency) rather than WSPT.
     #[allow(clippy::too_many_arguments)]
-    fn get_all_eligible_subgraph_tasks_int(
+    fn get_all_eligible_subgraph_tasks(
         &self,
         cache: &CriticalPathCache,
         ctx: &TaskData,
@@ -941,34 +869,9 @@ impl CriticalPathScheduler {
         eligible
     }
 
-    /// Pick the best task from eligible list using WSPT (priority / duration).
-    /// Uses integer IDs and Vec-based lookups for maximum performance.
-    ///
-    /// DEPRECATED: This method is kept for backwards compatibility but is no longer
-    /// used in the main scheduling loop. Unified task scoring now replaces WSPT.
-    #[allow(dead_code)]
-    fn pick_best_task_int(&self, eligible: &[TaskId], ctx: &TaskData) -> TaskId {
-        let mut best_int = eligible[0];
-        let mut best_score = f64::NEG_INFINITY;
-
-        for &task_int in eligible {
-            let idx = task_int as usize;
-            let priority = ctx.priorities[idx];
-            let duration = ctx.durations[idx];
-            let score = score_task(priority, duration);
-
-            if score > best_score {
-                best_score = score;
-                best_int = task_int;
-            }
-        }
-
-        best_int
-    }
-
-    /// Check if a task has an available resource using integer ID.
+    /// Check if a task has an available resource.
     #[inline]
-    fn task_has_available_resource_int(
+    fn task_has_available_resource(
         &self,
         task_int: TaskId,
         ctx: &TaskData,
@@ -997,7 +900,7 @@ impl CriticalPathScheduler {
     /// - A dependency completes (task becomes eligible)
     /// - A start_after constraint is satisfied
     /// - A resource becomes available
-    fn find_next_event_time_int(
+    fn find_next_event_time(
         &self,
         ctx: &TaskData,
         scheduled_vec: &[f64],
@@ -1214,7 +1117,7 @@ impl CriticalPathScheduler {
                     }
                 }
             }
-            self.select_best_resource_int(
+            self.select_best_resource(
                 &tied_candidates,
                 task_int,
                 ctx,
@@ -1264,7 +1167,7 @@ impl CriticalPathScheduler {
     ///    choice and pick the one with the best schedule score
     /// 3. Fallback: Pick the candidate with fewest blocking tasks
     #[allow(clippy::too_many_arguments)]
-    fn select_best_resource_int(
+    fn select_best_resource(
         &self,
         tied_candidates: &[(u32, NaiveDate)],
         task_int: TaskId,
@@ -1315,7 +1218,7 @@ impl CriticalPathScheduler {
                 "    All {} candidates are scarce, using rollout to decide",
                 candidates_with_counts.len()
             );
-            return self.select_resource_via_rollout_int(
+            return self.select_resource_via_rollout(
                 &candidates_with_counts,
                 task_int,
                 ctx,
@@ -1345,7 +1248,7 @@ impl CriticalPathScheduler {
 
     /// Select the best resource using rollout simulation (integer-only version).
     #[allow(clippy::too_many_arguments)]
-    fn select_resource_via_rollout_int(
+    fn select_resource_via_rollout(
         &self,
         candidates: &[(u32, NaiveDate, usize)],
         task_int: TaskId,
@@ -1360,7 +1263,7 @@ impl CriticalPathScheduler {
         let verbosity = self.config.verbosity;
 
         // Calculate horizon for simulation
-        let horizon = self.calculate_resource_choice_horizon_int(candidates, current_time, ctx);
+        let horizon = self.calculate_resource_choice_horizon(candidates, current_time, ctx);
 
         if verbosity >= crate::logging::VERBOSITY_DEBUG {
             let task_name = ctx.index.get_name(task_int).unwrap_or("?");
@@ -1418,7 +1321,7 @@ impl CriticalPathScheduler {
                         current_time,
                     )
                 });
-            let score = self.score_state_int(&final_state, ctx, horizon);
+            let score = self.score_state(&final_state, ctx, horizon);
 
             if verbosity >= crate::logging::VERBOSITY_DEBUG {
                 let res_name = self.resource_index.get_name(*resource_id).unwrap_or("?");
@@ -1442,7 +1345,7 @@ impl CriticalPathScheduler {
     }
 
     /// Calculate horizon for resource choice rollout (integer-only version).
-    fn calculate_resource_choice_horizon_int(
+    fn calculate_resource_choice_horizon(
         &self,
         candidates: &[(u32, NaiveDate, usize)],
         current_time: NaiveDate,
@@ -1682,7 +1585,7 @@ impl CriticalPathScheduler {
     /// Uses Vec-based state for efficient simulation.
     /// Returns Some((reason, reservation)) if we should skip, None if we should proceed.
     #[allow(clippy::too_many_arguments)]
-    fn check_rollout_skip_int(
+    fn check_rollout_skip(
         &self,
         task_int: TaskId,
         task_id: &str,
@@ -1692,7 +1595,7 @@ impl CriticalPathScheduler {
         ctx: &TaskData,
         available_mask: ResourceMask,
     ) -> Option<(String, ResourceReservation)> {
-        use super::rollout::find_competing_targets_int;
+        use super::rollout::find_competing_targets;
 
         let task = self.tasks.get(task_id)?;
 
@@ -1709,7 +1612,7 @@ impl CriticalPathScheduler {
         let completion = current_time + chrono::Duration::days(task.duration_days.ceil() as i64);
 
         // Find competing targets with higher-scored tasks that need this resource
-        let competing = find_competing_targets_int(
+        let competing = find_competing_targets(
             current_score,
             completion,
             &resource,
@@ -1764,7 +1667,7 @@ impl CriticalPathScheduler {
                     current_time,
                 )
             });
-        let score_a = self.score_state_int(&final_state_a, ctx, horizon);
+        let score_a = self.score_state(&final_state_a, ctx, horizon);
 
         // Scenario B: Skip this task (leave resource idle)
         let final_state_b = self
@@ -1784,7 +1687,7 @@ impl CriticalPathScheduler {
                     current_time,
                 )
             });
-        let score_b = self.score_state_int(&final_state_b, ctx, horizon);
+        let score_b = self.score_state(&final_state_b, ctx, horizon);
 
         // Compare: lower score is better
         if score_b < score_a {
