@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-01-29
+
 ### Fixed
 - Rollout analysis no longer considers the current task as a competitor with itself
 
